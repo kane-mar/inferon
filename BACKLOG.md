@@ -10,7 +10,6 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Priority | Status |
 |----|-------|------|----------|--------|
-| ITEM-001 | Docker deployment scaffold | chore | 1 | in-progress (verify on Docker host) |
 | ITEM-002 | Postgres schema (tenants + traces) | chore | 2 | refined |
 | ITEM-003 | Zero-copy SSE proxy ingress | feature | 3 | refined |
 | ITEM-004 | Auth & tenant context (Bearer key swap) | feature | 4 | refined |
@@ -18,4 +17,4 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-006 | Cost linter & cost calculator | feature | 6 | refined |
 | ITEM-007 | Cost-leak dashboard | feature | 7 | refined |
 
-_Last updated: 2026-08-30_
+_Last updated: 2026-08-30_ (ITEM-001 archived — verified on Docker host)
