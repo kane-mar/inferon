@@ -1,0 +1,8 @@
+target/
+.env
+.git/
+raw/
+wiki/
+.backlog/
+BACKLOG.md
+*.swp
