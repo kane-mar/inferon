@@ -9,6 +9,7 @@ services:
       REDIS_URL: redis://redis:6379
       UPSTREAM_API_KEY: ${UPSTREAM_API_KEY:-}
       DEFAULT_MODEL: deepseek-chat
+      RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
         condition: service_healthy
