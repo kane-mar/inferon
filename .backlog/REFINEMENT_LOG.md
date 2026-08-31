@@ -13,3 +13,7 @@ Added project constraint: toolchain = Rust + bash only, no Python/Ruby. No curre
 ## Refinement — 2026-08-30T10:22:32Z
 
 ITEM-001 archived: verified on Vultr vc2-1c-1gb (ewr, Ubuntu 24.04, Docker 29.1.3) — all 7 ACs + smoke.sh green. Item moved to .backlog/ARCHIVED/.
+
+## Refinement — 2026-08-31T00:28:59Z
+
+ITEM-002 archived: schema migration verified on on-demand Vultr host (postgres:16-alpine auto-init, all column/FK/index/idempotency checks green + smoke). TDD caught: docker missing on fresh VPS, ssh-boot race, macOS mktemp template, psql t/f booleans, network-volume perms via tar.

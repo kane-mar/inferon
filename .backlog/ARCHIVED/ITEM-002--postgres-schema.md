@@ -14,3 +14,11 @@
 **Technical Notes:**
 - Source: `inferon-complete-implementation-spec.md` schema.sql (see wiki `aio-proxy-overview.md` → Control Plane Data Schema)
 - No data migrations needed yet; keep SQL in `db/migrations/`
+
+## Verification (2026-08-30) — on-demand Vultr host, postgres:16-alpine
+- Migration db/init/001_init.sql auto-applied via docker-entrypoint-initdb.d on first init ✅
+- tenants + traces created with all expected columns/types ✅ (test-schema.sh column checks)
+- traces.tenant_id FK ON DELETE CASCADE ✅; tenants.api_key_hash UNIQUE ✅
+- Indexes idx_traces_tenant_created + idx_traces_prompt_hash ✅
+- Idempotent re-apply (no-op on second run) ✅
+- scripts/test-schema.sh: ALL SCHEMA CHECKS PASSED; full stack smoke.sh green after ✅

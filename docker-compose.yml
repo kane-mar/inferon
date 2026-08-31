@@ -28,6 +28,7 @@ services:
       POSTGRES_DB: inferon
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inferon -d inferon"]
       interval: 5s

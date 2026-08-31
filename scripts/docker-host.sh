@@ -68,14 +68,31 @@ down() {
     echo "destroyed $id"
 }
 
+wait_ssh() {
+    local ip=$1
+    for _ in $(seq 1 15); do
+        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "root@$ip" true 2>/dev/null; then
+            return 0
+        fi
+        sleep 5
+    done
+    echo "ssh not reachable on $ip" >&2
+    return 1
+}
+
 deploy() {
     local ip bundle
     ip=$(awk '{print $2}' "$STATE")
-    bundle=$(mktemp /tmp/inferon-deploy.XXXXXX.tgz)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml .dockerignore .env.example src scripts
+    echo "waiting for ssh on $ip..."
+    wait_ssh "$ip"
+    echo "bootstrapping docker on $ip..."
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
+        "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 && systemctl enable --now docker >/dev/null 2>&1 && docker --version"
+    bundle=$(mktemp /tmp/inferon-deploy.XXXXXX)
+    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml .dockerignore .env.example src scripts db
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/deploy.tgz"
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "mkdir -p /opt/inferon && tar xzf /tmp/deploy.tgz -C /opt/inferon && cd /opt/inferon && chmod +x scripts/smoke.sh && ./scripts/smoke.sh"
+        "mkdir -p /opt/inferon && tar xzf /tmp/deploy.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh && ./scripts/test-schema.sh && ./scripts/smoke.sh"
     rm -f "$bundle"
 }
 
