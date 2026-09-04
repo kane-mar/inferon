@@ -18,10 +18,9 @@ const RULE_B_MIN_PROMPT_TOKENS: i32 = 4000;
 const RULE_C_MAX_CONTENT_CHARS: usize = 3000;
 const MINI: &str = "gpt-4o-mini";
 
-/// gpt-4o tier but NOT gpt-4o-mini (a mini request can't be over-provisioned
-/// against mini). Prefix-tolerant for dated snapshots.
+/// gpt-4o tier but NOT gpt-4o-mini — shared with the router downgrade rule.
 fn is_gpt4o_full(model: &str) -> bool {
-    model.starts_with("gpt-4o") && !model.starts_with("gpt-4o-mini")
+    crate::router::is_gpt4o_tier(model)
 }
 
 /// Simple unstructured text: no tools/functions/response_format and every

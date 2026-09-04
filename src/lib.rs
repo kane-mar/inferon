@@ -1,6 +1,8 @@
+pub mod budget;
 pub mod cost;
 pub mod dashboard;
 pub mod linter;
+pub mod router;
 
 use axum::{
     body::Body,
@@ -200,6 +202,24 @@ impl TraceSink for PostgresTraceSink {
                     return;
                 }
             }
+            // Accrue actual spend toward the tenant budget (ITEM-016), same
+            // transaction. No-op when the tenant has no configuration row.
+            let cents = cost::cost_to_cents(msg.upstream_cost_usd);
+            if cents > 0 {
+                let spend_result = sqlx::query(
+                    "UPDATE tenant_configurations
+                     SET current_spend_cents = current_spend_cents + $1
+                     WHERE tenant_id = $2",
+                )
+                .bind(cents)
+                .bind(msg.tenant_id)
+                .execute(&mut *tx)
+                .await;
+                if let Err(e) = spend_result {
+                    tracing::error!("telemetry: spend accrual failed, rolling back batch: {e}");
+                    return;
+                }
+            }
         }
         if let Err(e) = tx.commit().await {
             tracing::error!("telemetry: commit failed: {e}");
@@ -348,6 +368,7 @@ pub struct AppState {
     pub http_client: Client,
     pub upstream_url: String,
     pub tenant_store: Arc<dyn TenantStore>,
+    pub budget_store: Arc<dyn budget::BudgetStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
@@ -428,7 +449,10 @@ async fn proxy_chat_completions(
         }
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
-    let meta = RequestMeta {
+    // Slice 2 (ITEM-015): heuristic downgrade decision over the client payload
+    // before it is consumed into the trace metadata.
+    let router_override = router::maybe_downgrade(&payload);
+    let mut meta = RequestMeta {
         id: Uuid::new_v4(),
         model: payload["model"].as_str().unwrap_or("unknown").to_string(),
         system_prompt_hash: system_prompt_hash(&payload),
@@ -443,12 +467,40 @@ async fn proxy_chat_completions(
     };
 
     let started = Instant::now();
+    // Budget breaker (ITEM-016): its fallback model wins over the router;
+    // a hard-cap rejection is traced and answered 429 before any upstream call.
+    let budget_override = match budget::check_budget(&state, tenant_id).await {
+        Ok(model) => model,
+        Err(resp) => {
+            let total_ms = started.elapsed().as_millis() as i64;
+            let msg = build_trace(&meta, tenant_id, 429, total_ms, Usage::default(), None, None, false);
+            send_trace(&state.telemetry_tx, msg);
+            return resp;
+        }
+    };
+    let mut model_override = budget_override.or(router_override);
+    let mut upstream_body = reqwest::Body::from(body_bytes);
+    if let Some(model) = model_override.take() {
+        meta.model = model.clone();
+        match budget::apply_model_override(&meta.raw_prompt, &model) {
+            Ok(bytes) => upstream_body = reqwest::Body::from(bytes),
+            Err(e) => {
+                tracing::error!("payload reserialization failed: {e}");
+                return json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "serialization_error",
+                    "failed to reserialize the request payload",
+                );
+            }
+        }
+    }
+
     let upstream_request = state
         .http_client
         .post(&state.upstream_url)
         .header("Authorization", format!("Bearer {upstream_key}"))
         .header("Content-Type", "application/json")
-        .body(body_bytes);
+        .body(upstream_body);
 
     let upstream = match upstream_request.send().await {
         Ok(response) => response,
@@ -881,15 +933,16 @@ mod tests {
                                 .unwrap()
                         }
                         _ => {
-                            // Echo the Authorization header we received so tests
-                            // can prove the proxy swapped the client key for the
-                            // tenant's master upstream key.
+                            // Echo the Authorization header and model we received
+                            // so tests can prove the key swap and the router /
+                            // budget model rewrites reached the upstream.
                             let auth = headers
                                 .get("authorization")
                                 .and_then(|v| v.to_str().ok())
                                 .unwrap_or("");
+                            let model = payload["model"].as_str().unwrap_or("");
                             let body = format!(
-                                r#"{{"echoed_auth":"{auth}","usage":{{"prompt_tokens":5,"completion_tokens":2}}}}"#
+                                r#"{{"echoed_auth":"{auth}","model":"{model}","usage":{{"prompt_tokens":5,"completion_tokens":2}}}}"#
                             );
                             axum::response::Response::builder()
                                 .header("content-type", "application/json")
@@ -915,6 +968,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: upstream_url.to_string(),
             tenant_store,
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(
@@ -959,6 +1013,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(
@@ -1072,6 +1127,160 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["usage"]["prompt_tokens"], 5);
         assert_eq!(json["usage"]["completion_tokens"], 2);
+    }
+
+    /// State with a budget configuration for the seeded tenant.
+    fn budgeted_state(
+        upstream_url: &str,
+        budget: budget::TenantBudget,
+    ) -> std::sync::Arc<AppState> {
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(uuid::Uuid::parse_str(TENANT_ID).unwrap(), budget);
+        let (tx, _rx) = mpsc::channel::<TraceMessage>(64);
+        std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: upstream_url.to_string(),
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            telemetry_tx: tx,
+            operator_key: None,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
+        })
+    }
+
+    /// Same state as `state` but with a fresh telemetry channel so the caller
+    /// can observe emitted traces.
+    fn with_trace_channel(
+        state: &std::sync::Arc<AppState>,
+    ) -> (std::sync::Arc<AppState>, mpsc::Receiver<TraceMessage>) {
+        let (tx, rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            http_client: state.http_client.clone(),
+            upstream_url: state.upstream_url.clone(),
+            tenant_store: state.tenant_store.clone(),
+            budget_store: state.budget_store.clone(),
+            operator_key: state.operator_key.clone(),
+            db: state.db.clone(),
+            telemetry_tx: tx,
+        });
+        (state, rx)
+    }
+
+    async fn json_body(response: axum::response::Response) -> Value {
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn simple_gpt4o_request_is_downgraded_to_mini() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "gpt-4o-mini", "upstream must see the downgraded model");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.request_model, "gpt-4o-mini", "trace reflects the actual model");
+    }
+
+    #[tokio::test]
+    async fn tool_using_gpt4o_is_not_downgraded() {
+        let (response, _rx) = traced_request(
+            r#"{"model":"gpt-4o","tools":[{"type":"function"}],"messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "gpt-4o", "complex requests keep the client model");
+    }
+
+    #[tokio::test]
+    async fn deepseek_requests_are_never_rewritten() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "deepseek-chat");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.request_model, "deepseek-chat");
+    }
+
+    #[tokio::test]
+    async fn hard_cap_budget_rejects_with_429_and_traces() {
+        let base = budgeted_state(
+            &mock_upstream().await,
+            budget::TenantBudget {
+                limit_cents: 1000,
+                spent_cents: 1000,
+                cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            },
+        );
+        let (state, mut rx) = with_trace_channel(&base);
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.status_code, 429);
+    }
+
+    #[tokio::test]
+    async fn near_cap_budget_downgrades_to_cheap_model() {
+        let state = budgeted_state(
+            &mock_upstream().await,
+            budget::TenantBudget {
+                limit_cents: 1000,
+                spent_cents: 900, // in the last 15% zone
+                cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            },
+        );
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "gpt-4o-mini", "budget fallback rewrites the model");
+    }
+
+    #[tokio::test]
+    async fn within_budget_requests_forward_unchanged() {
+        let state = budgeted_state(
+            &mock_upstream().await,
+            budget::TenantBudget {
+                limit_cents: 1000,
+                spent_cents: 100,
+                cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            },
+        );
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "deepseek-chat");
     }
 
     #[tokio::test]
@@ -1372,6 +1581,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(
@@ -1541,6 +1751,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(
@@ -1604,6 +1815,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(

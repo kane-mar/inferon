@@ -506,6 +506,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: "http://127.0.0.1:1/".to_string(),
             tenant_store: std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants)),
+            budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
             db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")

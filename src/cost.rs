@@ -67,6 +67,12 @@ pub fn savings_if_mini(prompt_tokens: i64, completion_tokens: i64) -> Decimal {
         + (Decimal::from(completion_tokens) * dec("9.40") / per_million)
 }
 
+/// Round a USD cost up to whole cents (never undercount spend for budgets).
+pub fn cost_to_cents(cost: Decimal) -> i64 {
+    let cents = (cost * Decimal::from(100)).ceil().round_dp(0);
+    i64::try_from(cents).unwrap_or(i64::MAX)
+}
+
 fn miss_only(prompt_miss: &str, completion: &str) -> Price {
     Price {
         prompt_miss: dec(prompt_miss),
@@ -157,6 +163,14 @@ mod tests {
         assert_eq!(calculate_cost("gpt-4o", 100, 50, 0), dec("0.000750"));
         assert_eq!(calculate_cost("gpt-4o", 100, 50, 60), dec("0.000750"));
         assert_eq!(calculate_cost("deepseek-reasoner", 1000, 0, 900), dec("0.003"));
+    }
+
+    #[test]
+    fn cost_rounds_up_to_whole_cents() {
+        assert_eq!(cost_to_cents(dec("0.004")), 1); // $0.004 -> 1 cent
+        assert_eq!(cost_to_cents(dec("0.015")), 2); // $0.015 -> 2 cents (ceil)
+        assert_eq!(cost_to_cents(dec("3.00")), 300);
+        assert_eq!(cost_to_cents(dec("0")), 0);
     }
 
     #[test]
