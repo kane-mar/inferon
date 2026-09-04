@@ -1,19 +1,9 @@
 # Refinement Log
 
-- 2026-08-30T03:50:48Z: Backlog initialized
+## 2026-09-04 — Slice 1 complete; backlog replenished
 
-## Refinement — 2026-08-30T03:51:52Z
-
-Slice 1 refinement: wrote 7 backlog items with user stories + AC from wiki (aio-proxy-overview, slice engineering spec, project direction). Docker scaffold first per PO. DeepSeek default noted; DeepSeek pricing row TBD (ITEM-006); stream-mode token gap flagged (ITEM-005).
-
-## Refinement — 2026-08-30T03:54:05Z
-
-Added project constraint: toolchain = Rust + bash only, no Python/Ruby. No current Slice 1 item affected. Slice 3 spec scripts are Python — reimplement in Rust/bash (open: Unsloth training is Python tooling).
-
-## Refinement — 2026-08-30T10:22:32Z
-
-ITEM-001 archived: verified on Vultr vc2-1c-1gb (ewr, Ubuntu 24.04, Docker 29.1.3) — all 7 ACs + smoke.sh green. Item moved to .backlog/ARCHIVED/.
-
-## Refinement — 2026-08-31T00:28:59Z
-
-ITEM-002 archived: schema migration verified on on-demand Vultr host (postgres:16-alpine auto-init, all column/FK/index/idempotency checks green + smoke). TDD caught: docker missing on fresh VPS, ssh-boot race, macOS mktemp template, psql t/f booleans, network-volume perms via tar.
+- **Archived**: ITEM-001..007 (Slice 1: docker scaffold, schema, zero-copy proxy, tenant auth, telemetry, cost linter, dashboard) — all ACs verified live on disposable Vultr hosts; 45 tests green.
+- **Refinement session**: backlog was empty (Rule 5 — flagged). Replenished from the documented gap shortlist + the roadmap's next slice.
+- **New items (single-ranked, small→large)**: ITEM-008 DeepSeek real pricing (dashboard $ are wrong today), ITEM-009 traces on stream abort (data loss), ITEM-010 rule B counts survive restart, ITEM-011 runbook, ITEM-012 smoke coverage, ITEM-013 operator view (flagged: conflicts with ITEM-007 AC5 tenant isolation — needs an operator auth mechanism), ITEM-014 durable deployment (first always-on spend — business decision, break down when it rises), ITEM-015 + ITEM-016 Slice 2 (heuristic router, Postgres budget breaker — left chunky per progressive granularity).
+- **Product goal updated** for the next horizon: durable api.inferon.dev + automatic cost protection.
+- **Items deliberately not backlogged**: future Slices 3–5 (distillation/serving/autonomous) — too large and low-probability; will be captured when relevant.
