@@ -13,14 +13,14 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-008 | DeepSeek real pricing in the cost table | bug | **done — archived 2026-09-04** |
-| ITEM-009 | Trace emitted when a client aborts a stream | bug | refined |
-| ITEM-017 | Cache-hit-aware cost accounting | bug | refined |
-| ITEM-010 | Rule B repeat counts survive proxy restarts | bug | refined |
-| ITEM-011 | Runbook: seed tenants, dashboard URL, ops notes | improvement | refined |
-| ITEM-012 | smoke.sh exercises chat + dashboard endpoints | improvement | refined |
-| ITEM-013 | Operator view across tenants | feature | refined |
+| ITEM-009 | Trace emitted when a client aborts a stream | bug | **done — archived 2026-09-04** |
+| ITEM-017 | Cache-hit-aware cost accounting | bug | **done — archived 2026-09-04** |
+| ITEM-010 | Rule B repeat counts survive proxy restarts | bug | **done — archived 2026-09-04** |
+| ITEM-011 | Runbook: seed tenants, dashboard URL, ops notes | improvement | **done — archived 2026-09-04** |
+| ITEM-012 | smoke.sh exercises chat + dashboard endpoints | improvement | **done — archived 2026-09-04** |
+| ITEM-013 | Operator view across tenants | feature | **done — archived 2026-09-04** |
 | ITEM-014 | Durable deployment of api.inferon.dev | improvement | refined |
-| ITEM-015 | Heuristic model router (Slice 2) | feature | refined |
-| ITEM-016 | Postgres budget circuit breaker (Slice 2) | feature | refined |
+| ITEM-015 | Heuristic model router (Slice 2) | feature | **done — archived 2026-09-04** |
+| ITEM-016 | Postgres budget circuit breaker (Slice 2) | feature | **done — archived 2026-09-04** |
 
-_Last updated: 2026-09-04_ (ITEM-008 archived; ITEM-017 added — cache-hit-aware costing; backlog: ITEM-009, 017, 010..016)
+_Last updated: 2026-09-04_ (ITEM-008..013, 015, 016, 017 archived; remaining: ITEM-014 durable deployment)
