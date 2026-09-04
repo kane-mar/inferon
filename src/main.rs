@@ -46,7 +46,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState {
         http_client: Client::builder().pool_max_idle_per_host(100).build()?,
         upstream_url: std::env::var("UPSTREAM_URL")
-            .unwrap_or_else(|_| DEFAULT_UPSTREAM_URL.to_string()),
+            .ok()
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| DEFAULT_UPSTREAM_URL.to_string()),
         tenant_store: Arc::new(PostgresTenantStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
         telemetry_tx,

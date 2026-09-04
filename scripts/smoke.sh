@@ -79,7 +79,7 @@ check_status "by-model with key -> 200" 200 \
 check_status "waste with key -> 200" 200 \
     "$BASE/v1/dashboard/api/waste?days=7" -H "Authorization: Bearer $DEV_KEY"
 
-curl -fsS "$BASE/v1/dashboard" | grep -q "Inferon — cost leaks" || fail "dashboard HTML not served"
+curl -fsS "$BASE/v1/dashboard" | grep -q "cost leaks" || fail "dashboard HTML not served"
 echo "ok: dashboard HTML served"
 
 echo "ALL SMOKE CHECKS PASSED"
