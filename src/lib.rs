@@ -127,6 +127,14 @@ pub trait TraceSink: Send {
     async fn flush(&mut self, batch: &mut Vec<TraceMessage>);
 }
 
+pub async fn load_system_prompt_counts(pool: &sqlx::PgPool) -> Result<HashMap<String, u32>, sqlx::Error> {
+    let rows: Vec<(String, i32)> =
+        sqlx::query_as("SELECT hash, count FROM system_prompt_counts")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|(hash, count)| (hash, count.max(0) as u32)).collect())
+}
+
 pub struct PostgresTraceSink {
     pool: sqlx::PgPool,
 }
@@ -177,6 +185,21 @@ impl TraceSink for PostgresTraceSink {
                 tracing::error!("telemetry: trace insert failed, rolling back batch: {e}");
                 return; // tx dropped -> rollback keeps the flush atomic (AC6)
             }
+            // Persist the per-hash occurrence count (ITEM-010) in the same
+            // transaction, so rule B repeat counts survive restarts.
+            if let Some(hash) = &msg.system_prompt_hash {
+                let count_result = sqlx::query(
+                    "INSERT INTO system_prompt_counts (hash, count) VALUES ($1, 1)
+                     ON CONFLICT (hash) DO UPDATE SET count = system_prompt_counts.count + 1",
+                )
+                .bind(hash)
+                .execute(&mut *tx)
+                .await;
+                if let Err(e) = count_result {
+                    tracing::error!("telemetry: count upsert failed, rolling back batch: {e}");
+                    return;
+                }
+            }
         }
         if let Err(e) = tx.commit().await {
             tracing::error!("telemetry: commit failed: {e}");
@@ -187,17 +210,18 @@ impl TraceSink for PostgresTraceSink {
 /// Background worker: batches TraceMessages and flushes them to the sink every
 /// `flush_interval` or every `batch_size` items, whichever comes first. DB I/O
 /// happens only here, never on the hot request path (AC2).
+/// `initial_counts` seeds the per-hash repeat counter from persisted state so
+/// linter rule B keeps counting across restarts (ITEM-010).
 pub async fn telemetry_worker(
     mut rx: mpsc::Receiver<TraceMessage>,
     mut sink: Box<dyn TraceSink>,
     flush_interval: Duration,
     batch_size: usize,
+    initial_counts: HashMap<String, u32>,
 ) {
     let mut buffer: Vec<TraceMessage> = Vec::with_capacity(batch_size);
     let mut interval = tokio::time::interval(flush_interval);
-    // Occurrence count per system_prompt_hash — rule B needs to know a system
-    // prompt is *repeating* before flagging it.
-    let mut hash_counts: HashMap<String, u32> = HashMap::new();
+    let mut hash_counts: HashMap<String, u32> = initial_counts;
     loop {
         tokio::select! {
             msg = rx.recv() => match msg {
@@ -1404,6 +1428,15 @@ mod tests {
         flush_interval_ms: u64,
         batch_size: usize,
     ) -> std::sync::Arc<tokio::sync::Mutex<SinkCounters>> {
+        spawn_worker_with_counts(rx, flush_interval_ms, batch_size, HashMap::new())
+    }
+
+    fn spawn_worker_with_counts(
+        rx: mpsc::Receiver<TraceMessage>,
+        flush_interval_ms: u64,
+        batch_size: usize,
+        initial_counts: HashMap<String, u32>,
+    ) -> std::sync::Arc<tokio::sync::Mutex<SinkCounters>> {
         let counters = std::sync::Arc::new(tokio::sync::Mutex::new(SinkCounters::default()));
         let sink: Box<dyn TraceSink> = Box::new(SharedSink(counters.clone()));
         tokio::spawn(telemetry_worker(
@@ -1411,6 +1444,7 @@ mod tests {
             sink,
             std::time::Duration::from_millis(flush_interval_ms),
             batch_size,
+            initial_counts,
         ));
         counters
     }
@@ -1442,6 +1476,26 @@ mod tests {
         let counters = counters.lock().await;
         assert_eq!(counters.messages, 5);
         assert_eq!(counters.flushes, 1, "one transactional flush per batch");
+    }
+
+    #[tokio::test]
+    async fn worker_honors_counts_persisted_before_restart() {
+        // A restart reloads counts from the DB (initial_counts). A prompt seen
+        // once before the restart must flag on its first post-restart hit.
+        let (tx, rx) = mpsc::channel(256);
+        let mut persisted = HashMap::new();
+        persisted.insert("hash-repeated".to_string(), 1);
+        let counters = spawn_worker_with_counts(rx, 60_000, 100, persisted);
+        let mut msg = dummy_trace();
+        msg.system_prompt_hash = Some("hash-repeated".to_string());
+        msg.prompt_tokens = 5000;
+        msg.cached_prompt_tokens = Some(0);
+        tx.send(msg).await.unwrap();
+        drop(tx);
+        assert!(
+            wait_until(counters.clone(), |c| c.cache_miss_flags >= 1).await,
+            "second-ever occurrence must be flagged even across a restart"
+        );
     }
 
     #[tokio::test]

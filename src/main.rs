@@ -1,6 +1,6 @@
 use inferon::{
-    build_router, parse_port, ping_health, telemetry_worker, AppState, PostgresTenantStore,
-    PostgresTraceSink, TraceMessage,
+    build_router, load_system_prompt_counts, parse_port, ping_health, telemetry_worker, AppState,
+    PostgresTenantStore, PostgresTraceSink, TraceMessage,
 };
 use reqwest::Client;
 use sqlx::postgres::PgPoolOptions;
@@ -34,11 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let (telemetry_tx, telemetry_rx) = tokio::sync::mpsc::channel::<TraceMessage>(TELEMETRY_CHANNEL_CAPACITY);
+    let initial_counts = load_system_prompt_counts(&pool).await?;
     tokio::spawn(telemetry_worker(
         telemetry_rx,
         Box::new(PostgresTraceSink::new(pool.clone())),
         std::time::Duration::from_millis(TELEMETRY_FLUSH_INTERVAL_MS),
         TELEMETRY_BATCH_SIZE,
+        initial_counts,
     ));
 
     let state = Arc::new(AppState {
