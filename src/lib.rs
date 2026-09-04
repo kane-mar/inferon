@@ -212,8 +212,12 @@ pub async fn telemetry_worker(
                     };
                     // Enrich off the hot path (ITEM-006): lint + cost.
                     msg.waste_detected = linter::lint(&msg, repeat_count);
-                    msg.upstream_cost_usd =
-                        cost::calculate_cost(&msg.request_model, msg.prompt_tokens, msg.completion_tokens);
+                    msg.upstream_cost_usd = cost::calculate_cost(
+                        &msg.request_model,
+                        msg.prompt_tokens,
+                        msg.completion_tokens,
+                        msg.cached_prompt_tokens.unwrap_or(0),
+                    );
                     buffer.push(msg);
                     if buffer.len() >= batch_size {
                         sink.flush(&mut buffer).await;
