@@ -1,3 +1,7 @@
+pub mod cost;
+pub mod dashboard;
+pub mod linter;
+
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -95,6 +99,8 @@ impl TenantStore for PostgresTenantStore {
 pub struct TenantId(pub Uuid);
 
 /// One completed request, queued for the batch telemetry worker (ITEM-005).
+/// The worker fills `waste_detected` and `upstream_cost_usd` (ITEM-006) before
+/// handing the message to the sink.
 #[derive(Clone, Debug)]
 pub struct TraceMessage {
     pub id: Uuid,
@@ -103,11 +109,16 @@ pub struct TraceMessage {
     pub system_prompt_hash: Option<String>,
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
+    /// Provider-reported prompt tokens served from cache
+    /// (`usage.prompt_tokens_details.cached_tokens`), when the provider sends it.
+    pub cached_prompt_tokens: Option<i64>,
     pub ttft_ms: Option<i64>,
     pub total_duration_ms: i64,
     pub status_code: u16,
     pub raw_prompt: Option<Value>,
     pub raw_completion: Option<Value>,
+    pub waste_detected: Option<Value>,
+    pub upstream_cost_usd: rust_decimal::Decimal,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -143,8 +154,9 @@ impl TraceSink for PostgresTraceSink {
                 r#"INSERT INTO traces (
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
-                    total_duration_ms, status_code, raw_prompt, raw_completion
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                    total_duration_ms, status_code, raw_prompt, raw_completion,
+                    upstream_cost_usd, waste_detected
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -157,6 +169,8 @@ impl TraceSink for PostgresTraceSink {
             .bind(i32::from(msg.status_code))
             .bind(msg.raw_prompt.as_ref().map(Json))
             .bind(msg.raw_completion.as_ref().map(Json))
+            .bind(msg.upstream_cost_usd)
+            .bind(msg.waste_detected.as_ref().map(Json))
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -181,10 +195,25 @@ pub async fn telemetry_worker(
 ) {
     let mut buffer: Vec<TraceMessage> = Vec::with_capacity(batch_size);
     let mut interval = tokio::time::interval(flush_interval);
+    // Occurrence count per system_prompt_hash — rule B needs to know a system
+    // prompt is *repeating* before flagging it.
+    let mut hash_counts: HashMap<String, u32> = HashMap::new();
     loop {
         tokio::select! {
             msg = rx.recv() => match msg {
-                Some(msg) => {
+                Some(mut msg) => {
+                    let repeat_count = match &msg.system_prompt_hash {
+                        Some(hash) => {
+                            let count = hash_counts.entry(hash.clone()).or_insert(0);
+                            *count += 1;
+                            *count
+                        }
+                        None => 0,
+                    };
+                    // Enrich off the hot path (ITEM-006): lint + cost.
+                    msg.waste_detected = linter::lint(&msg, repeat_count);
+                    msg.upstream_cost_usd =
+                        cost::calculate_cost(&msg.request_model, msg.prompt_tokens, msg.completion_tokens);
                     buffer.push(msg);
                     if buffer.len() >= batch_size {
                         sink.flush(&mut buffer).await;
@@ -225,11 +254,19 @@ fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-/// Extract (prompt, completion) token counts from the last SSE data frame that
-/// carries a usage object — e.g. DeepSeek's final chunk before [DONE]. This is
-/// run over the already-accumulated stream bytes at stream end, so frames may
-/// be parsed whole regardless of TCP fragmentation.
-pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<(i32, i32)> {
+/// Token accounting parsed from an upstream response (usage object).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub cached_tokens: Option<i64>,
+}
+
+/// Extract token counts from the last SSE data frame that carries a usage
+/// object — e.g. DeepSeek's final chunk before [DONE]. This is run over the
+/// already-accumulated stream bytes at stream end, so frames may be parsed
+/// whole regardless of TCP fragmentation.
+pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<Usage> {
     let mut last = None;
     for line in bytes.split(|&b| b == b'\n') {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
@@ -245,7 +282,12 @@ pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<(i32, i32)> {
             frame["usage"]["prompt_tokens"].as_i64(),
             frame["usage"]["completion_tokens"].as_i64(),
         ) {
-            last = Some((p as i32, c as i32));
+            last = Some(Usage {
+                prompt_tokens: p as i32,
+                completion_tokens: c as i32,
+                cached_tokens: frame["usage"]["prompt_tokens_details"]["cached_tokens"]
+                    .as_i64(),
+            });
         }
     }
     last
@@ -262,13 +304,27 @@ fn system_prompt_hash(payload: &Value) -> Option<String> {
 }
 
 /// Token counts from a parsed upstream JSON response (non-streaming path).
-fn usage_tokens(response_json: &Option<Value>) -> (i32, i32) {
+fn usage_from_json(response_json: &Option<Value>) -> Usage {
     match response_json {
-        Some(json) => (
-            json["usage"]["prompt_tokens"].as_i64().unwrap_or(0) as i32,
-            json["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32,
-        ),
-        None => (0, 0),
+        Some(json) => Usage {
+            prompt_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0) as i32,
+            completion_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32,
+            cached_tokens: json["usage"]["prompt_tokens_details"]["cached_tokens"].as_i64(),
+        },
+        None => Usage {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: None,
+        },
+    }
+}
+
+/// Empty usage — used when no usage information reached us (transport error).
+fn usage_zero() -> Usage {
+    Usage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cached_tokens: None,
     }
 }
 
@@ -278,12 +334,18 @@ pub struct AppState {
     pub upstream_url: String,
     pub tenant_store: Arc<dyn TenantStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
+    pub db: sqlx::PgPool,
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
+        .route("/v1/dashboard", get(dashboard::index))
+        .route("/v1/dashboard/api/summary", get(dashboard::summary))
+        .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
+        .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
+        .route("/v1/dashboard/api/waste", get(dashboard::waste))
         .with_state(state)
 }
 
@@ -381,7 +443,7 @@ async fn proxy_chat_completions(
         Err(e) => {
             tracing::error!("upstream request failed: {e}");
             let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 502, total_ms, (0, 0), None, None);
+            let msg = build_trace(&meta, tenant_id, 502, total_ms, usage_zero(), None, None);
             send_trace(&state.telemetry_tx, msg);
             return attach_tenant(upstream_error_response(), tenant_id);
         }
@@ -394,9 +456,9 @@ async fn proxy_chat_completions(
         return match upstream.bytes().await {
             Ok(bytes) => {
                 let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
-                let tokens = usage_tokens(&response_json);
+                let usage = usage_from_json(&response_json);
                 let total_ms = started.elapsed().as_millis() as i64;
-                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, tokens, None, response_json);
+                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, usage, None, response_json);
                 send_trace(&state.telemetry_tx, msg);
                 let mut response = Response::new(Body::from(bytes));
                 *response.status_mut() = status;
@@ -421,9 +483,9 @@ async fn proxy_chat_completions(
         match upstream.bytes().await {
             Ok(bytes) => {
                 let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
-                let tokens = usage_tokens(&response_json);
+                let usage = usage_from_json(&response_json);
                 let total_ms = started.elapsed().as_millis() as i64;
-                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, tokens, Some(total_ms), response_json);
+                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, usage, Some(total_ms), response_json);
                 send_trace(&state.telemetry_tx, msg);
                 let mut response = Response::new(Body::from(bytes));
                 *response.status_mut() = status;
@@ -453,7 +515,7 @@ fn build_trace(
     tenant_id: Uuid,
     status: u16,
     total_duration_ms: i64,
-    tokens: (i32, i32),
+    usage: Usage,
     ttft_ms: Option<i64>,
     raw_completion: Option<Value>,
 ) -> TraceMessage {
@@ -462,13 +524,16 @@ fn build_trace(
         tenant_id,
         request_model: meta.model.clone(),
         system_prompt_hash: meta.system_prompt_hash.clone(),
-        prompt_tokens: tokens.0,
-        completion_tokens: tokens.1,
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens: usage.cached_tokens,
         ttft_ms,
         total_duration_ms,
         status_code: status,
         raw_prompt: Some(meta.raw_prompt.clone()),
         raw_completion,
+        waste_detected: None,
+        upstream_cost_usd: rust_decimal::Decimal::ZERO,
     }
 }
 
@@ -489,7 +554,7 @@ fn send_trace(tx: &mpsc::Sender<TraceMessage>, msg: TraceMessage) {
 /// Resolve the caller's tenant from the Authorization header.
 /// Ok(Some(tenant)) = authenticated; Ok(None) = missing/invalid credentials;
 /// Err = store failure (caller should see 500, never a misleading 401).
-async fn authenticate(
+pub(crate) async fn authenticate(
     state: &AppState,
     headers: &axum::http::HeaderMap,
 ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
@@ -597,8 +662,8 @@ fn stream_with_trace(
             }
         }
         let total_duration_ms = started.elapsed().as_millis() as i64;
-        let tokens = usage_from_sse_bytes(&accumulated).unwrap_or((0, 0));
-        let msg = build_trace(&meta, tenant_id, status, total_duration_ms, tokens, ttft_ms, None);
+        let usage = usage_from_sse_bytes(&accumulated).unwrap_or_else(usage_zero);
+        let msg = build_trace(&meta, tenant_id, status, total_duration_ms, usage, ttft_ms, None);
         send_trace(&tx, msg);
     }
 }
@@ -729,6 +794,10 @@ mod tests {
             upstream_url: upstream_url.to_string(),
             tenant_store,
             telemetry_tx: tx,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
         })
     }
 
@@ -768,6 +837,10 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(body, auth))
@@ -784,11 +857,14 @@ mod tests {
             system_prompt_hash: None,
             prompt_tokens: 1,
             completion_tokens: 1,
+            cached_prompt_tokens: None,
             ttft_ms: Some(1),
             total_duration_ms: 1,
             status_code: 200,
             raw_prompt: None,
             raw_completion: None,
+            waste_detected: None,
+            upstream_cost_usd: rust_decimal::Decimal::ZERO,
         }
     }
 
@@ -1010,7 +1086,14 @@ mod tests {
 
     #[test]
     fn usage_from_sse_bytes_parses_final_usage_frame() {
-        assert_eq!(usage_from_sse_bytes(SSE_BODY.as_bytes()), Some((5, 2)));
+        assert_eq!(
+            usage_from_sse_bytes(SSE_BODY.as_bytes()),
+            Some(Usage {
+                prompt_tokens: 5,
+                completion_tokens: 2,
+                cached_tokens: None,
+            })
+        );
     }
 
     #[test]
@@ -1019,7 +1102,14 @@ mod tests {
         for chunk in SSE_BODY.as_bytes().chunks(7) {
             acc.extend_from_slice(chunk);
         }
-        assert_eq!(usage_from_sse_bytes(&acc), Some((5, 2)));
+        assert_eq!(
+            usage_from_sse_bytes(&acc),
+            Some(Usage {
+                prompt_tokens: 5,
+                completion_tokens: 2,
+                cached_tokens: None,
+            })
+        );
     }
 
     #[test]
@@ -1027,6 +1117,19 @@ mod tests {
         assert_eq!(usage_from_sse_bytes(b"data: {\"a\":1}\n\ndata: [DONE]\n\n"), None);
         assert_eq!(usage_from_sse_bytes(b""), None);
         assert_eq!(usage_from_sse_bytes(b"not sse at all"), None);
+    }
+
+    #[test]
+    fn usage_from_sse_bytes_reads_cache_evidence() {
+        let sse = "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"prompt_tokens_details\":{\"cached_tokens\":7}}}\n\n";
+        assert_eq!(
+            usage_from_sse_bytes(sse.as_bytes()),
+            Some(Usage {
+                prompt_tokens: 10,
+                completion_tokens: 2,
+                cached_tokens: Some(7),
+            })
+        );
     }
 
     #[test]
@@ -1167,6 +1270,10 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
         });
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -1197,6 +1304,8 @@ mod tests {
     struct SinkCounters {
         flushes: usize,
         messages: usize,
+        cache_miss_flags: usize,
+        over_provisioned_flags: usize,
     }
 
     struct SharedSink(std::sync::Arc<tokio::sync::Mutex<SinkCounters>>);
@@ -1206,8 +1315,17 @@ mod tests {
         async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
             let mut counters = self.0.lock().await;
             counters.flushes += 1;
-            counters.messages += batch.len();
-            batch.clear();
+            for msg in batch.drain(..) {
+                counters.messages += 1;
+                if let Some(waste) = &msg.waste_detected {
+                    if waste["cache_miss_system_prompt"] == true {
+                        counters.cache_miss_flags += 1;
+                    }
+                    if waste["over_provisioned"] == true {
+                        counters.over_provisioned_flags += 1;
+                    }
+                }
+            }
         }
     }
 
@@ -1278,6 +1396,25 @@ mod tests {
         assert!(
             wait_until(counters.clone(), |c| c.messages >= 2).await,
             "worker should flush the remainder on channel close"
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_lints_repeated_uncached_system_prompts_off_the_hot_path() {
+        let (tx, rx) = mpsc::channel(256);
+        let counters = spawn_worker(rx, 60_000, 100);
+        // Two identical traces: same hash, >=4000 prompt tokens, no cache benefit.
+        for _ in 0..2 {
+            let mut msg = dummy_trace();
+            msg.system_prompt_hash = Some("hash-repeated".to_string());
+            msg.prompt_tokens = 5000;
+            msg.cached_prompt_tokens = Some(0);
+            tx.send(msg).await.unwrap();
+        }
+        drop(tx);
+        assert!(
+            wait_until(counters.clone(), |c| c.cache_miss_flags >= 1).await,
+            "second occurrence of a large uncached system prompt must be flagged"
         );
     }
 }

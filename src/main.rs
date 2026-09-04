@@ -45,8 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_client: Client::builder().pool_max_idle_per_host(100).build()?,
         upstream_url: std::env::var("UPSTREAM_URL")
             .unwrap_or_else(|_| DEFAULT_UPSTREAM_URL.to_string()),
-        tenant_store: Arc::new(PostgresTenantStore::new(pool)),
+        tenant_store: Arc::new(PostgresTenantStore::new(pool.clone())),
         telemetry_tx,
+        db: pool,
     });
 
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
