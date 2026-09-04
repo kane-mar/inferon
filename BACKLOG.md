@@ -12,7 +12,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-008 | DeepSeek real pricing in the cost table | bug | refined |
+| ITEM-008 | DeepSeek real pricing in the cost table | bug | **done — archived 2026-09-04** |
 | ITEM-009 | Trace emitted when a client aborts a stream | bug | refined |
 | ITEM-010 | Rule B repeat counts survive proxy restarts | bug | refined |
 | ITEM-011 | Runbook: seed tenants, dashboard URL, ops notes | improvement | refined |
@@ -22,4 +22,4 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-015 | Heuristic model router (Slice 2) | feature | refined |
 | ITEM-016 | Postgres budget circuit breaker (Slice 2) | feature | refined |
 
-_Last updated: 2026-09-04_ (Slice 1 archived ITEM-001..007; backlog replenished with ops gaps + Slice 2 — see `.backlog/REFINEMENT_LOG.md`)
+_Last updated: 2026-09-04_ (ITEM-008 archived; backlog: ITEM-009..016)
