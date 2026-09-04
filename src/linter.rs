@@ -101,6 +101,7 @@ mod tests {
             raw_completion: None,
             waste_detected: None,
             upstream_cost_usd: Decimal::ZERO,
+            truncated: false,
         }
     }
 

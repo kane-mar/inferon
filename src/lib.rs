@@ -15,6 +15,7 @@ use reqwest::Client;
 use serde_json::Value;
 use sqlx::types::Json;
 use std::{
+    cell::Cell,
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
@@ -114,6 +115,9 @@ pub struct TraceMessage {
     pub raw_completion: Option<Value>,
     pub waste_detected: Option<Value>,
     pub upstream_cost_usd: rust_decimal::Decimal,
+    /// True when a streaming response ended before the upstream finished
+    /// (client abort or mid-stream error) — token counts are then best-effort.
+    pub truncated: bool,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -150,8 +154,8 @@ impl TraceSink for PostgresTraceSink {
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
                     total_duration_ms, status_code, raw_prompt, raw_completion,
-                    upstream_cost_usd, waste_detected
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"#,
+                    upstream_cost_usd, waste_detected, truncated
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -166,6 +170,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.raw_completion.as_ref().map(Json))
             .bind(msg.upstream_cost_usd)
             .bind(msg.waste_detected.as_ref().map(Json))
+            .bind(msg.truncated)
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -415,7 +420,7 @@ async fn proxy_chat_completions(
         Err(e) => {
             tracing::error!("upstream request failed: {e}");
             let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None);
+            let msg = build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None, false);
             send_trace(&state.telemetry_tx, msg);
             return json_error(
                 StatusCode::BAD_GATEWAY,
@@ -476,7 +481,7 @@ async fn forward_buffered(
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
-    let msg = build_trace(meta, tenant_id, status.as_u16(), total_ms, usage, ttft_ms, response_json);
+    let msg = build_trace(meta, tenant_id, status.as_u16(), total_ms, usage, ttft_ms, response_json, false);
     send_trace(&state.telemetry_tx, msg);
 
     let mut response = Response::new(Body::from(bytes));
@@ -503,6 +508,7 @@ fn build_trace(
     usage: Usage,
     ttft_ms: Option<i64>,
     raw_completion: Option<Value>,
+    truncated: bool,
 ) -> TraceMessage {
     TraceMessage {
         id: meta.id,
@@ -519,6 +525,7 @@ fn build_trace(
         raw_completion,
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
+        truncated,
     }
 }
 
@@ -598,9 +605,85 @@ fn stream_response(
     response
 }
 
+/// One-shot trace emitter for the streaming path. Sends the trace exactly
+/// once: on clean/errored completion from the stream loop, or from `Drop` when
+/// the client aborts mid-stream — nothing after a dropped future's last poll
+/// runs, so `Drop` is the only hook (ITEM-009). `send` is synchronous
+/// (`try_send`), so dropping never blocks.
+struct StreamEmit {
+    tx: mpsc::Sender<TraceMessage>,
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    status: u16,
+    started: Instant,
+    emitted: Cell<bool>,
+    ttft_ms: Cell<Option<i64>>,
+}
+
+impl StreamEmit {
+    fn new(
+        tx: mpsc::Sender<TraceMessage>,
+        meta: RequestMeta,
+        tenant_id: Uuid,
+        status: u16,
+        started: Instant,
+    ) -> Self {
+        Self {
+            tx,
+            meta,
+            tenant_id,
+            status,
+            started,
+            emitted: Cell::new(false),
+            ttft_ms: Cell::new(None),
+        }
+    }
+
+    fn note_ttft(&self, ttft_ms: i64) {
+        self.ttft_ms.set(Some(ttft_ms));
+    }
+
+    fn ttft_ms(&self) -> Option<i64> {
+        self.ttft_ms.get()
+    }
+
+    /// Emit the trace unless one was already sent. `truncated` marks a stream
+    /// that ended before the upstream finished (mid-stream error).
+    fn emit(&self, usage: Usage, truncated: bool) {
+        if self.emitted.replace(true) {
+            return;
+        }
+        let total_ms = self.started.elapsed().as_millis() as i64;
+        let msg = build_trace(
+            &self.meta,
+            self.tenant_id,
+            self.status,
+            total_ms,
+            usage,
+            self.ttft_ms(),
+            None,
+            truncated,
+        );
+        send_trace(&self.tx, msg);
+    }
+}
+
+impl Drop for StreamEmit {
+    fn drop(&mut self) {
+        if !self.emitted.get() {
+            // Client dropped the response mid-stream: the usage frame (sent at
+            // the very end by the provider) never arrived, so token counts are
+            // unknown — record zeroes and flag the trace as truncated.
+            tracing::debug!("stream dropped before completion; recording truncated trace");
+            self.emit(Usage::default(), true);
+        }
+    }
+}
+
 /// Tag each upstream chunk with its arrival time (TTFT on the first one), yield
 /// it immediately, and once the stream ends queue the trace with token counts
-/// parsed from the final usage frame.
+/// parsed from the final usage frame. A client abort mid-stream still emits a
+/// truncated trace via StreamEmit's Drop.
 fn stream_with_trace(
     byte_stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>>,
     started: Instant,
@@ -610,29 +693,29 @@ fn stream_with_trace(
     tx: mpsc::Sender<TraceMessage>,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> {
     async_stream::stream! {
+        let emit = StreamEmit::new(tx, meta, tenant_id, status, started);
         let mut stream = Box::pin(byte_stream);
-        let mut ttft_ms: Option<i64> = None;
         let mut accumulated: Vec<u8> = Vec::new();
+        let mut errored = false;
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    if ttft_ms.is_none() {
-                        ttft_ms = Some(started.elapsed().as_millis() as i64);
-                        tracing::debug!(ttft_ms, "first upstream chunk");
+                    if emit.ttft_ms().is_none() {
+                        emit.note_ttft(started.elapsed().as_millis() as i64);
+                        tracing::debug!(ttft_ms = emit.ttft_ms().unwrap(), "first upstream chunk");
                     }
                     accumulated.extend_from_slice(&bytes);
                     yield Ok(bytes);
                 }
                 Err(e) => {
                     tracing::error!("upstream stream error: {e}");
+                    errored = true;
                     break;
                 }
             }
         }
-        let total_duration_ms = started.elapsed().as_millis() as i64;
         let usage = usage_from_sse_bytes(&accumulated).unwrap_or_default();
-        let msg = build_trace(&meta, tenant_id, status, total_duration_ms, usage, ttft_ms, None);
-        send_trace(&tx, msg);
+        emit.emit(usage, errored);
     }
 }
 
@@ -664,6 +747,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
     const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
@@ -720,6 +804,41 @@ mod tests {
                             .header("content-type", "text/event-stream")
                             .body(Body::from(SSE_BODY_NO_USAGE))
                             .unwrap(),
+                        Some("slow") => {
+                            // Two SSE frames 300ms apart so a client can abort
+                            // mid-stream while the tap is waiting for frame 2.
+                            let body = async_stream::stream! {
+                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                                ));
+                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                                yield Ok(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                                ));
+                            };
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
+                        Some("miderror") => {
+                            // One good frame, then — after headers have surely
+                            // flushed — a mid-stream failure.
+                            let body = async_stream::stream! {
+                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                                ));
+                                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                                yield Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "mock mid-stream failure",
+                                ));
+                            };
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
                         _ if payload["stream"].as_bool().unwrap_or(false) => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -833,6 +952,7 @@ mod tests {
             raw_completion: None,
             waste_detected: None,
             upstream_cost_usd: rust_decimal::Decimal::ZERO,
+            truncated: false,
         }
     }
 
@@ -1343,6 +1463,104 @@ mod tests {
             wait_until(counters.clone(), |c| c.messages >= 2).await,
             "worker should flush the remainder on channel close"
         );
+    }
+
+    /// Drive a real HTTP request through axum::serve and close the socket
+    /// after the first SSE frame — a genuine client abort mid-stream.
+    async fn serve_and_abort(model: &str) -> mpsc::Receiver<TraceMessage> {
+        let (tx, rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            telemetry_tx: tx,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, build_router(state)).await.unwrap() });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let body = format!(
+            r#"{{"model":"{model}","stream":true,"messages":[{{"role":"user","content":"hi"}}]}}"#
+        );
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {CLIENT_KEY}\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+        socket.write_all(request.as_bytes()).await.unwrap();
+        // Read until at least the first SSE frame has arrived, then hang for a
+        // moment inside the mock's 300ms gap and drop the connection.
+        let mut buf = [0u8; 2048];
+        let mut seen = 0usize;
+        while seen < buf.len() {
+            let n = socket.read(&mut buf[seen..]).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            seen += n;
+            if String::from_utf8_lossy(&buf[..seen]).contains("content\":\"a\"") {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        drop(socket); // abort
+        rx
+    }
+
+    #[tokio::test]
+    async fn client_abort_mid_stream_records_single_truncated_trace() {
+        let mut rx = serve_and_abort("slow").await;
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("truncated trace should be emitted")
+            .expect("channel open");
+        assert!(msg.truncated, "aborted stream must be flagged truncated");
+        assert_eq!(msg.status_code, 200);
+        assert!(msg.raw_completion.is_none());
+        // Exactly one trace: the abort must not also fire the normal emit.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(rx.try_recv().is_err(), "no duplicate trace after abort");
+    }
+
+    #[tokio::test]
+    async fn upstream_mid_stream_error_records_truncated_trace() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            telemetry_tx: tx,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"miderror","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&body).contains("content\":\"a\""),
+            "client still receives the frames before the failure"
+        );
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        assert!(msg.truncated, "mid-stream upstream error must be flagged truncated");
     }
 
     #[tokio::test]
