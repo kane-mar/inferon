@@ -12,8 +12,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 |----|-------|------|----------|--------|
 | ITEM-003 | Zero-copy SSE proxy ingress | feature | 3 | **done — archived 2026-08-31** |
 | ITEM-004 | Auth & tenant context (Bearer key swap) | feature | 4 | **done — archived 2026-08-31** |
-| ITEM-005 | Async telemetry pipeline | feature | 5 | refined |
+| ITEM-005 | Async telemetry pipeline | feature | 5 | **done — archived 2026-09-01** |
 | ITEM-006 | Cost linter & cost calculator | feature | 6 | refined |
 | ITEM-007 | Cost-leak dashboard | feature | 7 | refined |
 
-_Last updated: 2026-08-31_ (ITEM-001, ITEM-002, ITEM-003, ITEM-004 archived)
+_Last updated: 2026-09-01_ (ITEM-001–005 archived)
