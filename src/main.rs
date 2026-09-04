@@ -1,4 +1,7 @@
-use inferon::{build_router, parse_port, ping_health, AppState, PostgresTenantStore};
+use inferon::{
+    build_router, parse_port, ping_health, telemetry_worker, AppState, PostgresTenantStore,
+    PostgresTraceSink, TraceMessage,
+};
 use reqwest::Client;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -8,6 +11,9 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_UPSTREAM_URL: &str = "https://api.deepseek.com/v1/chat/completions";
 const DEFAULT_DATABASE_URL: &str = "postgres://inferon:inferon@localhost:5432/inferon";
+const TELEMETRY_CHANNEL_CAPACITY: usize = 10_000;
+const TELEMETRY_FLUSH_INTERVAL_MS: u64 = 500;
+const TELEMETRY_BATCH_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,11 +33,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&database_url)
         .await?;
 
+    let (telemetry_tx, telemetry_rx) = tokio::sync::mpsc::channel::<TraceMessage>(TELEMETRY_CHANNEL_CAPACITY);
+    tokio::spawn(telemetry_worker(
+        telemetry_rx,
+        Box::new(PostgresTraceSink::new(pool.clone())),
+        std::time::Duration::from_millis(TELEMETRY_FLUSH_INTERVAL_MS),
+        TELEMETRY_BATCH_SIZE,
+    ));
+
     let state = Arc::new(AppState {
         http_client: Client::builder().pool_max_idle_per_host(100).build()?,
         upstream_url: std::env::var("UPSTREAM_URL")
             .unwrap_or_else(|_| DEFAULT_UPSTREAM_URL.to_string()),
         tenant_store: Arc::new(PostgresTenantStore::new(pool)),
+        telemetry_tx,
     });
 
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;

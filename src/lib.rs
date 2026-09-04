@@ -9,11 +9,13 @@ use axum::{
 use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde_json::Value;
+use sqlx::types::Json;
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const MAX_REQUEST_BYTES: usize = 10 * 1024 * 1024;
@@ -92,11 +94,190 @@ impl TenantStore for PostgresTenantStore {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TenantId(pub Uuid);
 
+/// One completed request, queued for the batch telemetry worker (ITEM-005).
+#[derive(Clone, Debug)]
+pub struct TraceMessage {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub request_model: String,
+    pub system_prompt_hash: Option<String>,
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub ttft_ms: Option<i64>,
+    pub total_duration_ms: i64,
+    pub status_code: u16,
+    pub raw_prompt: Option<Value>,
+    pub raw_completion: Option<Value>,
+}
+
+/// Flush seam for the telemetry worker: batches of TraceMessages are handed
+/// to a sink exactly once per flush (one DB transaction for PostgresTraceSink).
+#[async_trait::async_trait]
+pub trait TraceSink: Send {
+    async fn flush(&mut self, batch: &mut Vec<TraceMessage>);
+}
+
+pub struct PostgresTraceSink {
+    pool: sqlx::PgPool,
+}
+
+impl PostgresTraceSink {
+    pub fn new(pool: sqlx::PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl TraceSink for PostgresTraceSink {
+    async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
+        let mut tx = match self.pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::error!("telemetry: cannot begin transaction, dropping {} traces: {e}", batch.len());
+                batch.clear();
+                return;
+            }
+        };
+        for msg in batch.drain(..) {
+            let result = sqlx::query(
+                r#"INSERT INTO traces (
+                    id, tenant_id, request_model, system_prompt_hash,
+                    prompt_tokens, completion_tokens, time_to_first_token_ms,
+                    total_duration_ms, status_code, raw_prompt, raw_completion
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+            )
+            .bind(msg.id)
+            .bind(msg.tenant_id)
+            .bind(&msg.request_model)
+            .bind(msg.system_prompt_hash.as_deref())
+            .bind(msg.prompt_tokens)
+            .bind(msg.completion_tokens)
+            .bind(msg.ttft_ms.map(|t| t as i32))
+            .bind(msg.total_duration_ms as i32)
+            .bind(i32::from(msg.status_code))
+            .bind(msg.raw_prompt.as_ref().map(Json))
+            .bind(msg.raw_completion.as_ref().map(Json))
+            .execute(&mut *tx)
+            .await;
+            if let Err(e) = result {
+                tracing::error!("telemetry: trace insert failed, rolling back batch: {e}");
+                return; // tx dropped -> rollback keeps the flush atomic (AC6)
+            }
+        }
+        if let Err(e) = tx.commit().await {
+            tracing::error!("telemetry: commit failed: {e}");
+        }
+    }
+}
+
+/// Background worker: batches TraceMessages and flushes them to the sink every
+/// `flush_interval` or every `batch_size` items, whichever comes first. DB I/O
+/// happens only here, never on the hot request path (AC2).
+pub async fn telemetry_worker(
+    mut rx: mpsc::Receiver<TraceMessage>,
+    mut sink: Box<dyn TraceSink>,
+    flush_interval: Duration,
+    batch_size: usize,
+) {
+    let mut buffer: Vec<TraceMessage> = Vec::with_capacity(batch_size);
+    let mut interval = tokio::time::interval(flush_interval);
+    loop {
+        tokio::select! {
+            msg = rx.recv() => match msg {
+                Some(msg) => {
+                    buffer.push(msg);
+                    if buffer.len() >= batch_size {
+                        sink.flush(&mut buffer).await;
+                    }
+                }
+                None => {
+                    if !buffer.is_empty() {
+                        sink.flush(&mut buffer).await;
+                    }
+                    return;
+                }
+            },
+            _ = interval.tick() => {
+                if !buffer.is_empty() {
+                    sink.flush(&mut buffer).await;
+                }
+            }
+        }
+    }
+}
+
+/// Strip ASCII whitespace from both ends of a byte slice.
+fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&first, rest)) = bytes.split_first() {
+        if first.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    while let Some((&last, rest)) = bytes.split_last() {
+        if last.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+/// Extract (prompt, completion) token counts from the last SSE data frame that
+/// carries a usage object — e.g. DeepSeek's final chunk before [DONE]. This is
+/// run over the already-accumulated stream bytes at stream end, so frames may
+/// be parsed whole regardless of TCP fragmentation.
+pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<(i32, i32)> {
+    let mut last = None;
+    for line in bytes.split(|&b| b == b'\n') {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let Some(data) = line.strip_prefix(b"data:") else { continue };
+        let data = trim_ascii_ws(data);
+        if data == b"[DONE]" {
+            continue;
+        }
+        let Ok(frame) = serde_json::from_slice::<Value>(data) else {
+            continue;
+        };
+        if let (Some(p), Some(c)) = (
+            frame["usage"]["prompt_tokens"].as_i64(),
+            frame["usage"]["completion_tokens"].as_i64(),
+        ) {
+            last = Some((p as i32, c as i32));
+        }
+    }
+    last
+}
+
+/// SHA-256 hex of the first `role: system` message content (AC3).
+fn system_prompt_hash(payload: &Value) -> Option<String> {
+    payload["messages"]
+        .as_array()?
+        .iter()
+        .find(|m| m["role"] == "system")
+        .and_then(|m| m["content"].as_str())
+        .map(tenant_hash)
+}
+
+/// Token counts from a parsed upstream JSON response (non-streaming path).
+fn usage_tokens(response_json: &Option<Value>) -> (i32, i32) {
+    match response_json {
+        Some(json) => (
+            json["usage"]["prompt_tokens"].as_i64().unwrap_or(0) as i32,
+            json["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32,
+        ),
+        None => (0, 0),
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub http_client: Client,
     pub upstream_url: String,
     pub tenant_store: Arc<dyn TenantStore>,
+    pub telemetry_tx: mpsc::Sender<TraceMessage>,
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {
@@ -170,6 +351,12 @@ async fn proxy_chat_completions(
         }
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
+    let meta = RequestMeta {
+        id: Uuid::new_v4(),
+        model: payload["model"].as_str().unwrap_or("unknown").to_string(),
+        system_prompt_hash: system_prompt_hash(&payload),
+        raw_prompt: payload,
+    };
     let Some(upstream_key) = tenant.upstream_openai_key.as_deref() else {
         return attach_tenant(
             json_error(
@@ -193,18 +380,109 @@ async fn proxy_chat_completions(
         Ok(response) => response,
         Err(e) => {
             tracing::error!("upstream request failed: {e}");
+            let total_ms = started.elapsed().as_millis() as i64;
+            let msg = build_trace(&meta, tenant_id, 502, total_ms, (0, 0), None, None);
+            send_trace(&state.telemetry_tx, msg);
             return attach_tenant(upstream_error_response(), tenant_id);
         }
     };
 
     let status = upstream.status();
     if !status.is_success() {
-        return attach_tenant(forward_raw(upstream).await, tenant_id);
+        // Forward the upstream error as-is; still trace it (status_code column).
+        let content_type = upstream.headers().get(CONTENT_TYPE).cloned();
+        return match upstream.bytes().await {
+            Ok(bytes) => {
+                let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
+                let tokens = usage_tokens(&response_json);
+                let total_ms = started.elapsed().as_millis() as i64;
+                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, tokens, None, response_json);
+                send_trace(&state.telemetry_tx, msg);
+                let mut response = Response::new(Body::from(bytes));
+                *response.status_mut() = status;
+                if let Some(content_type) = content_type {
+                    response.headers_mut().insert(CONTENT_TYPE, content_type);
+                }
+                attach_tenant(response, tenant_id)
+            }
+            Err(e) => {
+                tracing::error!("upstream body read failed: {e}");
+                attach_tenant(upstream_error_response(), tenant_id)
+            }
+        };
     }
     if is_stream {
-        attach_tenant(stream_response(upstream, started), tenant_id)
+        attach_tenant(
+            stream_response(upstream, started, meta, tenant_id, status.as_u16(), state.telemetry_tx.clone()),
+            tenant_id,
+        )
     } else {
-        attach_tenant(forward_json(upstream).await, tenant_id)
+        // Non-streaming: buffer the full body, trace, then forward as JSON.
+        match upstream.bytes().await {
+            Ok(bytes) => {
+                let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
+                let tokens = usage_tokens(&response_json);
+                let total_ms = started.elapsed().as_millis() as i64;
+                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, tokens, Some(total_ms), response_json);
+                send_trace(&state.telemetry_tx, msg);
+                let mut response = Response::new(Body::from(bytes));
+                *response.status_mut() = status;
+                response
+                    .headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                attach_tenant(response, tenant_id)
+            }
+            Err(e) => {
+                tracing::error!("upstream body read failed: {e}");
+                attach_tenant(upstream_error_response(), tenant_id)
+            }
+        }
+    }
+}
+
+/// Request-derived fields shared by every trace of this request.
+struct RequestMeta {
+    id: Uuid,
+    model: String,
+    system_prompt_hash: Option<String>,
+    raw_prompt: Value,
+}
+
+fn build_trace(
+    meta: &RequestMeta,
+    tenant_id: Uuid,
+    status: u16,
+    total_duration_ms: i64,
+    tokens: (i32, i32),
+    ttft_ms: Option<i64>,
+    raw_completion: Option<Value>,
+) -> TraceMessage {
+    TraceMessage {
+        id: meta.id,
+        tenant_id,
+        request_model: meta.model.clone(),
+        system_prompt_hash: meta.system_prompt_hash.clone(),
+        prompt_tokens: tokens.0,
+        completion_tokens: tokens.1,
+        ttft_ms,
+        total_duration_ms,
+        status_code: status,
+        raw_prompt: Some(meta.raw_prompt.clone()),
+        raw_completion,
+    }
+}
+
+/// Queue a trace without ever blocking the request path (AC5): a full channel
+/// drops the trace with an error log; a closed channel logs at debug level.
+fn send_trace(tx: &mpsc::Sender<TraceMessage>, msg: TraceMessage) {
+    match tx.try_send(msg) {
+        Ok(()) => {}
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            tracing::error!("telemetry channel full; trace dropped");
+        }
+        Err(mpsc::error::TrySendError::Closed(_)) => {
+            tracing::debug!("telemetry channel closed; trace dropped");
+        }
     }
 }
 
@@ -254,45 +532,6 @@ fn attach_tenant(mut response: Response, tenant_id: Uuid) -> Response {
     response
 }
 
-/// Forward an upstream error response unchanged (status + body + content-type).
-async fn forward_raw(upstream: reqwest::Response) -> Response {
-    let status = upstream.status();
-    let content_type = upstream.headers().get(CONTENT_TYPE).cloned();
-    match upstream.bytes().await {
-        Ok(bytes) => {
-            let mut response = Response::new(Body::from(bytes));
-            *response.status_mut() = status;
-            if let Some(content_type) = content_type {
-                response.headers_mut().insert(CONTENT_TYPE, content_type);
-            }
-            response
-        }
-        Err(e) => {
-            tracing::error!("upstream body read failed: {e}");
-            upstream_error_response()
-        }
-    }
-}
-
-/// Forward a successful non-streaming response as JSON.
-async fn forward_json(upstream: reqwest::Response) -> Response {
-    let status = upstream.status();
-    match upstream.bytes().await {
-        Ok(bytes) => {
-            let mut response = Response::new(Body::from(bytes));
-            *response.status_mut() = status;
-            response
-                .headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-            response
-        }
-        Err(e) => {
-            tracing::error!("upstream body read failed: {e}");
-            upstream_error_response()
-        }
-    }
-}
-
 /// OpenAI-style error body for upstream transport failures (AC5: 502 with body).
 fn upstream_error_response() -> Response {
     let body = r#"{"error":{"message":"upstream request failed","type":"upstream_error"}}"#;
@@ -304,36 +543,51 @@ fn upstream_error_response() -> Response {
     response
 }
 
-/// Pipe an upstream byte stream through as text/event-stream, measuring and
-/// logging time-to-first-token (first upstream chunk) on the way.
-fn stream_response(upstream: reqwest::Response, started: Instant) -> Response {
-    let status = upstream.status();
-    let byte_stream = tap_ttft(upstream.bytes_stream(), started);
-    let mut response = Response::new(Body::from_stream(byte_stream));
-    *response.status_mut() = status;
+/// Pipe an upstream byte stream through as text/event-stream, emitting the
+/// request trace once the stream is fully consumed. Chunks are yielded
+/// immediately (zero-copy; no buffering that would break TTFT) while bytes are
+/// accumulated on the side solely for the final usage-frame parse (AC4).
+fn stream_response(
+    upstream: reqwest::Response,
+    started: Instant,
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    status: u16,
+    tx: mpsc::Sender<TraceMessage>,
+) -> Response {
+    let byte_stream = upstream.bytes_stream();
+    let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx);
+    let mut response = Response::new(Body::from_stream(stream));
+    *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
     response
 }
 
-/// Tag each upstream chunk with its arrival time; record TTFT on the first one.
-/// Chunks are yielded immediately (no buffering), so added latency is ~0.
-fn tap_ttft(
+/// Tag each upstream chunk with its arrival time (TTFT on the first one), yield
+/// it immediately, and once the stream ends queue the trace with token counts
+/// parsed from the final usage frame.
+fn stream_with_trace(
     byte_stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>>,
     started: Instant,
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    status: u16,
+    tx: mpsc::Sender<TraceMessage>,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> {
     async_stream::stream! {
         let mut stream = Box::pin(byte_stream);
-        let mut first = true;
+        let mut ttft_ms: Option<i64> = None;
+        let mut accumulated: Vec<u8> = Vec::new();
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    if first {
-                        let ttft_ms = started.elapsed().as_millis() as u64;
+                    if ttft_ms.is_none() {
+                        ttft_ms = Some(started.elapsed().as_millis() as i64);
                         tracing::debug!(ttft_ms, "first upstream chunk");
-                        first = false;
                     }
+                    accumulated.extend_from_slice(&bytes);
                     yield Ok(bytes);
                 }
                 Err(e) => {
@@ -342,6 +596,10 @@ fn tap_ttft(
                 }
             }
         }
+        let total_duration_ms = started.elapsed().as_millis() as i64;
+        let tokens = usage_from_sse_bytes(&accumulated).unwrap_or((0, 0));
+        let msg = build_trace(&meta, tenant_id, status, total_duration_ms, tokens, ttft_ms, None);
+        send_trace(&tx, msg);
     }
 }
 
@@ -375,7 +633,9 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
+    const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
+    const SSE_BODY_NO_USAGE: &str =
+        "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
     const CLIENT_KEY: &str = "sk-client-dev-key";
     const MASTER_KEY: &str = "sk-tenant-master-key";
     const TENANT_ID: &str = "11111111-1111-1111-1111-111111111111";
@@ -423,6 +683,10 @@ mod tests {
                             .status(429)
                             .body(Body::from("rate limited"))
                             .unwrap(),
+                        Some("nousage") => axum::response::Response::builder()
+                            .header("content-type", "text/event-stream")
+                            .body(Body::from(SSE_BODY_NO_USAGE))
+                            .unwrap(),
                         _ if payload["stream"].as_bool().unwrap_or(false) => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -455,23 +719,28 @@ mod tests {
         format!("http://{addr}/v1/chat/completions")
     }
 
-    fn test_state(upstream_url: &str) -> std::sync::Arc<AppState> {
+    fn state_with_store(
+        upstream_url: &str,
+        tenant_store: std::sync::Arc<dyn TenantStore>,
+    ) -> std::sync::Arc<AppState> {
+        let (tx, _rx) = mpsc::channel::<TraceMessage>(64);
         std::sync::Arc::new(AppState {
             http_client: reqwest::Client::new(),
             upstream_url: upstream_url.to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
+            tenant_store,
+            telemetry_tx: tx,
         })
+    }
+
+    fn test_state(upstream_url: &str) -> std::sync::Arc<AppState> {
+        state_with_store(upstream_url, std::sync::Arc::new(seeded_store()))
     }
 
     fn failing_state(upstream_url: &str) -> std::sync::Arc<AppState> {
-        std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: upstream_url.to_string(),
-            tenant_store: std::sync::Arc::new(FailingStore),
-        })
+        state_with_store(upstream_url, std::sync::Arc::new(FailingStore))
     }
 
-    async fn chat_request(body: &str, auth: Option<&str>) -> axum::response::Response {
+    fn chat_request_builder(body: &str, auth: Option<&str>) -> Request<Body> {
         let mut builder = Request::builder()
             .method("POST")
             .uri("/v1/chat/completions")
@@ -479,10 +748,48 @@ mod tests {
         if let Some(key) = auth {
             builder = builder.header("authorization", format!("Bearer {key}"));
         }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
+
+    async fn chat_request(body: &str, auth: Option<&str>) -> axum::response::Response {
         build_router(test_state(&mock_upstream().await))
-            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+            .oneshot(chat_request_builder(body, auth))
             .await
             .unwrap()
+    }
+
+    async fn traced_request(
+        body: &str,
+        auth: Option<&str>,
+    ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
+        let (tx, rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            telemetry_tx: tx,
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(body, auth))
+            .await
+            .unwrap();
+        (response, rx)
+    }
+
+    fn dummy_trace() -> TraceMessage {
+        TraceMessage {
+            id: uuid::Uuid::new_v4(),
+            tenant_id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+            request_model: "deepseek-chat".into(),
+            system_prompt_hash: None,
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            ttft_ms: Some(1),
+            total_duration_ms: 1,
+            status_code: 200,
+            raw_prompt: None,
+            raw_completion: None,
+        }
     }
 
     #[tokio::test]
@@ -696,6 +1003,281 @@ mod tests {
         assert_eq!(
             response.status(),
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    // --- ITEM-005 telemetry ---
+
+    #[test]
+    fn usage_from_sse_bytes_parses_final_usage_frame() {
+        assert_eq!(usage_from_sse_bytes(SSE_BODY.as_bytes()), Some((5, 2)));
+    }
+
+    #[test]
+    fn usage_from_sse_bytes_handles_frames_split_across_chunks() {
+        let mut acc = Vec::new();
+        for chunk in SSE_BODY.as_bytes().chunks(7) {
+            acc.extend_from_slice(chunk);
+        }
+        assert_eq!(usage_from_sse_bytes(&acc), Some((5, 2)));
+    }
+
+    #[test]
+    fn usage_from_sse_bytes_returns_none_when_absent() {
+        assert_eq!(usage_from_sse_bytes(b"data: {\"a\":1}\n\ndata: [DONE]\n\n"), None);
+        assert_eq!(usage_from_sse_bytes(b""), None);
+        assert_eq!(usage_from_sse_bytes(b"not sse at all"), None);
+    }
+
+    #[test]
+    fn system_prompt_hash_hashes_first_system_message() {
+        let payload: serde_json::Value = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": "be terse"},
+                {"role": "system", "content": "second"},
+                {"role": "user", "content": "hi"}
+            ]
+        });
+        assert_eq!(
+            system_prompt_hash(&payload).as_deref(),
+            Some(tenant_hash("be terse").as_str())
+        );
+    }
+
+    #[test]
+    fn system_prompt_hash_is_none_without_system_message() {
+        let payload: serde_json::Value =
+            serde_json::json!({"messages": [{"role": "user", "content": "hi"}]});
+        assert_eq!(system_prompt_hash(&payload), None);
+        assert_eq!(system_prompt_hash(&serde_json::json!({})), None);
+    }
+
+    #[tokio::test]
+    async fn non_stream_request_emits_trace_with_tokens_and_raw() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-chat","messages":[{"role":"system","content":"be terse"},{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let msg = rx.recv().await.expect("trace should be emitted");
+        assert_eq!(msg.tenant_id, uuid::Uuid::parse_str(TENANT_ID).unwrap());
+        assert_eq!(msg.request_model, "deepseek-chat");
+        assert_eq!(msg.prompt_tokens, 5);
+        assert_eq!(msg.completion_tokens, 2);
+        assert_eq!(msg.status_code, 200);
+        assert_eq!(
+            msg.system_prompt_hash.as_deref(),
+            Some(tenant_hash("be terse").as_str())
+        );
+        assert_eq!(
+            msg.raw_prompt.as_ref().unwrap()["messages"][0]["role"],
+            "system"
+        );
+        assert_eq!(
+            msg.raw_completion.as_ref().unwrap()["usage"]["prompt_tokens"],
+            5
+        );
+    }
+
+    #[tokio::test]
+    async fn non_stream_without_system_message_has_null_hash_and_ttft() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let msg = rx.recv().await.expect("trace should be emitted");
+        assert_eq!(msg.system_prompt_hash, None);
+        assert!(msg.ttft_ms.is_some(), "non-stream ttft mirrors total duration");
+        assert!(msg.total_duration_ms >= 0);
+        assert_eq!(msg.prompt_tokens, 5);
+    }
+
+    #[tokio::test]
+    async fn stream_request_emits_trace_with_usage_from_final_chunk() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-chat","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), SSE_BODY.as_bytes());
+        let msg = rx
+            .recv()
+            .await
+            .expect("trace emitted after the stream body is consumed");
+        assert_eq!(msg.prompt_tokens, 5, "tokens parsed from final chunk");
+        assert_eq!(msg.completion_tokens, 2);
+        assert!(msg.ttft_ms.is_some(), "ttft recorded at first chunk");
+        assert!(msg.total_duration_ms >= 0);
+        assert_eq!(msg.status_code, 200);
+        assert_eq!(msg.raw_completion, None, "stream raw deferred (per spec)");
+    }
+
+    #[tokio::test]
+    async fn stream_without_usage_frame_records_zero_tokens() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"nousage","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let _body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let msg = rx.recv().await.expect("trace should be emitted");
+        assert_eq!(msg.prompt_tokens, 0);
+        assert_eq!(msg.completion_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn upstream_error_response_is_traced_with_status() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"rate","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+
+        assert_eq!(response.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+        let _body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let msg = rx.recv().await.expect("trace should be emitted");
+        assert_eq!(msg.status_code, 429);
+        assert_eq!(msg.prompt_tokens, 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_send_never_blocks_when_channel_full() {
+        let (tx, rx_keepalive) = mpsc::channel::<TraceMessage>(1);
+        // Keep the receiver alive but never drain it: the channel fills after
+        // the first request's trace. Later requests must still complete (AC5).
+        let _keepalive = rx_keepalive;
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            telemetry_tx: tx,
+        });
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            for _ in 0..3 {
+                let response = build_router(state.clone())
+                    .oneshot(chat_request_builder(
+                        r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+                        Some(CLIENT_KEY),
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), axum::http::StatusCode::OK);
+                let _ = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                    .await
+                    .unwrap();
+            }
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "requests must not block on a full telemetry channel"
+        );
+    }
+
+    // Worker batching policy — sink-agnostic (the Postgres sink is exercised at
+    // the deployment seam where a real database exists).
+    #[derive(Default)]
+    struct SinkCounters {
+        flushes: usize,
+        messages: usize,
+    }
+
+    struct SharedSink(std::sync::Arc<tokio::sync::Mutex<SinkCounters>>);
+
+    #[async_trait::async_trait]
+    impl TraceSink for SharedSink {
+        async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
+            let mut counters = self.0.lock().await;
+            counters.flushes += 1;
+            counters.messages += batch.len();
+            batch.clear();
+        }
+    }
+
+    fn spawn_worker(
+        rx: mpsc::Receiver<TraceMessage>,
+        flush_interval_ms: u64,
+        batch_size: usize,
+    ) -> std::sync::Arc<tokio::sync::Mutex<SinkCounters>> {
+        let counters = std::sync::Arc::new(tokio::sync::Mutex::new(SinkCounters::default()));
+        let sink: Box<dyn TraceSink> = Box::new(SharedSink(counters.clone()));
+        tokio::spawn(telemetry_worker(
+            rx,
+            sink,
+            std::time::Duration::from_millis(flush_interval_ms),
+            batch_size,
+        ));
+        counters
+    }
+
+    async fn wait_until(
+        counters: std::sync::Arc<tokio::sync::Mutex<SinkCounters>>,
+        predicate: impl Fn(&SinkCounters) -> bool,
+    ) -> bool {
+        for _ in 0..200 {
+            if predicate(&*counters.lock().await) {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn worker_flushes_when_batch_threshold_reached() {
+        let (tx, rx) = mpsc::channel(256);
+        let counters = spawn_worker(rx, 60_000, 5); // interval never fires in this test
+        for _ in 0..5 {
+            tx.send(dummy_trace()).await.unwrap();
+        }
+        assert!(
+            wait_until(counters.clone(), |c| c.messages >= 5).await,
+            "worker should flush once 5 messages accumulate"
+        );
+        let counters = counters.lock().await;
+        assert_eq!(counters.messages, 5);
+        assert_eq!(counters.flushes, 1, "one transactional flush per batch");
+    }
+
+    #[tokio::test]
+    async fn worker_flushes_on_interval_when_idle() {
+        let (tx, rx) = mpsc::channel(256);
+        let counters = spawn_worker(rx, 40, 100);
+        tx.send(dummy_trace()).await.unwrap();
+        assert!(
+            wait_until(counters.clone(), |c| c.messages >= 1).await,
+            "worker should flush on the interval even below the batch size"
+        );
+        drop(tx);
+    }
+
+    #[tokio::test]
+    async fn worker_flushes_remainder_and_exits_when_senders_drop() {
+        let (tx, rx) = mpsc::channel(256);
+        let counters = spawn_worker(rx, 60_000, 100);
+        tx.send(dummy_trace()).await.unwrap();
+        tx.send(dummy_trace()).await.unwrap();
+        drop(tx); // all senders gone -> worker drains the remainder and exits
+        assert!(
+            wait_until(counters.clone(), |c| c.messages >= 2).await,
+            "worker should flush the remainder on channel close"
         );
     }
 }
