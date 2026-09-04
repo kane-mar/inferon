@@ -49,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|_| DEFAULT_UPSTREAM_URL.to_string()),
         tenant_store: Arc::new(PostgresTenantStore::new(pool.clone())),
         telemetry_tx,
+        operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
         db: pool,
     });
 

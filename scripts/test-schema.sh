@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATION="db/init/001_init.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -58,7 +58,7 @@ wait_healthy() {
     fail "postgres did not become healthy (last status: $status)"
 }
 
-echo "starting postgres (auto-applies $MIGRATION on first init)..."
+echo "starting postgres (auto-applies db/init/*.sql on first init)..."
 wait_healthy
 
 echo "--- initdb.d contents ---"
@@ -89,6 +89,16 @@ check_column traces status_code integer
 check_column traces raw_prompt jsonb
 check_column traces raw_completion jsonb
 check_column traces created_at "timestamp with time zone"
+check_column traces truncated boolean
+
+check_table system_prompt_counts
+check_table tenant_configurations
+check_column system_prompt_counts hash "character varying"
+check_column system_prompt_counts count integer
+check_column tenant_configurations tenant_id uuid
+check_column tenant_configurations budget_limit_cents bigint
+check_column tenant_configurations current_spend_cents bigint
+check_column tenant_configurations cheap_fallback_model text
 
 check_true "tenants.api_key_hash is unique" \
     "SELECT count(*) FROM information_schema.table_constraints WHERE table_name='tenants' AND constraint_type='UNIQUE'"
@@ -102,8 +112,10 @@ check_true "index idx_traces_tenant_created exists" \
 check_true "index idx_traces_prompt_hash exists" \
     "SELECT count(*) FROM pg_indexes WHERE tablename='traces' AND indexname='idx_traces_prompt_hash'"
 
-echo "re-applying migration (idempotency)..."
-docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$MIGRATION" || fail "idempotent re-apply errored"
-echo "ok: idempotent re-apply"
+echo "re-applying migrations (idempotency)..."
+for m in $MIGRATIONS; do
+    docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
+done
+echo "ok: idempotent re-apply (001 + 002)"
 
 echo "ALL SCHEMA CHECKS PASSED"

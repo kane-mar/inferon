@@ -6,8 +6,7 @@ services:
     environment:
       PORT: 8080
       DATABASE_URL: postgres://inferon:inferon@postgres:5432/inferon
-      REDIS_URL: redis://redis:6379
-      DEFAULT_MODEL: deepseek-chat
+      UPSTREAM_URL: ${UPSTREAM_URL:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:

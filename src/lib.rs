@@ -349,6 +349,9 @@ pub struct AppState {
     pub upstream_url: String,
     pub tenant_store: Arc<dyn TenantStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
+    /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
+    /// dashboard views. `None` disables operator access entirely (ITEM-013).
+    pub operator_key: Option<String>,
     pub db: sqlx::PgPool,
 }
 
@@ -361,6 +364,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
+        .route("/v1/dashboard/api/operator/tenants", get(dashboard::operator_tenants))
+        .route("/v1/dashboard/api/operator/summary", get(dashboard::operator_summary))
+        .route("/v1/dashboard/api/operator/by-model", get(dashboard::operator_by_model))
+        .route("/v1/dashboard/api/operator/by-prompt", get(dashboard::operator_by_prompt))
         .with_state(state)
 }
 
@@ -909,6 +916,7 @@ mod tests {
             upstream_url: upstream_url.to_string(),
             tenant_store,
             telemetry_tx: tx,
+            operator_key: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -952,6 +960,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            operator_key: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1364,6 +1373,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            operator_key: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1532,6 +1542,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            operator_key: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1594,6 +1605,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             telemetry_tx: tx,
+            operator_key: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )

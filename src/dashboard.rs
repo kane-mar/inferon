@@ -41,6 +41,14 @@ fn unauthorized() -> Response {
     )
 }
 
+fn forbidden() -> Response {
+    crate::json_error(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "this credential is not allowed here",
+    )
+}
+
 fn internal(message: &str) -> Response {
     tracing::error!("dashboard query failed: {message}");
     crate::json_error(StatusCode::INTERNAL_SERVER_ERROR, "dashboard_error", message)
@@ -50,10 +58,34 @@ fn json_ok(value: Value) -> Response {
     Json(value).into_response()
 }
 
-/// Resolve the caller's tenant (same seam as the proxy hot path).
-async fn tenant_or(state: &Arc<AppState>, headers: &HeaderMap) -> Result<uuid::Uuid, Response> {
+fn db_err(e: sqlx::Error) -> Response {
+    internal(&e.to_string())
+}
+
+/// Scope of an authenticated dashboard caller.
+enum Scope {
+    Tenant(uuid::Uuid),
+    Operator,
+}
+
+/// Resolve the bearer key against the operator secret first, then the tenant
+/// store (same seam as the proxy hot path). Operator access is disabled when
+/// no OPERATOR_API_KEY is configured (ITEM-013).
+async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Scope, Response> {
+    let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
+        return Err(unauthorized());
+    };
+    let Some(key) = auth.strip_prefix("Bearer ") else {
+        return Err(unauthorized());
+    };
+    if key.is_empty() {
+        return Err(unauthorized());
+    }
+    if state.operator_key.as_deref() == Some(key) {
+        return Ok(Scope::Operator);
+    }
     match crate::authenticate(state, headers).await {
-        Ok(Some(tenant)) => Ok(tenant.id),
+        Ok(Some(tenant)) => Ok(Scope::Tenant(tenant.id)),
         Ok(None) => Err(unauthorized()),
         Err(e) => {
             tracing::error!("tenant lookup failed: {e}");
@@ -62,25 +94,36 @@ async fn tenant_or(state: &Arc<AppState>, headers: &HeaderMap) -> Result<uuid::U
     }
 }
 
-fn db_err(e: sqlx::Error) -> Response {
-    internal(&e.to_string())
+/// Tenant-scoped handlers only: an operator credential is rejected (403).
+async fn tenant_or(state: &Arc<AppState>, headers: &HeaderMap) -> Result<uuid::Uuid, Response> {
+    match resolve_scope(state, headers).await? {
+        Scope::Tenant(id) => Ok(id),
+        Scope::Operator => Err(forbidden()),
+    }
 }
 
-/// GET /v1/dashboard — self-contained HTML shell; data loads via the JSON APIs.
-pub async fn index() -> Html<&'static str> {
-    Html(HTML)
+/// Operator-only handlers: tenant credentials are rejected (403). Returns the
+/// tenant filter — `None` = platform-wide.
+async fn operator_or(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<(), Response> {
+    match resolve_scope(state, headers).await? {
+        Scope::Operator => Ok(()),
+        Scope::Tenant(_) => Err(forbidden()),
+    }
 }
 
-/// GET /v1/dashboard/api/summary?days=7
-pub async fn summary(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Query(window): Query<Window>,
+/// Shared aggregate query plumbing. `tenant` is `Some(id)` for tenant-scoped
+/// views and `None` for the operator's platform-wide views (ITEM-013).
+/// The SQL uses `($1::uuid IS NULL OR tenant_id = $1)` so one query shape
+/// serves both scopes; the WHERE filter is the only separation.
+async fn query_summary(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+    scope_label: &str,
 ) -> Response {
-    let tenant_id = match tenant_or(&state, &headers).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
     let days = window.days();
     let row: Option<(i64, Decimal, i64, Option<String>, Option<String>)> =
         match sqlx::query_as(
@@ -90,9 +133,10 @@ pub async fn summary(
                     MIN(created_at)::text,
                     MAX(created_at)::text
              FROM traces
-             WHERE tenant_id = $1 AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+             WHERE ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
         )
-        .bind(tenant_id)
+        .bind(tenant)
         .bind(days)
         .fetch_optional(&state.db)
         .await
@@ -104,7 +148,8 @@ pub async fn summary(
     let (requests, total_cost, errors, first_at, last_at) =
         row.unwrap_or((0, Decimal::ZERO, 0, None, None));
     json_ok(json!({
-        "tenant_id": tenant_id.to_string(),
+        "scope": scope_label,
+        "tenant_id": tenant.map(|t| t.to_string()),
         "window_days": days,
         "requests": requests,
         "errors": errors,
@@ -114,24 +159,20 @@ pub async fn summary(
     }))
 }
 
-/// GET /v1/dashboard/api/by-model?days=7
-pub async fn by_model(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Query(window): Query<Window>,
+async fn query_by_model(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
 ) -> Response {
-    let tenant_id = match tenant_or(&state, &headers).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
     let rows: Vec<(String, i64, i64, i64, Decimal)> = match sqlx::query_as(
         "SELECT request_model, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0)
          FROM traces
-         WHERE tenant_id = $1 AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
          GROUP BY request_model ORDER BY 5 DESC",
     )
-    .bind(tenant_id)
+    .bind(tenant)
     .bind(window.days())
     .fetch_all(&state.db)
     .await
@@ -155,24 +196,20 @@ pub async fn by_model(
     json_ok(json!({"models": models}))
 }
 
-/// GET /v1/dashboard/api/by-prompt?days=7&limit=10 — top system-prompt clusters.
-pub async fn by_prompt(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Query(window): Query<Window>,
+async fn query_by_prompt(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
 ) -> Response {
-    let tenant_id = match tenant_or(&state, &headers).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
     let rows: Vec<(Option<String>, i64, i64, Decimal)> = match sqlx::query_as(
         "SELECT system_prompt_hash, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(upstream_cost_usd), 0)
          FROM traces
-         WHERE tenant_id = $1 AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
          GROUP BY system_prompt_hash ORDER BY 4 DESC LIMIT $3",
     )
-    .bind(tenant_id)
+    .bind(tenant)
     .bind(window.days())
     .bind(window.limit())
     .fetch_all(&state.db)
@@ -196,19 +233,11 @@ pub async fn by_prompt(
     json_ok(json!({"prompts": prompts}))
 }
 
-/// GET /v1/dashboard/api/waste?days=7 — waste flags with estimated $ impact.
-///
-/// Impact = actual spend of the flagged calls; savings_est = what gpt-4o-tier
-/// waste would cost on gpt-4o-mini (price delta on the flagged token sums).
-pub async fn waste(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Query(window): Query<Window>,
+async fn query_waste(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
 ) -> Response {
-    let tenant_id = match tenant_or(&state, &headers).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
     let rows: Vec<(String, i64, i64, i64, Decimal)> = match sqlx::query_as(
         "SELECT flag, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0)
@@ -217,10 +246,11 @@ pub async fn waste(
             ('over_provisioned', waste_detected->>'over_provisioned'),
             ('cache_miss', waste_detected->>'cache_miss_system_prompt'),
             ('model_misuse', waste_detected->>'model_misuse')) AS f(flag, fired)
-         WHERE tenant_id = $1 AND created_at >= NOW() - ($2 * INTERVAL '1 day') AND f.fired = 'true'
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day') AND f.fired = 'true'
          GROUP BY flag",
     )
-    .bind(tenant_id)
+    .bind(tenant)
     .bind(window.days())
     .fetch_all(&state.db)
     .await
@@ -242,6 +272,132 @@ pub async fn waste(
         });
     }
     json_ok(out)
+}
+
+/// GET /v1/dashboard — self-contained HTML shell; data loads via the JSON APIs.
+pub async fn index() -> Html<&'static str> {
+    Html(HTML)
+}
+
+/// GET /v1/dashboard/api/summary?days=7 (tenant scope)
+pub async fn summary(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_summary(&state, Some(id), &window, "tenant").await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/by-model?days=7 (tenant scope)
+pub async fn by_model(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_by_model(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/by-prompt?days=7&limit=10 (tenant scope)
+pub async fn by_prompt(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_by_prompt(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/waste?days=7 (tenant scope)
+pub async fn waste(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_waste(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/operator/tenants?days=7 — per-tenant spend + volume.
+pub async fn operator_tenants(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let rows: Vec<(String, i64, i64, Decimal)> = match sqlx::query_as(
+        "SELECT tenant_id::text, COUNT(*), COUNT(*) FILTER (WHERE status_code >= 400),
+                COALESCE(SUM(upstream_cost_usd), 0)
+         FROM traces
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')
+         GROUP BY tenant_id ORDER BY 4 DESC",
+    )
+    .bind(window.days())
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let tenants: Vec<Value> = rows
+        .into_iter()
+        .map(|(tenant_id, requests, errors, cost)| {
+            json!({
+                "tenant_id": tenant_id,
+                "requests": requests,
+                "errors": errors,
+                "cost_usd": cost.to_string(),
+            })
+        })
+        .collect();
+    json_ok(json!({"tenants": tenants, "window_days": window.days()}))
+}
+
+/// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.
+pub async fn operator_summary(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match operator_or(&state, &headers).await {
+        Ok(()) => query_summary(&state, None, &window, "operator").await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/operator/by-model?days=7 — platform-wide spend by model.
+pub async fn operator_by_model(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match operator_or(&state, &headers).await {
+        Ok(()) => query_by_model(&state, None, &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/operator/by-prompt?days=7 — platform-wide clusters.
+pub async fn operator_by_prompt(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match operator_or(&state, &headers).await {
+        Ok(()) => query_by_prompt(&state, None, &window).await,
+        Err(resp) => resp,
+    }
 }
 
 /// Self-contained dashboard page: key input (kept in memory), window buttons,
@@ -351,6 +507,7 @@ mod tests {
             upstream_url: "http://127.0.0.1:1/".to_string(),
             tenant_store: std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants)),
             telemetry_tx: tx,
+            operator_key: Some("op-secret".to_string()),
             db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
                 .unwrap(),
         })
@@ -402,6 +559,59 @@ mod tests {
                 .unwrap();
             assert_eq!(unknown.status(), axum::http::StatusCode::UNAUTHORIZED, "{uri} with unknown key");
         }
+    }
+
+    #[tokio::test]
+    async fn operator_scope_is_enforced_before_any_query() {
+        let state = dashboard_state();
+        let router = crate::build_router(state.clone());
+        let uri = "/v1/dashboard/api/operator/tenants?days=7";
+
+        // Endpoint gates (no DB touched): missing -> 401, tenant key -> 403.
+        let missing = router
+            .clone()
+            .oneshot(get(uri, None))
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let tenant_key = router
+            .clone()
+            .oneshot(get(uri, Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(tenant_key.status(), axum::http::StatusCode::FORBIDDEN);
+
+        // Tenant endpoints reject the operator credential.
+        let op_on_tenant_view = router
+            .clone()
+            .oneshot(get("/v1/dashboard/api/summary", Some("op-secret")))
+            .await
+            .unwrap();
+        assert_eq!(op_on_tenant_view.status(), axum::http::StatusCode::FORBIDDEN);
+
+        // Scope resolution itself (pure, no DB): operator key -> Operator,
+        // tenant key -> Tenant, unknown -> None.
+        fn bearer(key: &str) -> axum::http::HeaderMap {
+            let mut h = axum::http::HeaderMap::new();
+            h.insert("authorization", format!("Bearer {key}").parse().unwrap());
+            h
+        }
+        assert!(matches!(
+            resolve_scope(&state, &bearer("op-secret")).await.unwrap(),
+            Scope::Operator
+        ));
+        assert!(matches!(
+            resolve_scope(&state, &bearer("sk-dashboard-dev")).await.unwrap(),
+            Scope::Tenant(_)
+        ));
+        assert!(resolve_scope(&state, &bearer("sk-nope")).await.is_err());
+
+        // Operator access is disabled when no operator key is configured.
+        let mut disabled = dashboard_state();
+        std::sync::Arc::get_mut(&mut disabled)
+            .unwrap()
+            .operator_key = None;
+        assert!(resolve_scope(&disabled, &bearer("op-secret")).await.is_err());
     }
 
     #[test]
