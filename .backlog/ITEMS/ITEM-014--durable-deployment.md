@@ -15,3 +15,11 @@
 - All verification so far used disposable Vultr hosts (destroyed after each item); nothing is deployed durably
 - Domain/TLS: needs DNS for api.inferon.dev + a certificate story (Caddy/Traefik or a cloud LB)
 - Break this down further when it reaches the top of the backlog (DNS, host provisioning, TLS, backups, tenant minting are candidate slices)
+
+## Breakdown (2026-09-04 — item reached the top)
+- **014a DNS delegation** — inferon.dev is parked on sav.com coming-soon NS; needs the registrar to point the zone at Vultr DNS (ns1/ns2.vultr.com) or add an A record for api.inferon.dev at the registrar. User action at the registrar. Vultr-side zone + A record can be pre-created.
+- **014b Durable host + stack** — permanent Vultr instance running compose with `restart: unless-stopped` + named volumes (data survives reboots); `scripts/deploy-durable.sh` makes it repeatable.
+- **014c TLS ingress** — Caddy (compose profile `prod`) reverse-proxying api.inferon.dev → proxy:8080 with auto Let's Encrypt; activates once 014a lands.
+- **014d Firewall** — Vultr firewall group allowing only 22/80/443 on the durable host (no public 8080).
+- **014e Public verification** — https://api.inferon.dev/healthz + a real tenant request through the public URL; archive the item after this passes.
+- **014f Backups** — documented: Vultr snapshots of the host (pgdata/redisdata volumes); ad-hoc until demand justifies automation.

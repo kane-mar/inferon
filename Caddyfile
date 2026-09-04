@@ -1,0 +1,4 @@
+# TLS ingress for the durable deployment (compose profile "prod").
+api.inferon.dev {
+    reverse_proxy proxy:8080
+}

@@ -90,6 +90,26 @@ no tenant can see another tenant's data):
 - `GET /v1/dashboard/api/by-prompt?days=7&limit=10`
 - `GET /v1/dashboard/api/waste?days=7`
 
+## Durable deployment (api.inferon.dev)
+
+`scripts/deploy-durable.sh` provisions and updates a permanent host (~$5-6/mo —
+the first always-on spend; `teardown` stops billing). It runs the stack with
+`restart: unless-stopped` + named volumes behind a Caddy TLS ingress
+(compose profile `prod`) on a Vultr firewall allowing only 22/80/443.
+
+```bash
+./scripts/deploy-durable.sh up        # provision + deploy (prints OPERATOR_API_KEY once)
+./scripts/deploy-durable.sh redeploy  # rebuild + update the stack
+./scripts/deploy-durable.sh status    # containers + healthz probe
+./scripts/deploy-durable.sh teardown  # destroy the host
+```
+
+The `api.inferon.dev` A record is pre-staged in Vultr DNS; HTTPS goes live once
+the registrar points `inferon.dev` nameservers at Vultr (ns1/ns2.vultr.com).
+Operator dashboard: `https://api.inferon.dev/v1/dashboard/api/operator/*` with
+the saved `OPERATOR_API_KEY`. Backups: a Vultr snapshot of the host captures the
+pgdata/redisdata volumes.
+
 ## Development
 
 - Rust + bash only (project decision); SQL for migrations.

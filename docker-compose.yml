@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "${PORT:-8080}:8080"
+    restart: unless-stopped
     environment:
       PORT: 8080
       DATABASE_URL: postgres://inferon:inferon@postgres:5432/inferon
@@ -22,6 +23,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: inferon
       POSTGRES_PASSWORD: inferon
@@ -37,6 +39,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     volumes:
       - redisdata:/data
     healthcheck:
@@ -45,6 +48,23 @@ services:
       timeout: 3s
       retries: 10
 
+  # TLS ingress for api.inferon.dev (ITEM-014c); enabled via --profile prod.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["prod"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - proxy
+
 volumes:
   pgdata:
   redisdata:
+  caddydata:
+  caddyconfig:
