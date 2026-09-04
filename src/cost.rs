@@ -10,11 +10,17 @@ use std::str::FromStr;
 /// Price per 1M tokens: (prompt, completion) USD.
 pub type Price = (Decimal, Decimal);
 
-/// Model-aware price lookup. Prefix-tolerant so dated snapshots like
-/// `gpt-4o-2024-08-06` price like `gpt-4o`; `gpt-4o-mini*` must win over the
-/// `gpt-4o` prefix.
+/// Model-aware price lookup (USD per 1M tokens, prompt/completion).
+/// Prefix-tolerant so dated snapshots price correctly. DeepSeek rows from the
+/// DeepSeek pricing page (2026): `deepseek-chat` is an alias of v4-flash.
+/// NOTE: single off-peak cache-miss pair — DeepSeek bills peak at 2x and
+/// cache hits far lower, so these are labeled estimates, not invoices.
 pub fn price_for(model: &str) -> Price {
-    if model.starts_with("gpt-4o-mini") {
+    if model.starts_with("deepseek-v4-pro") {
+        (dec("0.66"), dec("1.98"))
+    } else if model.starts_with("deepseek-chat") || model.starts_with("deepseek-v4-flash") {
+        (dec("0.22"), dec("0.66"))
+    } else if model.starts_with("gpt-4o-mini") {
         (dec("0.15"), dec("0.60"))
     } else if model.starts_with("gpt-4o") {
         (dec("2.50"), dec("10.00"))
@@ -56,8 +62,23 @@ mod tests {
         assert_eq!(price_for("gpt-4o-mini"), (dec("0.15"), dec("0.60")));
         assert_eq!(price_for("gpt-4o-2024-08-06"), (dec("2.50"), dec("10.00")));
         assert_eq!(price_for("gpt-4o-mini-2024-07-18"), (dec("0.15"), dec("0.60")));
-        assert_eq!(price_for("deepseek-chat"), (dec("3.00"), dec("15.00"))); // default row
         assert_eq!(price_for("unknown-model"), (dec("3.00"), dec("15.00")));
+    }
+
+    #[test]
+    fn deepseek_chat_prices_at_v4_flash_rates() {
+        // Oracle: DeepSeek pricing page — v4-flash input (cache miss) $0.22 /
+        // output $0.66 off-peak per 1M; deepseek-chat resolves to v4-flash.
+        assert_eq!(price_for("deepseek-chat"), (dec("0.22"), dec("0.66")));
+        assert_eq!(price_for("deepseek-v4-flash"), (dec("0.22"), dec("0.66")));
+        assert_eq!(price_for("deepseek-v4-flash-vision-exp"), (dec("0.22"), dec("0.66")));
+        assert_eq!(price_for("deepseek-v4-pro"), (dec("0.66"), dec("1.98")));
+    }
+
+    #[test]
+    fn deepseek_reasoner_still_uses_the_default_row() {
+        // Not listed on the pricing page yet — unchanged default behavior (AC5).
+        assert_eq!(price_for("deepseek-reasoner"), (dec("3.00"), dec("15.00")));
     }
 
     #[test]
@@ -65,9 +86,12 @@ mod tests {
         // gpt-4o, 100 prompt + 50 completion tokens:
         // (100/1M)*2.50 + (50/1M)*10.00 = 0.00025 + 0.00050 = 0.000750
         assert_eq!(calculate_cost("gpt-4o", 100, 50), dec("0.000750"));
-        // default row, 1,000,000 prompt tokens -> exactly $3.00
-        assert_eq!(calculate_cost("deepseek-chat", 1_000_000, 0), dec("3.00"));
-        assert_eq!(calculate_cost("deepseek-chat", 0, 100_000), dec("1.50"));
+        // deepseek-chat at real rates: 1M prompt -> $0.22, 100k output -> $0.066
+        assert_eq!(calculate_cost("deepseek-chat", 1_000_000, 0), dec("0.22"));
+        assert_eq!(calculate_cost("deepseek-chat", 0, 100_000), dec("0.066"));
+        assert_eq!(calculate_cost("deepseek-v4-pro", 1_000_000, 1_000_000), dec("2.64"));
+        // unknown model -> default row
+        assert_eq!(calculate_cost("deepseek-reasoner", 1_000_000, 0), dec("3.00"));
         // zero tokens cost nothing
         assert_eq!(calculate_cost("gpt-4o", 0, 0), dec("0.000000"));
     }
