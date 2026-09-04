@@ -34,14 +34,16 @@ impl Window {
 }
 
 fn unauthorized() -> Response {
-    let body = json!({"error": {"message": "missing or invalid Authorization header", "type": "invalid_api_key"}});
-    (StatusCode::UNAUTHORIZED, Json(body)).into_response()
+    crate::json_error(
+        StatusCode::UNAUTHORIZED,
+        "invalid_api_key",
+        "missing or invalid Authorization header",
+    )
 }
 
 fn internal(message: &str) -> Response {
     tracing::error!("dashboard query failed: {message}");
-    let body = json!({"error": {"message": message, "type": "dashboard_error"}});
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+    crate::json_error(StatusCode::INTERNAL_SERVER_ERROR, "dashboard_error", message)
 }
 
 fn json_ok(value: Value) -> Response {

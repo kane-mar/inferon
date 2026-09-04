@@ -50,37 +50,33 @@ fn dec(s: &str) -> Decimal {
 mod tests {
     use super::*;
 
-    fn d(s: &str) -> Decimal {
-        Decimal::from_str(s).unwrap()
-    }
-
     #[test]
     fn prices_match_the_spec_table() {
-        assert_eq!(price_for("gpt-4o"), (d("2.50"), d("10.00")));
-        assert_eq!(price_for("gpt-4o-mini"), (d("0.15"), d("0.60")));
-        assert_eq!(price_for("gpt-4o-2024-08-06"), (d("2.50"), d("10.00")));
-        assert_eq!(price_for("gpt-4o-mini-2024-07-18"), (d("0.15"), d("0.60")));
-        assert_eq!(price_for("deepseek-chat"), (d("3.00"), d("15.00"))); // default row
-        assert_eq!(price_for("unknown-model"), (d("3.00"), d("15.00")));
+        assert_eq!(price_for("gpt-4o"), (dec("2.50"), dec("10.00")));
+        assert_eq!(price_for("gpt-4o-mini"), (dec("0.15"), dec("0.60")));
+        assert_eq!(price_for("gpt-4o-2024-08-06"), (dec("2.50"), dec("10.00")));
+        assert_eq!(price_for("gpt-4o-mini-2024-07-18"), (dec("0.15"), dec("0.60")));
+        assert_eq!(price_for("deepseek-chat"), (dec("3.00"), dec("15.00"))); // default row
+        assert_eq!(price_for("unknown-model"), (dec("3.00"), dec("15.00")));
     }
 
     #[test]
     fn cost_is_exact_decimal_math() {
         // gpt-4o, 100 prompt + 50 completion tokens:
         // (100/1M)*2.50 + (50/1M)*10.00 = 0.00025 + 0.00050 = 0.000750
-        assert_eq!(calculate_cost("gpt-4o", 100, 50), d("0.000750"));
+        assert_eq!(calculate_cost("gpt-4o", 100, 50), dec("0.000750"));
         // default row, 1,000,000 prompt tokens -> exactly $3.00
-        assert_eq!(calculate_cost("deepseek-chat", 1_000_000, 0), d("3.00"));
-        assert_eq!(calculate_cost("deepseek-chat", 0, 100_000), d("1.50"));
+        assert_eq!(calculate_cost("deepseek-chat", 1_000_000, 0), dec("3.00"));
+        assert_eq!(calculate_cost("deepseek-chat", 0, 100_000), dec("1.50"));
         // zero tokens cost nothing
-        assert_eq!(calculate_cost("gpt-4o", 0, 0), d("0.000000"));
+        assert_eq!(calculate_cost("gpt-4o", 0, 0), dec("0.000000"));
     }
 
     #[test]
     fn mini_savings_delta_matches_table() {
         // 1000 prompt + 500 completion tokens on gpt-4o: cost difference vs
         // mini = 1000*2.35/1M + 500*9.40/1M = 0.00235 + 0.00470 = 0.007050
-        assert_eq!(savings_if_mini(1000, 500), d("0.007050"));
-        assert_eq!(savings_if_mini(0, 0), d("0"));
+        assert_eq!(savings_if_mini(1000, 500), dec("0.007050"));
+        assert_eq!(savings_if_mini(0, 0), dec("0"));
     }
 }

@@ -93,11 +93,6 @@ impl TenantStore for PostgresTenantStore {
     }
 }
 
-/// Response extension carrying the resolved tenant id — the hook ITEM-005
-/// telemetry reads when writing traces.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TenantId(pub Uuid);
-
 /// One completed request, queued for the batch telemetry worker (ITEM-005).
 /// The worker fills `waste_detected` and `upstream_cost_usd` (ITEM-006) before
 /// handing the message to the sink.
@@ -255,7 +250,8 @@ fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
 }
 
 /// Token accounting parsed from an upstream response (usage object).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `Default` = no usage reached us (transport error / provider sent none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Usage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
@@ -311,24 +307,10 @@ fn usage_from_json(response_json: &Option<Value>) -> Usage {
             completion_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32,
             cached_tokens: json["usage"]["prompt_tokens_details"]["cached_tokens"].as_i64(),
         },
-        None => Usage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            cached_tokens: None,
-        },
+        None => Usage::default(),
     }
 }
 
-/// Empty usage — used when no usage information reached us (transport error).
-fn usage_zero() -> Usage {
-    Usage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        cached_tokens: None,
-    }
-}
-
-#[derive(Clone)]
 pub struct AppState {
     pub http_client: Client,
     pub upstream_url: String,
@@ -360,8 +342,7 @@ async fn healthz() -> &'static str {
 /// master key, then forwards: streaming requests pipe upstream bytes through
 /// unchanged (zero-copy) as text/event-stream; non-streaming requests pass the
 /// JSON body through with usage intact. Transport errors become 502; upstream
-/// HTTP error statuses are forwarded as-is. Every response after auth carries
-/// the tenant id in its extensions for telemetry (ITEM-005).
+/// HTTP error statuses are forwarded as-is.
 async fn proxy_chat_completions(
     State(state): State<Arc<AppState>>,
     req: Request,
@@ -389,26 +370,20 @@ async fn proxy_chat_completions(
     let body_bytes = match axum::body::to_bytes(req.into_body(), MAX_REQUEST_BYTES).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            return attach_tenant(
-                json_error(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    "payload_too_large",
-                    "request body exceeds 10MB",
-                ),
-                tenant_id,
+            return json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "request body exceeds 10MB",
             )
         }
     };
     let payload: Value = match serde_json::from_slice(&body_bytes) {
         Ok(payload) => payload,
         Err(_) => {
-            return attach_tenant(
-                json_error(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_json",
-                    "request body must be valid JSON",
-                ),
-                tenant_id,
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_json",
+                "request body must be valid JSON",
             )
         }
     };
@@ -420,13 +395,10 @@ async fn proxy_chat_completions(
         raw_prompt: payload,
     };
     let Some(upstream_key) = tenant.upstream_openai_key.as_deref() else {
-        return attach_tenant(
-            json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "tenant_misconfigured",
-                "tenant has no upstream key configured",
-            ),
-            tenant_id,
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "tenant_misconfigured",
+            "tenant has no upstream key configured",
         );
     };
 
@@ -443,63 +415,76 @@ async fn proxy_chat_completions(
         Err(e) => {
             tracing::error!("upstream request failed: {e}");
             let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 502, total_ms, usage_zero(), None, None);
+            let msg = build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None);
             send_trace(&state.telemetry_tx, msg);
-            return attach_tenant(upstream_error_response(), tenant_id);
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                "upstream request failed",
+            );
         }
     };
 
     let status = upstream.status();
     if !status.is_success() {
-        // Forward the upstream error as-is; still trace it (status_code column).
-        let content_type = upstream.headers().get(CONTENT_TYPE).cloned();
-        return match upstream.bytes().await {
-            Ok(bytes) => {
-                let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
-                let usage = usage_from_json(&response_json);
-                let total_ms = started.elapsed().as_millis() as i64;
-                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, usage, None, response_json);
-                send_trace(&state.telemetry_tx, msg);
-                let mut response = Response::new(Body::from(bytes));
-                *response.status_mut() = status;
-                if let Some(content_type) = content_type {
-                    response.headers_mut().insert(CONTENT_TYPE, content_type);
-                }
-                attach_tenant(response, tenant_id)
-            }
-            Err(e) => {
-                tracing::error!("upstream body read failed: {e}");
-                attach_tenant(upstream_error_response(), tenant_id)
-            }
-        };
+        // Forward the upstream error as-is (keep its content-type); still trace.
+        return forward_buffered(&state, &meta, tenant_id, started, upstream, None).await;
     }
     if is_stream {
-        attach_tenant(
-            stream_response(upstream, started, meta, tenant_id, status.as_u16(), state.telemetry_tx.clone()),
+        stream_response(
+            upstream,
+            started,
+            meta,
             tenant_id,
+            status.as_u16(),
+            state.telemetry_tx.clone(),
         )
     } else {
-        // Non-streaming: buffer the full body, trace, then forward as JSON.
-        match upstream.bytes().await {
-            Ok(bytes) => {
-                let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
-                let usage = usage_from_json(&response_json);
-                let total_ms = started.elapsed().as_millis() as i64;
-                let msg = build_trace(&meta, tenant_id, status.as_u16(), total_ms, usage, Some(total_ms), response_json);
-                send_trace(&state.telemetry_tx, msg);
-                let mut response = Response::new(Body::from(bytes));
-                *response.status_mut() = status;
-                response
-                    .headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                attach_tenant(response, tenant_id)
-            }
-            Err(e) => {
-                tracing::error!("upstream body read failed: {e}");
-                attach_tenant(upstream_error_response(), tenant_id)
-            }
-        }
+        let json_content_type = Some(HeaderValue::from_static("application/json"));
+        forward_buffered(&state, &meta, tenant_id, started, upstream, json_content_type).await
     }
+}
+
+/// Buffer an upstream body, trace the completed request, and build the
+/// forwarded response. `content_type` overrides the forwarded content-type
+/// when present; otherwise the upstream's own header is preserved (upstream
+/// error bodies are forwarded as-is). Shared by the non-2xx and the 2xx
+/// non-streaming paths.
+async fn forward_buffered(
+    state: &AppState,
+    meta: &RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    upstream: reqwest::Response,
+    content_type: Option<HeaderValue>,
+) -> Response {
+    let status = upstream.status();
+    let upstream_content_type = upstream.headers().get(CONTENT_TYPE).cloned();
+    let bytes = match upstream.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("upstream body read failed: {e}");
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                "upstream request failed",
+            );
+        }
+    };
+    let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
+    let usage = usage_from_json(&response_json);
+    let total_ms = started.elapsed().as_millis() as i64;
+    // Non-streaming ttft mirrors total duration; error responses have no ttft.
+    let ttft_ms = status.is_success().then_some(total_ms);
+    let msg = build_trace(meta, tenant_id, status.as_u16(), total_ms, usage, ttft_ms, response_json);
+    send_trace(&state.telemetry_tx, msg);
+
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = status;
+    if let Some(content_type) = content_type.or(upstream_content_type) {
+        response.headers_mut().insert(CONTENT_TYPE, content_type);
+    }
+    response
 }
 
 /// Request-derived fields shared by every trace of this request.
@@ -581,27 +566,10 @@ fn tenant_hash(key: &str) -> String {
 }
 
 /// OpenAI-style JSON error response.
-fn json_error(status: StatusCode, err_type: &str, message: &str) -> Response {
+pub(crate) fn json_error(status: StatusCode, err_type: &str, message: &str) -> Response {
     let body = serde_json::json!({"error": {"message": message, "type": err_type}}).to_string();
     let mut response = Response::new(Body::from(body));
     *response.status_mut() = status;
-    response
-        .headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    response
-}
-
-/// Stamp a response with the tenant id for the telemetry layer (ITEM-005).
-fn attach_tenant(mut response: Response, tenant_id: Uuid) -> Response {
-    response.extensions_mut().insert(TenantId(tenant_id));
-    response
-}
-
-/// OpenAI-style error body for upstream transport failures (AC5: 502 with body).
-fn upstream_error_response() -> Response {
-    let body = r#"{"error":{"message":"upstream request failed","type":"upstream_error"}}"#;
-    let mut response = Response::new(Body::from(body));
-    *response.status_mut() = StatusCode::BAD_GATEWAY;
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -662,7 +630,7 @@ fn stream_with_trace(
             }
         }
         let total_duration_ms = started.elapsed().as_millis() as i64;
-        let usage = usage_from_sse_bytes(&accumulated).unwrap_or_else(usage_zero);
+        let usage = usage_from_sse_bytes(&accumulated).unwrap_or_default();
         let msg = build_trace(&meta, tenant_id, status, total_duration_ms, usage, ttft_ms, None);
         send_trace(&tx, msg);
     }
@@ -995,7 +963,6 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
-        assert!(response.extensions().get::<TenantId>().is_none());
     }
 
     #[tokio::test]
@@ -1031,31 +998,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tenant_id_is_attached_to_success_response() {
-        let response = chat_request(
-            r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
-            Some(CLIENT_KEY),
-        )
-        .await;
-
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let tenant_id = response.extensions().get::<TenantId>().copied();
-        assert_eq!(
-            tenant_id,
-            Some(TenantId(uuid::Uuid::parse_str(TENANT_ID).unwrap()))
-        );
-    }
-
-    #[tokio::test]
-    async fn non_json_body_returns_400_with_tenant_attached() {
+    async fn non_json_body_returns_400() {
         let response = chat_request("this is not json", Some(CLIENT_KEY)).await;
 
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-        let tenant_id = response.extensions().get::<TenantId>().copied();
-        assert_eq!(
-            tenant_id,
-            Some(TenantId(uuid::Uuid::parse_str(TENANT_ID).unwrap()))
-        );
     }
 
     #[tokio::test]
