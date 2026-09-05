@@ -104,11 +104,26 @@ the first always-on spend; `teardown` stops billing). It runs the stack with
 ./scripts/deploy-durable.sh teardown  # destroy the host
 ```
 
-The `api.inferon.dev` A record is pre-staged in Vultr DNS; HTTPS goes live once
-the registrar points `inferon.dev` nameservers at Vultr (ns1/ns2.vultr.com).
+The `inferon.dev` zone lives in Vultr DNS with `A api -> <host ip>`; HTTPS goes live
+once the registrar points `inferon.dev` nameservers at Vultr (ns1/ns2.vultr.com) —
+until then `api.inferon.dev` resolves to sav.com's parking page and Caddy cannot
+obtain a certificate (it retries hourly; a `redeploy` forces an immediate attempt).
 Operator dashboard: `https://api.inferon.dev/v1/dashboard/api/operator/*` with
-the saved `OPERATOR_API_KEY`. Backups: a Vultr snapshot of the host captures the
-pgdata/redisdata volumes.
+the saved `OPERATOR_API_KEY`.
+
+Backups: a Vultr snapshot captures the pgdata/redisdata volumes (crash-consistent;
+Postgres replays WAL on restore). Take one before risky changes:
+
+```bash
+curl -fsS -X POST https://api.vultr.com/v2/snapshots \
+  -H "Authorization: Bearer $VULTR_API_KEY" -H "Content-Type: application/json" \
+  -d '{"instance_id":"<host id from deploy-durable.sh state>","description":"inferon-durable-$(date +%Y%m%d)"}'
+```
+
+Restore: deploy a new instance from the snapshot (Vultr console) — the data
+volumes come back intact and the stack auto-starts (`restart: unless-stopped`).
+The restored instance gets a **new IP**: update the `api` A record in Vultr DNS
+and `~/.cache/inferon-durable/state` before pointing anything at it.
 
 ## Development
 
