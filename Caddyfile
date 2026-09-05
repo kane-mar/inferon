@@ -1,4 +1,5 @@
 # TLS ingress for the durable deployment (compose profile "prod").
-api.inferon.dev {
+# The site address comes from the INFERON_HOST env (set by deploy-durable.sh).
+{$SITE_ADDRESS} {
     reverse_proxy proxy:8080
 }

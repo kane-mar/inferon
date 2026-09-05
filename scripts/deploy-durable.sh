@@ -11,6 +11,7 @@
 #
 # Env: VULTR_API_KEY, VULTR_REGION, VULTR_PLAN, VULTR_SSH_KEY_ID,
 #      OPERATOR_API_KEY (optional; generated + saved if unset),
+#      INFERON_HOST (public TLS hostname; saved after first deploy),
 #      INFERON_DURABLE_STATE (default ~/.cache/inferon-durable)
 
 set -euo pipefail
@@ -78,9 +79,21 @@ wait_ssh() {
     return 1
 }
 
+# Which hostname serves the public TLS endpoint. INFERON_HOST env wins;
+# otherwise the value persisted at the first deploy. Always persisted so
+# later redeploys/status reuse it without the env var.
+resolve_hostname() {
+    if [ -z "${INFERON_HOST:-}" ] && [ -f "$STATE_DIR/hostname" ]; then
+        INFERON_HOST=$(cat "$STATE_DIR/hostname")
+    fi
+    [ -n "${INFERON_HOST:-}" ] || { echo "INFERON_HOST is required (the public hostname, e.g. INFERON_HOST=api.example.sh)" >&2; exit 1; }
+    printf '%s\n' "$INFERON_HOST" > "$STATE_DIR/hostname"
+}
+
 deploy() {
     local ip id
     read -r id ip < "$STATE"
+    resolve_hostname
     echo "waiting for ssh on $ip..."
     wait_ssh "$ip"
     echo "bootstrapping docker on $ip..."
@@ -102,18 +115,19 @@ deploy() {
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
     rm -f "$bundle"
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh && OPERATOR_API_KEY='$OPERATOR_API_KEY' docker compose --profile prod up -d --build"
+        "mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' docker compose --profile prod up -d --build"
     if [ ! -f "$OP_FILE" ]; then
         echo "OPERATOR_API_KEY (saved to $OP_FILE): $OPERATOR_API_KEY"
     fi
     echo "deployed. stack: docker compose ps (host $ip)"
-    echo "public endpoint will serve HTTPS once DNS points api.inferon.dev at $ip (ITEM-014a)"
+    echo "public endpoint: https://$INFERON_HOST (point an A record at $ip to go live)"
 }
 
 redeploy() {
     [ -f "$STATE" ] || { echo "no durable host state — run: $0 up" >&2; exit 1; }
     local ip id
     read -r id ip < "$STATE"
+    resolve_hostname
     wait_ssh "$ip"
     local bundle
     bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
@@ -121,7 +135,7 @@ redeploy() {
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
     rm -f "$bundle"
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "cd /opt/inferon && tar xzf /tmp/durable.tgz && chmod -R a+rX /opt/inferon && OPERATOR_API_KEY='$(cat "$OP_FILE" 2>/dev/null || echo "${OPERATOR_API_KEY:-}")' docker compose --profile prod up -d --build"
+        "cd /opt/inferon && tar xzf /tmp/durable.tgz && chmod -R a+rX /opt/inferon && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$(cat "$OP_FILE" 2>/dev/null || echo "${OPERATOR_API_KEY:-}")' docker compose --profile prod up -d --build"
     echo "redeployed"
 }
 
