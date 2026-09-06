@@ -1,5 +1,35 @@
 # Refinement Log
 
+## 2026-09-06 (late) — OmniRouting pull reviewed; ITEM-028..030 staged with evidence
+
+Engineering review after the ITEM-023..027 guard chain archived (all ACs,
+smoke passed live on the durable host). ITEM-028 reached the top of the
+pullable region and was pulled — the pull surfaced hard blockers, so 028..030
+were returned to the backlog as **staged** (in-list, not pullable) with
+measured evidence recorded in-item:
+
+- **ort does not build on the dev toolchain**: ort 2.x (only non-yanked
+  crates.io line) has no `x86_64-apple-darwin` ONNX Runtime prebuilt (build
+  fails); ort 1.x is mass-yanked (v1.16.3 builds only as a git-tag dep).
+  Every slice so far relied on the local cargo test loop — a Linux-only ort
+  dependency breaks the TDD loop (host builds are ~30 min on the 1 vCPU host).
+- **AC2 (<3 ms) not met by any real artifact, measured**: TaylorAI/bge-micro-v2
+  quantized int8 (17 MB — the authentic micro-class model) = **7.4 ms** mean
+  per (1,128) embed on this machine (Level3 opt, 4 intra threads);
+  all-MiniLM-L6-v2 int8 (23 MB) = 13 ms. A sub-3 ms micro embedder is itself
+  a distillation product — i.e. the parked Slice 3.
+- **029 needs real task traffic**: today's corpus has no real task clusters;
+  centroid building (AC1) and the AC4 quality gate would be vacuous — the
+  refinement-log ordering question answers itself.
+- **030 consumes 029**: replacing the working ITEM-015/016 protection with an
+  epsilon schedule requires the 029 quality-gap signal to be valid.
+
+**Unpark triggers (PO to choose)**: (1) PO re-baselines the 028 latency AC
+and accepts a linux-gated build loop for ort code → pull 028 now; (2) Slice 3
+(distillation) unparked → its micro artifact rides the 031/032 gate; (3) a
+newer-CPU proxy tier measures the existing artifact <3 ms. Guard chain
+023..027 complete; pullable region otherwise empty.
+
 ## 2026-09-06 — ITEM-033 captured (PO backlog review)
 
 - **New item captured**: user accounts & logins (ITEM-033, feature, captured). Human-facing accounts + login — distinct from ITEM-004 (machine API-key auth, done) and ITEM-018 (out-of-band key minting). Placed at bottom of pullable region (large/unrefined). Open PO questions logged in-item: who logs in (external devs vs operators), account↔tenant model, self-serve vs invite signup, auth mechanism, and ranking vs the ITEM-018/019/020 cluster.

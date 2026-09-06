@@ -11,6 +11,7 @@
 4. Classification quality is gated against the ITEM-015 heuristic on the same corpus before this becomes a routing input
 
 **Technical Notes:**
+- Depends on ITEM-028 (currently staged by the 2026-09-06 engineering review) and on real task traffic: the refinement log's ordering question ('worth building before ITEM-018/020 bring real traffic and real task clusters?') is now answered by evidence — today's trace corpus holds no real task clusters, so centroid building (AC1) and the AC4 quality gate vs ITEM-015 would be vacuous. Staged with 028; unpark when a real-traffic corpus exists (ITEM-018 tenants active) AND ITEM-028 lands.
 - Parent: ITEM-022 (archived), slice 022b
 - Depends on ITEM-028 (the embedder); consumes the centroid shape built from ITEM-026's negative samples later
 - Ordering question (from parent, still open): is this worth building before ITEM-018/020 bring real traffic and real task clusters? If not, ITEM-029/030 may drop below 020's alerts when 018 lands
