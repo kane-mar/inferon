@@ -48,7 +48,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # TLS ingress for api.inferon.dev (ITEM-014c); enabled via --profile prod.
+  # TLS ingress for the public hostname (ITEM-014c); enabled via --profile prod.
   caddy:
     image: caddy:2-alpine
     profiles: ["prod"]

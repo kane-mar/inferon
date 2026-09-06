@@ -1,5 +1,12 @@
 # Refinement Log
 
+## 2026-09-05 — ITEM-014 archived; backlog empty
+
+- **Hostname decision**: live endpoint is `https://inferon.agilefederation.com/v1` — a subdomain of the existing company domain (one A record in DNSimple, no registrar delegation). The sav.com/delegation path for api.inferon.dev was abandoned (registrar action blocked); inferon.dev remains parked at sav.com. This supersedes the Vultr-DNS-zone + NS-delegation approach noted 2026-09-04 (whose Vultr-side zone also turned out never to have been created).
+- **ITEM-014 (durable deployment) archived — all ACs verified**: HTTPS live on the durable host (Let's Encrypt cert, public chat + tenant/operator dashboards exercised over the public URL, auth boundary 401/403 intact), restart test keeps real data (2 traces + rule-B counts), tenant minted via seed-tenant.sh with a live DeepSeek master key, first Vultr snapshot taken (4dca04b7), cost ~$5-6/mo acknowledged.
+- **Slice 1 + 2 backlog is now fully delivered and archived.**
+- **Backlog empty (Rule 5)** — replenish. Candidates per the roadmap (wiki/llm-inference/inferon-product-roadmap.md): Slice 3 automated LoRA distillation (large — needs breakdown when it reaches the top), Slice 4 self-healing schema guard, Slice 5 autonomous OmniRouting; plus live-product backlog items that surfaced: real developer onboarding (first external tenant), dashboard polish, anomaly alerts.
+
 ## 2026-09-04 — Slice 1 complete; backlog replenished
 
 - **Archived**: ITEM-001..007 (Slice 1: docker scaffold, schema, zero-copy proxy, tenant auth, telemetry, cost linter, dashboard) — all ACs verified live on disposable Vultr hosts; 45 tests green.

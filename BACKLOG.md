@@ -2,7 +2,7 @@
 
 ## Product Goal
 
-Get Inferon in front of real developers at `https://api.inferon.dev/v1` and make cost protection automatic: a durable, trustworthy deployment with **true** cost numbers, then Slice 2's automatic cost routing and budget enforcement.
+Get Inferon in front of real developers at `https://inferon.agilefederation.com/v1` and make cost protection automatic: a durable, trustworthy deployment with **true** cost numbers, then Slice 2's automatic cost routing and budget enforcement.
 
 Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007) is complete and archived.
 
@@ -19,8 +19,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-011 | Runbook: seed tenants, dashboard URL, ops notes | improvement | **done — archived 2026-09-04** |
 | ITEM-012 | smoke.sh exercises chat + dashboard endpoints | improvement | **done — archived 2026-09-04** |
 | ITEM-013 | Operator view across tenants | feature | **done — archived 2026-09-04** |
-| ITEM-014 | Durable deployment of api.inferon.dev | improvement | **in progress** — 014b/c/d/f verified live; 014a Vultr zone re-created (was missing); registrar NS delegation + 014e public HTTPS pending (user action at sav.com) |
+| ITEM-014 | Durable deployment (live at inferon.agilefederation.com) | improvement | **done — archived 2026-09-05** |
 | ITEM-015 | Heuristic model router (Slice 2) | feature | **done — archived 2026-09-04** |
 | ITEM-016 | Postgres budget circuit breaker (Slice 2) | feature | **done — archived 2026-09-04** |
 
-_Last updated: 2026-09-05_ (ITEM-014 in progress: durable host verified live — restarts, real tenant + traces, snapshot taken; DNS zone re-created in Vultr; only registrar NS delegation blocks public HTTPS)
+_Last updated: 2026-09-05_ — all items archived; **backlog is empty (Rule 5 — needs replenishment)**. Product goal delivered: https://inferon.agilefederation.com/v1 live on the durable host behind HTTPS with real tenants.

@@ -90,7 +90,7 @@ no tenant can see another tenant's data):
 - `GET /v1/dashboard/api/by-prompt?days=7&limit=10`
 - `GET /v1/dashboard/api/waste?days=7`
 
-## Durable deployment (api.inferon.dev)
+## Durable deployment (inferon.agilefederation.com)
 
 `scripts/deploy-durable.sh` provisions and updates a permanent host (~$5-6/mo —
 the first always-on spend; `teardown` stops billing). It runs the stack with
@@ -98,18 +98,20 @@ the first always-on spend; `teardown` stops billing). It runs the stack with
 (compose profile `prod`) on a Vultr firewall allowing only 22/80/443.
 
 ```bash
-./scripts/deploy-durable.sh up        # provision + deploy (prints OPERATOR_API_KEY once)
-./scripts/deploy-durable.sh redeploy  # rebuild + update the stack
+INFERON_HOST=inferon.agilefederation.com ./scripts/deploy-durable.sh up  # provision + deploy
+./scripts/deploy-durable.sh redeploy  # rebuild + update the stack (reuses the saved INFERON_HOST)
 ./scripts/deploy-durable.sh status    # containers + healthz probe
 ./scripts/deploy-durable.sh teardown  # destroy the host
 ```
 
-The `inferon.dev` zone lives in Vultr DNS with `A api -> <host ip>`; HTTPS goes live
-once the registrar points `inferon.dev` nameservers at Vultr (ns1/ns2.vultr.com) —
-until then `api.inferon.dev` resolves to sav.com's parking page and Caddy cannot
-obtain a certificate (it retries hourly; a `redeploy` forces an immediate attempt).
-Operator dashboard: `https://api.inferon.dev/v1/dashboard/api/operator/*` with
-the saved `OPERATOR_API_KEY`.
+The public hostname is `INFERON_HOST`, saved to `~/.cache/inferon-durable/hostname`
+on first deploy; change it + `redeploy` to move the endpoint (the durable host
+currently serves inferon.agilefederation.com). It resolves via a plain A record in
+the parent zone's DNS (DNSimple for agilefederation.com) — no registrar delegation
+involved. Caddy obtains a Let's Encrypt cert automatically once the A record points
+at the host and ports 80/443 are open.
+Operator dashboard: `https://inferon.agilefederation.com/v1/dashboard/api/operator/*`
+with the saved `OPERATOR_API_KEY`.
 
 Backups: a Vultr snapshot captures the pgdata/redisdata volumes (crash-consistent;
 Postgres replays WAL on restore). Take one before risky changes:
@@ -122,8 +124,9 @@ curl -fsS -X POST https://api.vultr.com/v2/snapshots \
 
 Restore: deploy a new instance from the snapshot (Vultr console) — the data
 volumes come back intact and the stack auto-starts (`restart: unless-stopped`).
-The restored instance gets a **new IP**: update the `api` A record in Vultr DNS
-and `~/.cache/inferon-durable/state` before pointing anything at it.
+The restored instance gets a **new IP**: update the `inferon` A record in the
+parent zone's DNS (DNSimple for agilefederation.com) and
+`~/.cache/inferon-durable/state` before pointing anything at it.
 
 ## Development
 

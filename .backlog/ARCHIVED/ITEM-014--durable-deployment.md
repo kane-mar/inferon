@@ -1,5 +1,12 @@
 ## ITEM-014: Durable Deployment of api.inferon.dev
 
+> **ARCHIVED 2026-09-05 — all ACs met.** Hostname decision: the live endpoint is
+> `https://inferon.agilefederation.com/v1` (subdomain of the existing company domain,
+> one DNSimple A record — no registrar delegation; the inferon.dev domain stays parked
+> at sav.com unused). AC1 ✅ HTTPS live (LE cert, verified public chat + dashboards);
+> AC2 ✅ restart test + snapshot `4dca04b7`; AC3 ✅ `deploy-durable.sh`; AC4 ✅ tenant
+> minted via seed-tenant.sh with live DeepSeek key; AC5 ✅ ~$5-6/mo acknowledged.
+
 **As a** product owner
 **I want** the proxy reachable at `https://api.inferon.dev/v1` on a permanent host
 **So that** developers can paste the baseURL and get the Slice 1 experience for real
