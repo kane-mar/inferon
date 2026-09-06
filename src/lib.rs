@@ -1,5 +1,6 @@
 pub mod alerts;
 pub mod budget;
+pub mod guard;
 pub mod cost;
 pub mod dashboard;
 pub mod linter;
@@ -525,14 +526,28 @@ async fn proxy_chat_completions(
         return forward_buffered(&state, &meta, tenant_id, started, upstream, None).await;
     }
     if is_stream {
-        stream_response(
-            upstream,
-            started,
-            meta,
-            tenant_id,
-            status.as_u16(),
-            state.telemetry_tx.clone(),
-        )
+        // ITEM-023 (guard): requests with a JSON-schema contract served by a
+        // cheap tier are buffered end-to-end and validated before anything
+        // reaches the client. Anything else keeps the zero-copy passthrough.
+        if guard::is_guarded_request(&meta.raw_prompt, &meta.model) {
+            guarded_stream_response(
+                meta,
+                tenant_id,
+                started,
+                upstream,
+                state.telemetry_tx.clone(),
+            )
+            .await
+        } else {
+            stream_response(
+                upstream,
+                started,
+                meta,
+                tenant_id,
+                status.as_u16(),
+                state.telemetry_tx.clone(),
+            )
+        }
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));
         forward_buffered(&state, &meta, tenant_id, started, upstream, json_content_type).await
@@ -692,6 +707,122 @@ fn stream_response(
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
     response
+}
+
+/// Guarded buffered response (ITEM-023). For requests with a JSON-schema
+/// contract served by a cheap tier the whole upstream body is buffered and
+/// only released to the client after `[DONE]` + successful validation. A
+/// client abort during the buffered phase still emits the truncated trace
+/// (ITEM-009 semantics — Drop hook on `BufferedGuard`).
+///
+/// ITEM-025 replaces the rejection branch with a transparent replay to the
+/// tenant's frontier model; until then a guard failure answers a clean 502.
+async fn guarded_stream_response(
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    upstream: reqwest::Response,
+    tx: mpsc::Sender<TraceMessage>,
+) -> Response {
+    let guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
+    let bytes = match upstream.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("guarded upstream body read failed: {e}");
+            guard_emit.emit(Usage::default(), true);
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                "guarded upstream request failed",
+            );
+        }
+    };
+
+    // Flush gate: container integrity now; schema conformance lands in 024.
+    let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
+    match guard::check_guarded_sse(&bytes, schema.as_ref()) {
+        Ok(()) => {
+            let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+            // ttft is when the client actually sees the first byte: after the
+            // buffered flush (Slice 4 latency target measures this, ITEM-027).
+            guard_emit.emit(usage, false);
+            let mut response = Response::new(Body::from(bytes));
+            *response.status_mut() = StatusCode::OK;
+            response
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+            response
+        }
+        Err(reason) => {
+            tracing::warn!(
+                "guard rejected a cheap-tier response: {} (reason {})",
+                tenant_id,
+                reason.label()
+            );
+            guard_emit.emit(Usage::default(), false);
+            json_error(
+                StatusCode::BAD_GATEWAY,
+                "guard_rejected",
+                "cheap-tier response failed schema validation",
+            )
+        }
+    }
+}
+
+/// Drop-guarded trace emitter for the buffered (non-streamed-to-client)
+/// phase: if the client disconnects while the upstream body is still being
+/// buffered the handler future is dropped, and only this guard's Drop runs —
+/// emitting a truncated trace (ITEM-009 semantics preserved for the guard).
+struct BufferedGuard {
+    tx: mpsc::Sender<TraceMessage>,
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    emitted: Cell<bool>,
+}
+
+impl BufferedGuard {
+    fn new(
+        tx: mpsc::Sender<TraceMessage>,
+        meta: RequestMeta,
+        tenant_id: Uuid,
+        started: Instant,
+    ) -> Self {
+        Self {
+            tx,
+            meta,
+            tenant_id,
+            started,
+            emitted: Cell::new(false),
+        }
+    }
+
+    fn emit(&self, usage: Usage, truncated: bool) {
+        if self.emitted.replace(true) {
+            return;
+        }
+        let total_ms = self.started.elapsed().as_millis() as i64;
+        let msg = build_trace(
+            &self.meta,
+            self.tenant_id,
+            200,
+            total_ms,
+            usage,
+            None,
+            None,
+            truncated,
+        );
+        send_trace(&self.tx, msg);
+    }
+}
+
+impl Drop for BufferedGuard {
+    fn drop(&mut self) {
+        if !self.emitted.get() {
+            tracing::debug!("guarded request dropped before flush; recording truncated trace");
+            self.emit(Usage::default(), true);
+        }
+    }
 }
 
 /// One-shot trace emitter for the streaming path. Sends the trace exactly
@@ -926,6 +1057,50 @@ mod tests {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
                                 .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
+                        Some("gpt-4o-mini") if {
+                            // Cheap tier + schema contract: the guard only
+                            // engages when the mock sends a truncated stream
+                            // (content marker "truncated") — valid streams hit
+                            // the generic SSE arm below.
+                            payload["messages"][0]["content"].as_str() == Some("truncated")
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(
+                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
+                                ))
+                                .unwrap()
+                        }
+                        Some("gpt-4o-mini") if {
+                            // Slow guarded stream: first frame, 300ms gap, then
+                            // [DONE] — lets a test abort mid-buffer.
+                            payload["messages"][0]["content"].as_str() == Some("guarded-slow")
+                        } => {
+                            let body = async_stream::stream! {
+                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                                ));
+                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                                yield Ok(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                                ));
+                            };
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
+                        Some("nodone") => {
+                            // Valid JSON frames but no [DONE] — used to prove
+                            // unguarded traffic pipes a truncated body through
+                            // unchanged (guard never engages without a schema).
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(
+                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
+                                ))
                                 .unwrap()
                         }
                         _ if payload["stream"].as_bool().unwrap_or(false) => {
@@ -1864,5 +2039,141 @@ mod tests {
             wait_until(counters.clone(), |c| c.cache_miss_flags >= 1).await,
             "second occurrence of a large uncached system prompt must be flagged"
         );
+    }
+
+    // --- ITEM-023: schema guard buffered validation seam ---
+
+    /// A streamed request carrying a JSON-schema contract and a cheap-tier
+    /// model (gpt-4o-mini) — the guard's trigger condition.
+    fn guarded_stream_body(model: &str, marker: &str) -> String {
+        serde_json::json!({
+            "model": model,
+            "stream": true,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {"type": "object", "properties": {"answer": {"type": "string"}}}
+                }
+            },
+            "messages": [{"role": "user", "content": marker}]
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn guarded_valid_stream_buffers_then_flushes_after_done() {
+        // gpt-4o-mini + schema contract + stream -> guarded path. The mock's
+        // generic streaming route returns a well-formed SSE body; the client
+        // must receive it whole (buffered, then flushed after [DONE]).
+        let (response, mut rx) = traced_request(&guarded_stream_body("gpt-4o-mini", "hi"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/event-stream"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(body.as_ref(), SSE_BODY.as_bytes(), "buffered body flushed whole");
+        let msg = rx.recv().await.expect("trace emitted");
+        assert_eq!(msg.status_code, 200);
+        assert!(!msg.truncated, "clean guarded flush is not truncated");
+    }
+
+    #[tokio::test]
+    async fn guarded_stream_without_done_is_rejected_not_forwarded() {
+        // Mock model "nodone" streams valid frames but no [DONE] — the
+        // container gate rejects it, so the client gets a clean 502 instead of
+        // a truncated cheap-model body (ITEM-023 AC1: flush only after DONE +
+        // successful validation).
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("gpt-4o-mini", "truncated"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["type"], "guard_rejected");
+        let msg = rx.recv().await.expect("trace emitted");
+        assert_eq!(msg.status_code, 200); // the trace records the request's upstream status
+    }
+
+    #[tokio::test]
+    async fn unguarded_stream_stays_byte_for_byte_unchanged() {
+        // Same cheap model but NO schema contract: pure passthrough, even for
+        // a body the guard would reject (IT-023 AC2: unguarded = zero change).
+        let body = r#"{"model":"nodone","stream":true,"messages":[{"role":"user","content":"hi"}]}"#;
+        let (response, _rx) = traced_request(body, Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let out = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            text.contains("data: {") && !text.contains("[DONE]"),
+            "unguarded traffic pipes the truncated upstream body straight through"
+        );
+    }
+
+    #[tokio::test]
+    async fn frontier_model_with_schema_contract_is_not_guarded() {
+        // Same schema contract but a frontier model: not guarded, passthrough.
+        let (response, _rx) = traced_request(&guarded_stream_body("deepseek-v4-pro", "hi"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let out = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(out.as_ref(), SSE_BODY.as_bytes());
+    }
+
+    /// Drive a real guarded request through axum::serve and drop the socket
+    /// while the guard is still buffering the slow upstream (abort mid-buffer).
+    async fn serve_guarded_and_abort(model: &str) -> mpsc::Receiver<TraceMessage> {
+        let (tx, rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            db: sqlx::PgPool::connect_lazy(
+                "postgres://inferon:inferon@localhost:5432/inferon",
+            )
+            .unwrap(),
+        });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, build_router(state)).await.unwrap() });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let body = guarded_stream_body(model, "guarded-slow");
+        let request = format!(
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {CLIENT_KEY}\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+        socket.write_all(request.as_bytes()).await.unwrap();
+        // The guard buffers everything, so the client sees no body bytes yet —
+        // the abort happens while the handler still waits on the slow upstream
+        // (guarded-slow sleeps 300ms between frames). Drop mid-buffer.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        drop(socket); // abort
+        rx
+    }
+
+    #[tokio::test]
+    async fn client_abort_during_guarded_buffer_records_truncated_trace() {
+        let mut rx = serve_guarded_and_abort("gpt-4o-mini").await;
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("truncated trace should be emitted")
+            .expect("channel open");
+        assert!(msg.truncated, "abort while buffering must be flagged truncated");
+        // Exactly one trace — no duplicate from a later flush.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(rx.try_recv().is_err(), "no duplicate trace after abort");
     }
 }
