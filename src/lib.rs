@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod budget;
 pub mod guard;
 use guard::GuardReason;
+pub mod mock_upstream;
 pub mod cost;
 pub mod dashboard;
 pub mod linter;
@@ -537,7 +538,15 @@ async fn proxy_chat_completions(
         // ITEM-023 (guard): requests with a JSON-schema contract served by a
         // cheap tier are buffered end-to-end and validated before anything
         // reaches the client. Anything else keeps the zero-copy passthrough.
-        if guard::is_guarded_request(&meta.raw_prompt, &meta.model) {
+        // ITEM-027 AC1: the guard is ON by default; a tenant opts out via
+        // tenant_configurations.guard_enabled (fail-open on read errors).
+        let guarded = guard::is_guarded_request(&meta.raw_prompt, &meta.model)
+            && state
+                .budget_store
+                .guard_enabled_for(tenant_id)
+                .await
+                .unwrap_or(true);
+        if guarded {
             guarded_stream_response(
                 &state,
                 meta,
@@ -1406,12 +1415,27 @@ mod tests {
         body: &str,
         auth: Option<&str>,
     ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
+        traced_request_with_budget(
+            body,
+            auth,
+            std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+        )
+        .await
+    }
+
+    /// `traced_request` with a caller-supplied budget store — used to pin the
+    /// ITEM-027 guard opt-out (a tenant config with guard_enabled = false).
+    async fn traced_request_with_budget(
+        body: &str,
+        auth: Option<&str>,
+        budget_store: std::sync::Arc<dyn budget::BudgetStore>,
+    ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
         let (tx, rx) = mpsc::channel(64);
         let state = std::sync::Arc::new(AppState {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            budget_store,
             telemetry_tx: tx,
             operator_key: None,
             db: sqlx::PgPool::connect_lazy(
@@ -1623,6 +1647,7 @@ mod tests {
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            guard_enabled: true,
             },
         );
         let (state, mut rx) = with_trace_channel(&base);
@@ -1646,6 +1671,7 @@ mod tests {
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            guard_enabled: true,
             },
         );
         let response = build_router(state)
@@ -1668,6 +1694,7 @@ mod tests {
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
+            guard_enabled: true,
             },
         );
         let response = build_router(state)
@@ -2416,6 +2443,49 @@ mod tests {
         assert_eq!(ev["reason"], "upstream_failure", "the original guard reason");
         assert_eq!(ev["detail"], "http 500");
         assert!(rx.try_recv().is_err(), "still exactly one trace");
+    }
+
+    #[tokio::test]
+    async fn tenant_guard_opt_out_restores_byte_for_byte_passthrough() {
+        // 027 AC1: with tenant_configurations.guard_enabled = false the lying
+        // cheap stream pipes through unchanged (no buffering, no fallback) and
+        // no guard event is recorded — the opt-out is per tenant, everyone
+        // else keeps the default-on guard.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: false,
+            },
+        );
+        let store: std::sync::Arc<dyn budget::BudgetStore> =
+            std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets));
+        let (response, mut rx) = traced_request_with_budget(
+            &guarded_stream_body("gpt-4o-mini", "wrong-shape"),
+            Some(CLIENT_KEY),
+            store,
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let expected = delta_only_stream(r#"{"other":1}"#);
+        assert_eq!(
+            body.as_ref(),
+            expected.as_bytes(),
+            "opt-out tenant gets the raw cheap body, no fallback"
+        );
+        let msg = rx.recv().await.expect("trace emitted");
+        assert_eq!(msg.request_model, "gpt-4o-mini");
+        assert!(
+            msg.guard_event.is_none(),
+            "opt-out tenant records no guard event"
+        );
     }
 
     #[tokio::test]

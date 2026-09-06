@@ -30,6 +30,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(if ping_health(port).await { 0 } else { 1 });
     }
 
+    // ITEM-027 AC3 smoke harness: same binary, lying-upstream mock mode (no
+    // postgres, no telemetry worker — just the chat endpoint). Keeps the
+    // deployment unit a single image.
+    if std::env::args().nth(1).as_deref() == Some("--mock-upstream") {
+        inferon::mock_upstream::serve(port).await?;
+        return Ok(());
+    }
+
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
     let pool = PgPoolOptions::new()
         .max_connections(5)

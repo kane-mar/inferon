@@ -49,6 +49,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Lying-guarded-upstream mock for the smoke run (ITEM-027 AC3): answers
+  # schema-violating SSE to cheap-tier guarded requests and schema-valid SSE
+  # to the guard's frontier replay, 502 to everything else. Runs only under
+  # the smoke profile — never part of a prod deployment.
+  mock-upstream:
+    build: .
+    profiles: ["mock"]
+    restart: "no"
+    environment:
+      PORT: 8090
+      RUST_LOG: ${RUST_LOG:-info}
+    command: ["--mock-upstream"]
+
   # TLS ingress for the public hostname (ITEM-014c); enabled via --profile prod.
   caddy:
     image: caddy:2-alpine

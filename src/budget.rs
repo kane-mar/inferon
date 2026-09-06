@@ -15,11 +15,15 @@ use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 /// Config for one tenant (0 limit = unlimited; None model = no fallback).
+/// `guard_enabled` (ITEM-027 AC1) lives on the same `tenant_configurations`
+/// row the budget reads — the schema guard is on by default and a tenant can
+/// opt out here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TenantBudget {
     pub limit_cents: i64,
     pub spent_cents: i64,
     pub cheap_fallback_model: Option<String>,
+    pub guard_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +58,17 @@ pub trait BudgetStore: Send + Sync {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<TenantBudget>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// ITEM-027 AC1: whether the schema guard is active for this tenant.
+    /// Defaults to true — the guard is on unless the tenant's configuration
+    /// row opts out (`guard_enabled = false`); a config-read failure also
+    /// stays true (fail-open: never weaken the safety net on a DB hiccup).
+    async fn guard_enabled_for(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(true)
+    }
 }
 
 #[derive(Default)]
@@ -75,6 +90,13 @@ impl BudgetStore for InMemoryBudgetStore {
     ) -> Result<Option<TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.budgets.get(&tenant_id).cloned())
     }
+
+    async fn guard_enabled_for(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.budgets.get(&tenant_id).map_or(true, |b| b.guard_enabled))
+    }
 }
 
 pub struct PostgresBudgetStore {
@@ -93,18 +115,36 @@ impl BudgetStore for PostgresBudgetStore {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
-        let row: Option<(i64, i64, Option<String>)> = sqlx::query_as(
-            "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model
+        let row: Option<(i64, i64, Option<String>, bool)> = sqlx::query_as(
+            "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model,
+                    COALESCE(guard_enabled, TRUE)
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(limit_cents, spent_cents, cheap_fallback_model)| TenantBudget {
-            limit_cents,
-            spent_cents,
-            cheap_fallback_model,
+        Ok(row.map(|(limit_cents, spent_cents, cheap_fallback_model, guard_enabled)| {
+            TenantBudget {
+                limit_cents,
+                spent_cents,
+                cheap_fallback_model,
+                guard_enabled,
+            }
         }))
+    }
+
+    async fn guard_enabled_for(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let enabled: Option<bool> = sqlx::query_scalar(
+            "SELECT COALESCE(guard_enabled, TRUE) FROM tenant_configurations
+             WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(enabled.unwrap_or(true))
     }
 }
 
@@ -162,6 +202,7 @@ mod tests {
             limit_cents: limit,
             spent_cents: spent,
             cheap_fallback_model: cheap.map(str::to_string),
+            guard_enabled: true,
         }
     }
 
@@ -188,6 +229,26 @@ mod tests {
         );
         // in-zone but no cheap model configured -> Allow (no fallback possible)
         assert_eq!(enforce_budget(&budget(1000, 900, None)), BudgetVerdict::Allow);
+    }
+
+    #[tokio::test]
+    async fn guard_is_on_by_default_and_opt_out_is_honored() {
+        let tenant = uuid::Uuid::new_v4();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant,
+            TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: false,
+            },
+        );
+        let store = InMemoryBudgetStore::new(budgets);
+        // Unconfigured tenant (no row) -> guarded (default true).
+        assert!(store.guard_enabled_for(uuid::Uuid::new_v4()).await.unwrap());
+        // Configured opt-out -> false.
+        assert!(!store.guard_enabled_for(tenant).await.unwrap());
     }
 
     #[test]

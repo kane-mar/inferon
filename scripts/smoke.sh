@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Deployment seam smoke for the full proxy surface (ITEM-012). Runs on a host
-# with Docker. Brings the stack up, seeds a throwaway tenant, then asserts:
-#   healthz 200, chat 401 without a key, chat 502 with a valid key against an
-#   unreachable upstream (proves the auth boundary without external calls),
-#   dashboard summary/by-model/waste 200 with the key and 401 without.
-# Cleans up the throwaway tenant on exit.
+# with Docker. Brings the stack up — including the lying mock upstream under
+# the `mock` compose profile (ITEM-027) — seeds throwaway tenants, then asserts:
+#   healthz 200, chat 401 without a key, chat 502 with a valid key (mock
+#   answers 502 to unguarded traffic: auth boundary without external calls),
+#   a lying cheap upstream forces a transparent frontier fallback and the
+#   client still gets a valid 200 (ITEM-027 AC3), the per-tenant guard
+#   opt-out restores raw passthrough (ITEM-027 AC1),
+#   dashboard/operator views 200 with the right keys and 401/403 without.
+# Cleans up the throwaway tenants on exit.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,8 +17,11 @@ COMPOSE=(docker compose -f docker-compose.yml)
 PORT="${PORT:-8080}"
 BASE="http://127.0.0.1:$PORT"
 CONTAINER="inferon-postgres-1"
-# Unreachable upstream: authenticated requests must pass auth then fail fast.
-export UPSTREAM_URL="http://127.0.0.1:9/v1/chat/completions"
+# The lying mock upstream (ITEM-027 AC3): schema-violating SSE for the cheap
+# tier, schema-valid SSE for the guard's frontier replay, 502 for everything
+# else. Profile-gated so prod deploys never run it.
+export COMPOSE_PROFILES="mock"
+export UPSTREAM_URL="http://mock-upstream:8090/v1/chat/completions"
 # Operator credential (ITEM-013/020): enables the platform-wide operator views.
 # Generated here so the smoke run exercises the operator surface end-to-end.
 export OPERATOR_API_KEY="sk-smoke-op-$(openssl rand -hex 8)"
@@ -26,6 +33,9 @@ psql() {
 cleanup() {
     if [ -n "${DEV_KEY_HASH:-}" ]; then
         psql "DELETE FROM tenants WHERE api_key_hash = '$DEV_KEY_HASH';" >/dev/null 2>&1 || true
+    fi
+    if [ -n "${OPT_OUT_HASH:-}" ]; then
+        psql "DELETE FROM tenants WHERE api_key_hash = '$OPT_OUT_HASH';" >/dev/null 2>&1 || true
     fi
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
 }
@@ -53,14 +63,22 @@ for i in $(seq 1 60); do
     [ "$i" = 60 ] && fail "proxy did not become healthy within 60s"
 done
 
-# Seed a throwaway tenant: sha256(dev key) + a placeholder master key.
+# Seed a guarded tenant plus an opt-out tenant (ITEM-027 AC1): sha256 hashes
+# + a placeholder master key; the opt-out tenant's configuration row disables
+# the schema guard.
 DEV_KEY="sk-smoke-$(openssl rand -hex 8)"
 DEV_KEY_HASH=$(printf '%s' "$DEV_KEY" | shasum -a 256 | awk '{print $1}')
 psql "INSERT INTO tenants (api_key_hash, upstream_openai_key)
       VALUES ('$DEV_KEY_HASH', 'sk-smoke-master') ON CONFLICT DO NOTHING;" >/dev/null
-echo "ok: seeded throwaway tenant"
+OPT_OUT_KEY="sk-smoke-opt-$(openssl rand -hex 8)"
+OPT_OUT_HASH=$(printf '%s' "$OPT_OUT_KEY" | shasum -a 256 | awk '{print $1}')
+OPT_OUT_ID=$(psql "INSERT INTO tenants (api_key_hash, upstream_openai_key)
+      VALUES ('$OPT_OUT_HASH', 'sk-smoke-master') RETURNING id;")
+psql "INSERT INTO tenant_configurations (tenant_id, guard_enabled)
+      VALUES ('$OPT_OUT_ID', false);" >/dev/null
+echo "ok: seeded guarded + opt-out tenants"
 
-echo "-- auth boundary (no external calls: upstream is unroutable) --"
+echo "-- auth boundary (no external calls: the mock answers 502 to unguarded traffic) --"
 check_status "chat without key -> 401" 401 \
     -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
@@ -68,10 +86,45 @@ check_status "chat with wrong key -> 401" 401 \
     -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
     -H "Authorization: Bearer sk-wrong" \
     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
-check_status "chat with tenant key -> 502 (auth passed, upstream dead)" 502 \
+check_status "chat with tenant key -> 502 (auth passed, upstream refused)" 502 \
     -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
     -H "Authorization: Bearer $DEV_KEY" \
     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+
+echo "-- schema guard: lying cheap upstream forces a frontier fallback (ITEM-027 AC3) --"
+# A guarded request (cheap model + json_schema contract + stream): the mock
+# answers a schema-violating SSE as gpt-4o-mini, so the proxy must discard it
+# and replay on the frontier (deepseek-v4-pro), which answers schema-valid.
+GUARDED_BODY='{"model":"gpt-4o-mini","stream":true,"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}}},"messages":[{"role":"user","content":"smoke-guarded"}]}'
+post_and_code() {
+    local key=$1 body=$2
+    curl -sS -w '\n%{http_code}' -X POST "$BASE/v1/chat/completions" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $key" -d "$body"
+}
+resp=$(post_and_code "$DEV_KEY" "$GUARDED_BODY")
+code=$(printf '%s' "$resp" | tail -1)
+body=$(printf '%s' "$resp" | sed '$d')
+[ "$code" = "200" ] || fail "guarded request: expected fallback 200, got HTTP $code"
+printf '%s' "$body" | grep -q '"answer"' || fail "fallback body lacks the schema-valid answer: $body"
+printf '%s' "$body" | grep -q '"other"' && fail "cheap lying body leaked to the client: $body"
+echo "ok: guarded request answered with the frontier's schema-valid replay (HTTP $code)"
+
+# The opt-out tenant sees the raw (lying) cheap body — guard bypassed.
+resp=$(post_and_code "$OPT_OUT_KEY" "$GUARDED_BODY")
+code=$(printf '%s' "$resp" | tail -1)
+body=$(printf '%s' "$resp" | sed '$d')
+[ "$code" = "200" ] || fail "opt-out request: expected raw 200, got HTTP $code"
+printf '%s' "$body" | grep -q '"other"' || fail "opt-out tenant should see the cheap body untouched: $body"
+echo "ok: opt-out tenant gets the raw cheap body, no fallback (ITEM-027 AC1)"
+
+# Traces settle in the DB after a telemetry flush; assert the guard events.
+sleep 2
+fb=$(psql "SELECT count(*) FROM traces t JOIN tenants tn ON tn.id = t.tenant_id WHERE tn.api_key_hash = '$DEV_KEY_HASH' AND t.guard_event->>'outcome' = 'fallback';")
+[ "$fb" -ge 1 ] || fail "no fallback guard event recorded for the guarded tenant (rows: $fb)"
+echo "ok: fallback guard event persisted (outcome=fallback)"
+noev=$(psql "SELECT count(*) FROM traces t JOIN tenants tn ON tn.id = t.tenant_id WHERE tn.api_key_hash = '$OPT_OUT_HASH' AND t.guard_event IS NOT NULL;")
+[ "$noev" = "0" ] || fail "opt-out tenant must record no guard event (rows: $noev)"
+echo "ok: opt-out tenant traces carry no guard event (additive telemetry)"
 
 echo "-- dashboard surface --"
 check_status "summary without key -> 401" 401 "$BASE/v1/dashboard/api/summary"
