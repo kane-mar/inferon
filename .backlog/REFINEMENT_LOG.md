@@ -15,6 +15,7 @@
 - Decisions logged in-item: 021 schema source = response_format.json_schema.schema; fallback = original requested model (frontier in a DeepSeek-only world). 022 epsilon schedule verbatim from spec burn-ratio formulas (1.2/0.5 → 0.02/0.15/0.05), consuming ITEM-016's existing counters; embedding classifier additive over ITEM-015 heuristics.
 - Open PO decisions flagged: fallback frontier config, buffer-vs-incremental validation, guard default scope, embedding-model artifact shipping (affects snapshot size), and whether 022b/c should wait for real traffic (018/020) before building.
 - **Split into pullable items (same day, PO request)**: ITEM-021 → ITEM-023..027 (guard slices a-e), ITEM-022 → ITEM-028..032 (OmniRouting slices a-e). Parents archived as superseded (story/ACs/open decisions retained there). Slice dependency pull-order preserved: guard item chain before OmniRouting chain. ITEM-031/032 (evolution loop, PagedLoRA) remain staged/gated on the parked Slice 3 — in the list, not pullable.
+- **Staged-item decisions (PO)**: unpark trigger for ITEM-031/032 (and Slice 3) is **backlog order itself** — no separate data trigger; when the items reach the top they're pulled, by definition unparked. GPU economics for ITEM-032 **err toward the most performant model** (cost secondary) — persistent best-in-class base is the default direction when the GPU tier activates. Recorded in ITEM-031/032 files.
 
 ## 2026-09-04 — Slice 1 complete; backlog replenished
 

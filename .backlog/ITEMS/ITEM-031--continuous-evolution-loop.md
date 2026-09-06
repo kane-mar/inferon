@@ -14,3 +14,6 @@
 - Parent: ITEM-022 (archived), slice 022d
 - **Gate: Slice 3 distillation infra** (S3 adapter weights, vLLM cluster, DPO dataset shape from ITEM-026). This row exists so the work is visible and rankable; it is not pullable today
 - Slice 3 is deliberately parked by the PO — revisit this gate when/if that decision changes
+
+**Decisions (PO, 2026-09-05):**
+- **Unpark trigger = backlog order.** No special data trigger: Slice 3/distillation work is ranked below the actionable backlog, and "when we get to it" means when this item shuffles to the top it is, by definition, unparked and gets pulled. Staging is informational only — the single-ranked list is the trigger mechanism.

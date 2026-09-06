@@ -13,3 +13,7 @@
 - Parent: ITEM-022 (archived), slice 022e
 - **Gate: owning a GPU serving fleet** (Slice 3+). Like ITEM-031, visible and rankable but not pullable today
 - Revisit only when hosted-only routing (ITEM-028..030) is proven insufficient or Slice 3 unparking is on the table
+
+**Decisions (PO, 2026-09-05):**
+- **Unpark trigger = backlog order** (same as ITEM-031): activates when it reaches the top; no separate trigger criteria.
+- **GPU economics err toward the most performant model.** When the GPU tier activates (base-model pinning, engine choice, persistent-vs-serverless topology), pick the option that runs the most performant model for the workload; cost is a secondary consideration, not the deciding one. Implication: the spec's persistent 4× L4 node with a pinned best-in-class base is the default direction unless it materially underperforms.
