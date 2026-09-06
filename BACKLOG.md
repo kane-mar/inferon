@@ -12,7 +12,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-018 | First real developer onboarding | improvement | refined |
+| ITEM-018 | First real developer onboarding | improvement | **verified** — AC1–AC5 system checks done live 2026-09-06; **awaiting PO handoff** of staged key to an external developer (see item file) |
 | ITEM-019 | Dashboard polish for external developers | improvement | refined |
 | ITEM-020 | Cost anomaly alerts | feature | refined |
 | ITEM-023 | Schema guard: buffered validation seam | feature | refined |
