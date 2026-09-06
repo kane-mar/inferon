@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -90,6 +90,9 @@ check_column traces raw_prompt jsonb
 check_column traces raw_completion jsonb
 check_column traces created_at "timestamp with time zone"
 check_column traces truncated boolean
+check_column traces guard_event jsonb
+check_true "partial index idx_traces_guard_reason exists" \
+    "SELECT count(*) FROM pg_indexes WHERE tablename='traces' AND indexname='idx_traces_guard_reason'"
 
 check_table system_prompt_counts
 check_table tenant_configurations
@@ -130,6 +133,6 @@ echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002 + 003)"
+echo "ok: idempotent re-apply (001 + 002 + 003 + 004)"
 
 echo "ALL SCHEMA CHECKS PASSED"

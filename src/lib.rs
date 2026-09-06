@@ -1,6 +1,7 @@
 pub mod alerts;
 pub mod budget;
 pub mod guard;
+use guard::GuardReason;
 pub mod cost;
 pub mod dashboard;
 pub mod linter;
@@ -19,7 +20,7 @@ use reqwest::Client;
 use serde_json::Value;
 use sqlx::types::Json;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
@@ -122,6 +123,10 @@ pub struct TraceMessage {
     /// True when a streaming response ended before the upstream finished
     /// (client abort or mid-stream error) — token counts are then best-effort.
     pub truncated: bool,
+    /// Schema-guard event (ITEM-025): present only when the guard fired on a
+    /// guarded request (cheap tier + schema contract). Unguarded traffic keeps
+    /// this None — the telemetry is additive only (ITEM-026 AC4).
+    pub guard_event: Option<Value>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -166,8 +171,8 @@ impl TraceSink for PostgresTraceSink {
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
                     total_duration_ms, status_code, raw_prompt, raw_completion,
-                    upstream_cost_usd, waste_detected, truncated
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"#,
+                    upstream_cost_usd, waste_detected, truncated, guard_event
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -183,6 +188,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.upstream_cost_usd)
             .bind(msg.waste_detected.as_ref().map(Json))
             .bind(msg.truncated)
+            .bind(msg.guard_event.as_ref().map(Json))
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -531,10 +537,12 @@ async fn proxy_chat_completions(
         // reaches the client. Anything else keeps the zero-copy passthrough.
         if guard::is_guarded_request(&meta.raw_prompt, &meta.model) {
             guarded_stream_response(
+                &state,
                 meta,
                 tenant_id,
                 started,
                 upstream,
+                upstream_key,
                 state.telemetry_tx.clone(),
             )
             .await
@@ -597,6 +605,7 @@ async fn forward_buffered(
 }
 
 /// Request-derived fields shared by every trace of this request.
+#[derive(Clone)]
 struct RequestMeta {
     id: Uuid,
     model: String,
@@ -630,6 +639,7 @@ fn build_trace(
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
         truncated,
+        guard_event: None,
     }
 }
 
@@ -715,26 +725,30 @@ fn stream_response(
 /// client abort during the buffered phase still emits the truncated trace
 /// (ITEM-009 semantics — Drop hook on `BufferedGuard`).
 ///
-/// ITEM-025 replaces the rejection branch with a transparent replay to the
-/// tenant's frontier model; until then a guard failure answers a clean 502.
+/// ITEM-025: when the flush gate rejects the cheap response (any classified
+/// failure), the bad buffer is discarded and the original prompt is replayed
+/// to the tenant's frontier model with their upstream key; the replacement
+/// response is served to the client and the request's single trace records
+/// the guard event. If the replay itself fails the request answers loudly
+/// with a clean 502 (AC4) — never a silent drop.
 async fn guarded_stream_response(
+    state: &Arc<AppState>,
     meta: RequestMeta,
     tenant_id: Uuid,
     started: Instant,
     upstream: reqwest::Response,
+    upstream_key: &str,
     tx: mpsc::Sender<TraceMessage>,
 ) -> Response {
-    let guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
+    let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
     let bytes = match upstream.bytes().await {
         Ok(bytes) => bytes,
         Err(e) => {
             tracing::error!("guarded upstream body read failed: {e}");
-            guard_emit.emit(Usage::default(), true);
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                "upstream_error",
-                "guarded upstream request failed",
-            );
+            // 025: a cheap stream that dies before any bytes is the
+            // "connection crash" class — fall back, don't surface it.
+            return fallback_to_frontier(&mut guard_emit, state, upstream_key, GuardReason::UpstreamFailure)
+                .await;
         }
     };
 
@@ -755,16 +769,102 @@ async fn guarded_stream_response(
         }
         Err(reason) => {
             tracing::warn!(
-                "guard rejected a cheap-tier response: {} (reason {})",
+                "guard rejected a cheap-tier response: {} (reason {}) — replaying on the frontier",
                 tenant_id,
                 reason.label()
             );
+            fallback_to_frontier(&mut guard_emit, state, upstream_key, reason).await
+        }
+    }
+}
+
+/// ITEM-025: transparent fallback after the guard discards a cheap response.
+/// Replays the ORIGINAL prompt (`meta.raw_prompt`, pre-router/budget
+/// downgrade) on the tenant's frontier model — their own key, same upstream —
+/// and serves the replacement response. Exactly one trace is emitted for the
+/// request (BufferedGuard is one-shot): on success it records the fallback
+/// guard event and the trace's model is retargeted to the model that served
+/// (the cost basis); when the replay itself fails the request answers a loud
+/// clean 502 and the trace records `fallback_failed` + the reason (AC3/AC4).
+async fn fallback_to_frontier(
+    guard_emit: &mut BufferedGuard,
+    state: &AppState,
+    upstream_key: &str,
+    reason: GuardReason,
+) -> Response {
+    let frontier = guard::fallback_model(&guard_emit.meta.raw_prompt);
+    let replay_body = match budget::apply_model_override(&guard_emit.meta.raw_prompt, &frontier) {
+        Ok(body) => body,
+        Err(e) => {
+            tracing::error!("guard fallback payload reserialization failed: {e}");
+            guard_emit.emit(Usage::default(), false);
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "serialization_error",
+                "failed to reserialize the request payload",
+            );
+        }
+    };
+    let replay = state
+        .http_client
+        .post(&state.upstream_url)
+        .header("Authorization", format!("Bearer {upstream_key}"))
+        .header("Content-Type", "application/json")
+        .body(replay_body)
+        .send()
+        .await;
+    let guarded_model = guard_emit.meta.model.clone();
+    match replay {
+        Err(e) => {
+            tracing::error!("guard frontier replay failed: {e}");
+            let event =
+                guard::guard_event("fallback_failed", reason, &guarded_model, Some("transport error"));
+            guard_emit.note_guard(&frontier, event);
             guard_emit.emit(Usage::default(), false);
             json_error(
                 StatusCode::BAD_GATEWAY,
-                "guard_rejected",
-                "cheap-tier response failed schema validation",
+                "guard_fallback_error",
+                "frontier fallback request failed",
             )
+        }
+        Ok(res) if !res.status().is_success() => {
+            let detail = format!("http {}", res.status().as_u16());
+            tracing::warn!("guard frontier replay rejected: {detail}");
+            let event =
+                guard::guard_event("fallback_failed", reason, &guarded_model, Some(&detail));
+            guard_emit.note_guard(&frontier, event);
+            guard_emit.emit(Usage::default(), false);
+            json_error(
+                StatusCode::BAD_GATEWAY,
+                "guard_fallback_error",
+                "frontier fallback was rejected",
+            )
+        }
+        Ok(res) => {
+            // Note the event BEFORE buffering the replay so a mid-replay
+            // client abort (Drop) still records the guard event (AC3).
+            let event = guard::guard_event("fallback", reason, &guarded_model, None);
+            guard_emit.note_guard(&frontier, event);
+            let bytes = match res.bytes().await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::error!("guard frontier body read failed: {e}");
+                    guard_emit.emit(Usage::default(), true);
+                    return json_error(
+                        StatusCode::BAD_GATEWAY,
+                        "guard_fallback_error",
+                        "frontier fallback body read failed",
+                    );
+                }
+            };
+            let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+            guard_emit.emit(usage, false);
+            let mut response = Response::new(Body::from(bytes));
+            *response.status_mut() = StatusCode::OK;
+            response
+                .headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+            response
         }
     }
 }
@@ -779,6 +879,12 @@ struct BufferedGuard {
     tenant_id: Uuid,
     started: Instant,
     emitted: Cell<bool>,
+    /// ITEM-025: the model that ultimately served (the frontier replay),
+    /// overriding `meta.model` on the request's trace — the cost basis.
+    retarget_model: RefCell<Option<String>>,
+    /// ITEM-025 AC3: guard event attached to the single trace once the guard
+    /// has fired. None until `note_guard` runs — additive only.
+    guard_event: RefCell<Option<Value>>,
 }
 
 impl BufferedGuard {
@@ -794,7 +900,17 @@ impl BufferedGuard {
             tenant_id,
             started,
             emitted: Cell::new(false),
+            retarget_model: RefCell::new(None),
+            guard_event: RefCell::new(None),
         }
+    }
+
+    /// ITEM-025: record that the guard fired and retarget the trace's model
+    /// to the frontier that (will) serve the request. Must run before the
+    /// replay is buffered so a mid-replay client abort still records both.
+    fn note_guard(&self, served_model: &str, event: Value) {
+        *self.retarget_model.borrow_mut() = Some(served_model.to_string());
+        *self.guard_event.borrow_mut() = Some(event);
     }
 
     fn emit(&self, usage: Usage, truncated: bool) {
@@ -802,8 +918,12 @@ impl BufferedGuard {
             return;
         }
         let total_ms = self.started.elapsed().as_millis() as i64;
-        let msg = build_trace(
-            &self.meta,
+        let mut meta = self.meta.clone();
+        if let Some(model) = self.retarget_model.borrow().clone() {
+            meta.model = model;
+        }
+        let mut msg = build_trace(
+            &meta,
             self.tenant_id,
             200,
             total_ms,
@@ -812,6 +932,7 @@ impl BufferedGuard {
             None,
             truncated,
         );
+        msg.guard_event = self.guard_event.borrow().clone();
         send_trace(&self.tx, msg);
     }
 }
@@ -1070,10 +1191,14 @@ mod tests {
                                 .unwrap()
                         }
                         Some("gpt-4o-mini") if {
-                            // Guard-triggered request (schema + cheap model):
-                            // frames arrive but [DONE] never does, so the
-                            // buffered guard must reject rather than forward.
-                            payload["messages"][0]["content"].as_str() == Some("truncated")
+                            // Cheap lie: frames arrive but [DONE] never does —
+                            // the guard discards the buffer and falls back.
+                            // Markers: "truncated" (container failure) and
+                            // "boom" (fallback-failure test, ITEM-025 AC4).
+                            matches!(
+                                payload["messages"][0]["content"].as_str(),
+                                Some("truncated" | "boom")
+                            )
                         } => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -1093,9 +1218,20 @@ mod tests {
                                 .unwrap()
                         }
                         Some("gpt-4o-mini") if {
-                            // Well-formed JSON that violates the answer schema
-                            // (missing required "answer") — must be rejected.
+                            // Cheap lie: well-formed JSON that violates the
+                            // answer schema ({"other":1}, missing required
+                            // "answer") — must be discarded, never forwarded.
                             payload["messages"][0]["content"].as_str() == Some("wrong-shape")
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
+                                .unwrap()
+                        }
+                        Some("gpt-4o-mini") if {
+                            // Cheap lie for the abort-during-fallback test:
+                            // instant violation, so the replay starts at once.
+                            payload["messages"][0]["content"].as_str() == Some("slow-fallback")
                         } => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -1119,6 +1255,57 @@ mod tests {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
                                 .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
+                        Some("deepseek-v4-pro") if {
+                            // Fallback failure (ITEM-025 AC4): the frontier
+                            // replay itself answers 5xx — loud and clean.
+                            payload["messages"][0]["content"].as_str() == Some("boom")
+                        } => {
+                            axum::response::Response::builder()
+                                .status(500)
+                                .body(Body::from("boom"))
+                                .unwrap()
+                        }
+                        Some("deepseek-v4-pro") if {
+                            // Default frontier replay (cheap original escalated
+                            // to the deployment frontier): honours the contract.
+                            let marker = payload["messages"][0]["content"].as_str();
+                            matches!(marker, Some("wrong-shape" | "truncated"))
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                                .unwrap()
+                        }
+                        Some("deepseek-v4-pro") if {
+                            // Slow frontier replay: first frame, 300ms gap,
+                            // then [DONE] — lets a test abort mid-replay.
+                            payload["messages"][0]["content"].as_str() == Some("slow-fallback")
+                        } => {
+                            let body = async_stream::stream! {
+                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                                ));
+                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                                yield Ok(axum::body::Bytes::from_static(
+                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                                ));
+                            };
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(axum::body::Body::from_stream(body))
+                                .unwrap()
+                        }
+                        Some("gpt-4o") if {
+                            // Frontier replay when the tenant's original request
+                            // (pre-downgrade) was gpt-4o: honours the contract.
+                            let marker = payload["messages"][0]["content"].as_str();
+                            matches!(marker, Some("wrong-shape" | "truncated"))
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
                                 .unwrap()
                         }
                         Some("nodone") => {
@@ -1251,6 +1438,7 @@ mod tests {
             waste_detected: None,
             upstream_cost_usd: rust_decimal::Decimal::ZERO,
             truncated: false,
+            guard_event: None,
         }
     }
 
@@ -2117,39 +2305,106 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn guarded_schema_violation_is_rejected_not_forwarded() {
-        // 024: content is well-formed JSON but violates the request's schema
-        // (mock marker "wrong-shape" streams {"other":1} against an answer
-        // schema requiring "answer") — the buffered response must not reach
-        // the client; classification itself is pinned by guard.rs unit tests.
+    async fn guarded_schema_violation_falls_back_to_the_frontier() {
+        // 025 AC1: the cheap model streams well-formed JSON that violates the
+        // answer schema ("wrong-shape" -> {"other":1}). The bad buffer is
+        // discarded and the original prompt replayed on the tenant's frontier
+        // (deepseek-v4-pro — a cheap original escalates to the deployment
+        // frontier). The client receives one valid 200 SSE response and one
+        // trace carrying the guard event (AC2/AC3).
         let (response, mut rx) =
             traced_request(&guarded_stream_body("gpt-4o-mini", "wrong-shape"), Some(CLIENT_KEY)).await;
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/event-stream"
+        );
         let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["type"], "guard_rejected");
-        let msg = rx.recv().await.expect("trace emitted");
+        let expected = delta_only_stream(r#"{"answer":"42"}"#);
+        assert_eq!(
+            body.as_ref(),
+            expected.as_bytes(),
+            "frontier replay flushed whole — never a cheap partial body"
+        );
+        let msg = rx.recv().await.expect("exactly one trace");
         assert_eq!(msg.status_code, 200);
+        assert!(!msg.truncated, "clean fallback is not truncated");
+        assert_eq!(
+            msg.request_model, "deepseek-v4-pro",
+            "trace model = the model that ultimately served (cost basis)"
+        );
+        let ev = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(ev["outcome"], "fallback");
+        assert_eq!(ev["reason"], "schema_violation");
+        assert_eq!(ev["guarded_model"], "gpt-4o-mini");
+        assert!(rx.try_recv().is_err(), "fallback is not a second request");
     }
 
     #[tokio::test]
-    async fn guarded_stream_without_done_is_rejected_not_forwarded() {
-        // Mock model "nodone" streams valid frames but no [DONE] — the
-        // container gate rejects it, so the client gets a clean 502 instead of
-        // a truncated cheap-model body (ITEM-023 AC1: flush only after DONE +
-        // successful validation).
+    async fn guarded_truncated_upstream_falls_back_to_the_frontier() {
+        // Container failure (JSON frames but no [DONE]) is a classified
+        // UpstreamFailure: the buffer is discarded and the request falls back
+        // instead of showing the client a truncated cheap body.
         let (response, mut rx) =
             traced_request(&guarded_stream_body("gpt-4o-mini", "truncated"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let expected = delta_only_stream(r#"{"answer":"42"}"#);
+        assert_eq!(body.as_ref(), expected.as_bytes());
+        let msg = rx.recv().await.expect("exactly one trace");
+        assert!(!msg.truncated);
+        let ev = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(ev["outcome"], "fallback");
+        assert_eq!(ev["reason"], "upstream_failure");
+        assert_eq!(msg.request_model, "deepseek-v4-pro");
+    }
+
+    #[tokio::test]
+    async fn downgraded_frontier_request_falls_back_to_the_original_model() {
+        // The tenant asked gpt-4o; the router downgraded it to gpt-4o-mini and
+        // the cheap response violated the schema. The replay must target the
+        // ORIGINALLY REQUESTED model (gpt-4o), not the deployment default.
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("gpt-4o", "wrong-shape"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let expected = delta_only_stream(r#"{"answer":"42"}"#);
+        assert_eq!(body.as_ref(), expected.as_bytes());
+        let msg = rx.recv().await.expect("exactly one trace");
+        assert_eq!(msg.request_model, "gpt-4o", "replayed to the original model");
+        let ev = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(ev["guarded_model"], "gpt-4o-mini", "the guard fired on the downgrade");
+        assert_eq!(ev["reason"], "schema_violation");
+    }
+
+    #[tokio::test]
+    async fn guarded_fallback_upstream_failure_is_loud_and_clean() {
+        // 025 AC4: the frontier replay itself fails (mock 500 for model
+        // deepseek-v4-pro on marker "boom"). The client gets one clean 502 —
+        // no silent data loss — and the single trace preserves the guard
+        // reason plus the fallback failure detail.
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("gpt-4o-mini", "boom"), Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
         let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["error"]["type"], "guard_rejected");
-        let msg = rx.recv().await.expect("trace emitted");
-        assert_eq!(msg.status_code, 200); // the trace records the request's upstream status
+        assert_eq!(json["error"]["type"], "guard_fallback_error");
+        let msg = rx.recv().await.expect("exactly one trace");
+        assert_eq!(msg.status_code, 200, "answered (not truncated)");
+        assert_eq!(msg.request_model, "deepseek-v4-pro");
+        let ev = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(ev["outcome"], "fallback_failed");
+        assert_eq!(ev["reason"], "upstream_failure", "the original guard reason");
+        assert_eq!(ev["detail"], "http 500");
+        assert!(rx.try_recv().is_err(), "still exactly one trace");
     }
 
     #[tokio::test]
@@ -2181,8 +2436,11 @@ mod tests {
     }
 
     /// Drive a real guarded request through axum::serve and drop the socket
-    /// while the guard is still buffering the slow upstream (abort mid-buffer).
-    async fn serve_guarded_and_abort(model: &str) -> mpsc::Receiver<TraceMessage> {
+    /// while the handler is still buffering (abort mid-buffer). `marker`
+    /// selects the mock upstream behaviour for the cheap model: "guarded-slow"
+    /// = slow cheap stream (abort before the guard verdict); "slow-fallback" =
+    /// instant cheap violation then a slow frontier replay (abort mid-replay).
+    async fn serve_guarded_and_abort(model: &str, marker: &str) -> mpsc::Receiver<TraceMessage> {
         let (tx, rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
             http_client: reqwest::Client::new(),
@@ -2201,7 +2459,7 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, build_router(state)).await.unwrap() });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let body = guarded_stream_body(model, "guarded-slow");
+        let body = guarded_stream_body(model, marker);
         let request = format!(
             "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: Bearer {CLIENT_KEY}\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
@@ -2210,8 +2468,8 @@ mod tests {
         let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
         socket.write_all(request.as_bytes()).await.unwrap();
         // The guard buffers everything, so the client sees no body bytes yet —
-        // the abort happens while the handler still waits on the slow upstream
-        // (guarded-slow sleeps 300ms between frames). Drop mid-buffer.
+        // the abort happens while the handler still waits upstream (300ms gap
+        // between frames on the mock). Drop mid-buffer.
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         drop(socket); // abort
         rx
@@ -2219,13 +2477,34 @@ mod tests {
 
     #[tokio::test]
     async fn client_abort_during_guarded_buffer_records_truncated_trace() {
-        let mut rx = serve_guarded_and_abort("gpt-4o-mini").await;
+        let mut rx = serve_guarded_and_abort("gpt-4o-mini", "guarded-slow").await;
         let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
             .await
             .expect("truncated trace should be emitted")
             .expect("channel open");
         assert!(msg.truncated, "abort while buffering must be flagged truncated");
         // Exactly one trace — no duplicate from a later flush.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(rx.try_recv().is_err(), "no duplicate trace after abort");
+    }
+
+    #[tokio::test]
+    async fn client_abort_during_frontier_replay_records_one_guard_trace() {
+        // 025: cheap response violated instantly, so the replay to the frontier
+        // (deepseek-v4-pro, slow) is in flight when the client aborts mid-
+        // replay. Exactly one trace: truncated, retargeted to the frontier,
+        // still carrying the guard event.
+        let mut rx = serve_guarded_and_abort("gpt-4o-mini", "slow-fallback").await;
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("truncated trace should be emitted")
+            .expect("channel open");
+        assert!(msg.truncated, "abort during the replay is flagged truncated");
+        assert_eq!(msg.request_model, "deepseek-v4-pro");
+        let ev = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(ev["outcome"], "fallback");
+        assert_eq!(ev["reason"], "schema_violation");
+        assert_eq!(ev["guarded_model"], "gpt-4o-mini");
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(rx.try_recv().is_err(), "no duplicate trace after abort");
     }

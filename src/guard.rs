@@ -76,6 +76,48 @@ fn has_json_schema_contract(payload: &Value) -> bool {
     request_schema(payload).is_some()
 }
 
+/// Frontier replay target when a guarded request named a cheap model of its
+/// own (replaying to the same failing model would fail the guard again): the
+/// strongest model the deployment's default upstream serves (ITEM-025).
+pub const DEFAULT_GUARD_FRONTIER: &str = "deepseek-v4-pro";
+
+/// ITEM-025 AC1: the tenant's frontier model for the guard replay. Defaults to
+/// the model the tenant originally requested — pre-router/budget downgrade,
+/// i.e. their own frontier in a single-upstream world. Escalates to
+/// [`DEFAULT_GUARD_FRONTIER`] when the original request itself named a
+/// cheap-tier model. Pure function of the original (pre-override) payload.
+pub fn fallback_model(original_payload: &Value) -> String {
+    match original_payload["model"].as_str() {
+        Some(requested) if !is_cheap_tier(requested) => requested.to_string(),
+        _ => DEFAULT_GUARD_FRONTIER.to_string(),
+    }
+}
+
+/// ITEM-025 AC3: JSON guard event attached to the request's single trace.
+/// Shape is the ITEM-026 contract for views and counts:
+///   outcome: "fallback" (replay delivered) | "fallback_failed" (AC4)
+///   reason: GuardReason label that rejected the cheap response
+///   guarded_model: the cheap model the guard fired on (the trace's
+///     request_model is retargeted to the model that ultimately served)
+///   detail: present on fallback_failed — the replay's HTTP status or
+///     "transport error"
+pub fn guard_event(
+    outcome: &str,
+    reason: GuardReason,
+    guarded_model: &str,
+    detail: Option<&str>,
+) -> Value {
+    let mut event = serde_json::json!({
+        "outcome": outcome,
+        "reason": reason.label(),
+        "guarded_model": guarded_model,
+    });
+    if let Some(detail) = detail {
+        event["detail"] = serde_json::Value::String(detail.to_string());
+    }
+    event
+}
+
 /// Validate the *container* of a buffered guarded SSE stream (ITEM-023 scope).
 /// Returns the concatenated raw SSE bytes only when the stream is a complete,
 /// well-formed chat-completions event stream: at least one JSON `data:` frame
@@ -480,5 +522,51 @@ mod tests {
             check_guarded_sse(b"data: {\"a\":1}\n\n", Some(&answer_schema())),
             Err(GuardReason::UpstreamFailure)
         );
+    }
+
+    // --- ITEM-025: transparent fallback circuit helpers ---
+
+    #[test]
+    fn fallback_replays_the_originally_requested_frontier_model() {
+        // Router downgraded a gpt-4o request to gpt-4o-mini; the tenant's own
+        // frontier (pre-downgrade) is the replay target.
+        let gpt = serde_json::json!({"model": "gpt-4o", "messages": []});
+        assert_eq!(fallback_model(&gpt), "gpt-4o");
+        let pro = serde_json::json!({"model": "deepseek-v4-pro", "messages": []});
+        assert_eq!(fallback_model(&pro), "deepseek-v4-pro");
+        // Unknown models count as frontier (never downgraded, never guarded).
+        let unknown = serde_json::json!({"model": "claude-3-5-sonnet-20241022", "messages": []});
+        assert_eq!(fallback_model(&unknown), "claude-3-5-sonnet-20241022");
+    }
+
+    #[test]
+    fn fallback_escalates_cheap_original_requests_to_the_deployment_frontier() {
+        // Replaying a cheap original to itself would fail the guard again.
+        for cheap in ["gpt-4o-mini", "deepseek-chat", "deepseek-v4-flash"] {
+            let p = serde_json::json!({"model": cheap, "messages": []});
+            assert_eq!(fallback_model(&p), DEFAULT_GUARD_FRONTIER);
+        }
+        // No model at all -> same escalation.
+        assert_eq!(
+            fallback_model(&serde_json::json!({ "messages": [] })),
+            DEFAULT_GUARD_FRONTIER
+        );
+    }
+
+    #[test]
+    fn guard_event_shape_is_stable() {
+        let ok = guard_event("fallback", GuardReason::SchemaViolation, "gpt-4o-mini", None);
+        assert_eq!(ok["outcome"], "fallback");
+        assert_eq!(ok["reason"], "schema_violation");
+        assert_eq!(ok["guarded_model"], "gpt-4o-mini");
+        assert!(ok.get("detail").is_none());
+        let failed = guard_event(
+            "fallback_failed",
+            GuardReason::UpstreamFailure,
+            "deepseek-chat",
+            Some("http 500"),
+        );
+        assert_eq!(failed["outcome"], "fallback_failed");
+        assert_eq!(failed["detail"], "http 500");
     }
 }

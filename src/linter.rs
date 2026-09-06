@@ -101,6 +101,7 @@ mod tests {
             waste_detected: None,
             upstream_cost_usd: Decimal::ZERO,
             truncated: false,
+            guard_event: None,
         }
     }
 
