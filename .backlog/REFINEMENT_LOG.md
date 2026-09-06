@@ -6,6 +6,7 @@
 - **ITEM-014 (durable deployment) archived — all ACs verified**: HTTPS live on the durable host (Let's Encrypt cert, public chat + tenant/operator dashboards exercised over the public URL, auth boundary 401/403 intact), restart test keeps real data (2 traces + rule-B counts), tenant minted via seed-tenant.sh with a live DeepSeek master key, first Vultr snapshot taken (4dca04b7), cost ~$5-6/mo acknowledged.
 - **Slice 1 + 2 backlog is now fully delivered and archived.**
 - **Backlog empty (Rule 5)** — replenish. Candidate order (Slice 3 moved to the END by product owner, 2026-09-05): fine-grained live-product items first (real developer onboarding / first external tenant, dashboard polish, anomaly alerts — these get full stories when the backlog is written), then Slice 4 self-healing schema guard, then Slice 5 autonomous OmniRouting, with **Slice 3 automated LoRA distillation last** (chunky at the bottom; needs breakdown only if it ever reaches the top). Roadmap reference: wiki/llm-inference/inferon-product-roadmap.md.
+- **Replenished (later same day)**: ITEM-018..020 added refined (stories + ACs), ITEM-021 (Slice 4) + ITEM-022 (Slice 5) added captured/chunky. Slice 3 not added — parked per PO. Commit 2d372e9.
 
 ## 2026-09-04 — Slice 1 complete; backlog replenished
 
