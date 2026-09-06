@@ -432,6 +432,151 @@ pub async fn operator_alerts(
     json_ok(json!({"alerts": items, "window_days": window.days()}))
 }
 
+/// GET /v1/dashboard/api/guard?days=7 (tenant scope, ITEM-026 AC2)
+pub async fn guard(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_guard(&state, Some(id), &window, "tenant").await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/operator/guard?days=7 — platform-wide (ITEM-026 AC2).
+pub async fn operator_guard(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match operator_or(&state, &headers).await {
+        Ok(()) => query_guard(&state, None, &window, "operator").await,
+        Err(resp) => resp,
+    }
+}
+
+/// Guard telemetry aggregate over the additive `guard_event` JSONB on traces
+/// (ITEM-026 AC2/AC3). `tenant` is Some(id) for tenant scope, None for the
+/// operator platform-wide view — same shape trick as the other queries.
+/// Every event carries an outcome (flushed | fallback | fallback_failed) and,
+/// on failures, the GuardReason label; counts break down per guarded model and
+/// per failure reason, and fallbacking prompts (negative samples) come back in
+/// the existing system-prompt-hash shape for later distillation harvests.
+async fn query_guard(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+    scope_label: &str,
+) -> Response {
+    let days = window.days();
+    let row: Option<(i64, i64, i64)> = match sqlx::query_as(
+        "SELECT COUNT(*),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback_failed')
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND guard_event IS NOT NULL",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+    let (guarded, fallback, fallback_failed) = row.unwrap_or((0, 0, 0));
+
+    let by_model: Vec<(String, i64, i64, i64)> = match sqlx::query_as(
+        "SELECT COALESCE(guard_event->>'guarded_model', '(unknown)'), COUNT(*),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback_failed')
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND guard_event IS NOT NULL
+         GROUP BY 1 ORDER BY 2 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let models: Vec<Value> = by_model
+        .into_iter()
+        .map(|(model, guarded, fallback, fallback_failed)| {
+            json!({
+                "guarded_model": model,
+                "guarded": guarded,
+                "fallback": fallback,
+                "fallback_failed": fallback_failed,
+            })
+        })
+        .collect();
+
+    let by_reason: Vec<(String, i64)> = match sqlx::query_as(
+        "SELECT guard_event->>'reason', COUNT(*)
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND guard_event IS NOT NULL
+           AND guard_event->>'reason' IS NOT NULL
+         GROUP BY 1 ORDER BY 2 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let reasons: Vec<Value> = by_reason
+        .into_iter()
+        .map(|(reason, events)| json!({ "reason": reason, "events": events }))
+        .collect();
+
+    let negative: Vec<(String, i64)> = match sqlx::query_as(
+        "SELECT system_prompt_hash, COUNT(*)
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND guard_event->>'outcome' = 'fallback'
+           AND system_prompt_hash IS NOT NULL
+         GROUP BY system_prompt_hash ORDER BY 2 DESC LIMIT $3",
+    )
+    .bind(tenant)
+    .bind(days)
+    .bind(window.limit())
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let negative_samples: Vec<Value> = negative
+        .into_iter()
+        .map(|(hash, fallbacks)| json!({ "system_prompt_hash": hash, "fallbacks": fallbacks }))
+        .collect();
+
+    json_ok(json!({
+        "scope": scope_label,
+        "tenant_id": tenant.map(|t| t.to_string()),
+        "window_days": days,
+        "guarded_requests": guarded,
+        "fallback_requests": fallback,
+        "fallback_failed": fallback_failed,
+        "by_model": models,
+        "by_reason": reasons,
+        "negative_samples": negative_samples,
+    }))
+}
+
 /// Self-contained dashboard page: key input (kept in memory), window buttons,
 /// and CSS-bar charts fed by the JSON APIs above.
 const HTML: &str = r#"<!doctype html>
@@ -670,6 +815,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(op_on_tenant_view.status(), axum::http::StatusCode::FORBIDDEN);
+
+        // ITEM-026: the guard views share the same scope gates (no DB touched
+        // before the gate): tenant guard view needs a tenant key, operator
+        // guard view needs the operator key.
+        let tenant_guard = "/v1/dashboard/api/guard?days=7";
+        let guard_missing = router.clone().oneshot(get(tenant_guard, None)).await.unwrap();
+        assert_eq!(guard_missing.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let guard_op = router.clone().oneshot(get(tenant_guard, Some("op-secret"))).await.unwrap();
+        assert_eq!(guard_op.status(), axum::http::StatusCode::FORBIDDEN);
+
+        let operator_guard = "/v1/dashboard/api/operator/guard?days=7";
+        let op_guard_missing = router.clone().oneshot(get(operator_guard, None)).await.unwrap();
+        assert_eq!(op_guard_missing.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let op_guard_tenant = router
+            .clone()
+            .oneshot(get(operator_guard, Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(op_guard_tenant.status(), axum::http::StatusCode::FORBIDDEN);
 
         // ITEM-020 AC2: the operator alerts view has the same gate.
         let alerts_uri = "/v1/dashboard/api/operator/alerts?days=7";

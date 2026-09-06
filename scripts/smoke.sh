@@ -125,4 +125,20 @@ check_status "operator alerts with tenant key -> 403" 403 \
 check_status "operator alerts with operator key -> 200" 200 \
     "$BASE/v1/dashboard/api/operator/alerts?days=7" -H "Authorization: Bearer $OPERATOR_API_KEY"
 
+# ITEM-026: guard telemetry views (tenant + operator) follow the same gates.
+check_status "guard without key -> 401" 401 \
+    "$BASE/v1/dashboard/api/guard?days=7"
+check_status "guard with tenant key -> 200" 200 \
+    "$BASE/v1/dashboard/api/guard?days=7" -H "Authorization: Bearer $DEV_KEY"
+check_status "operator guard without key -> 401" 401 \
+    "$BASE/v1/dashboard/api/operator/guard?days=7"
+check_status "operator guard with tenant key -> 403" 403 \
+    "$BASE/v1/dashboard/api/operator/guard?days=7" -H "Authorization: Bearer $DEV_KEY"
+check_status "operator guard with operator key -> 200" 200 \
+    "$BASE/v1/dashboard/api/operator/guard?days=7" -H "Authorization: Bearer $OPERATOR_API_KEY"
+for d in 7 30 90; do
+    check_status "guard?days=$d -> 200" 200 \
+        "$BASE/v1/dashboard/api/guard?days=$d" -H "Authorization: Bearer $DEV_KEY"
+done
+
 echo "ALL SMOKE CHECKS PASSED"

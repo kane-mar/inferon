@@ -393,11 +393,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
+        .route("/v1/dashboard/api/guard", get(dashboard::guard))
         .route("/v1/dashboard/api/operator/tenants", get(dashboard::operator_tenants))
         .route("/v1/dashboard/api/operator/summary", get(dashboard::operator_summary))
         .route("/v1/dashboard/api/operator/by-model", get(dashboard::operator_by_model))
         .route("/v1/dashboard/api/operator/by-prompt", get(dashboard::operator_by_prompt))
         .route("/v1/dashboard/api/operator/alerts", get(dashboard::operator_alerts))
+        .route("/v1/dashboard/api/operator/guard", get(dashboard::operator_guard))
         .with_state(state)
 }
 
@@ -759,6 +761,7 @@ async fn guarded_stream_response(
             let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
             // ttft is when the client actually sees the first byte: after the
             // buffered flush (Slice 4 latency target measures this, ITEM-027).
+            guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
             guard_emit.emit(usage, false);
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
@@ -819,7 +822,7 @@ async fn fallback_to_frontier(
             tracing::error!("guard frontier replay failed: {e}");
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some("transport error"));
-            guard_emit.note_guard(&frontier, event);
+            guard_emit.note_guard(Some(&frontier), event);
             guard_emit.emit(Usage::default(), false);
             json_error(
                 StatusCode::BAD_GATEWAY,
@@ -832,7 +835,7 @@ async fn fallback_to_frontier(
             tracing::warn!("guard frontier replay rejected: {detail}");
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some(&detail));
-            guard_emit.note_guard(&frontier, event);
+            guard_emit.note_guard(Some(&frontier), event);
             guard_emit.emit(Usage::default(), false);
             json_error(
                 StatusCode::BAD_GATEWAY,
@@ -844,7 +847,7 @@ async fn fallback_to_frontier(
             // Note the event BEFORE buffering the replay so a mid-replay
             // client abort (Drop) still records the guard event (AC3).
             let event = guard::guard_event("fallback", reason, &guarded_model, None);
-            guard_emit.note_guard(&frontier, event);
+            guard_emit.note_guard(Some(&frontier), event);
             let bytes = match res.bytes().await {
                 Ok(bytes) => bytes,
                 Err(e) => {
@@ -905,11 +908,13 @@ impl BufferedGuard {
         }
     }
 
-    /// ITEM-025: record that the guard fired and retarget the trace's model
-    /// to the frontier that (will) serve the request. Must run before the
-    /// replay is buffered so a mid-replay client abort still records both.
-    fn note_guard(&self, served_model: &str, event: Value) {
-        *self.retarget_model.borrow_mut() = Some(served_model.to_string());
+    /// ITEM-025/026: record that the guard fired on this request. `served` is
+    /// the frontier model when a fallback replays it (retargets the trace's
+    /// request_model to the model that ultimately serves — the cost basis),
+    /// None when the cheap model itself served. Must run before any await
+    /// after the guard verdict so a client abort still records the event.
+    fn note_guard(&self, served: Option<&str>, event: Value) {
+        *self.retarget_model.borrow_mut() = served.map(str::to_string);
         *self.guard_event.borrow_mut() = Some(event);
     }
 
@@ -2302,6 +2307,12 @@ mod tests {
         let msg = rx.recv().await.expect("trace emitted");
         assert_eq!(msg.status_code, 200);
         assert!(!msg.truncated, "clean guarded flush is not truncated");
+        // 026 AC1: every guard event records outcome on the trace — a clean
+        // cheap flush is outcome "flushed", no failure reason.
+        let ev = msg.guard_event.as_ref().expect("guard event recorded on flush");
+        assert_eq!(ev["outcome"], "flushed");
+        assert_eq!(ev["guarded_model"], "gpt-4o-mini");
+        assert!(ev.get("reason").is_none(), "no failure reason on a clean flush");
     }
 
     #[tokio::test]
@@ -2427,12 +2438,15 @@ mod tests {
     #[tokio::test]
     async fn frontier_model_with_schema_contract_is_not_guarded() {
         // Same schema contract but a frontier model: not guarded, passthrough.
-        let (response, _rx) = traced_request(&guarded_stream_body("deepseek-v4-pro", "hi"), Some(CLIENT_KEY)).await;
+        let (response, mut rx) = traced_request(&guarded_stream_body("deepseek-v4-pro", "hi"), Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         let out = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .unwrap();
         assert_eq!(out.as_ref(), SSE_BODY.as_bytes());
+        let msg = rx.recv().await.expect("trace emitted");
+        // 026 AC4: guard telemetry is additive — unguarded traces stay None.
+        assert!(msg.guard_event.is_none(), "unguarded trace never gains a guard event");
     }
 
     /// Drive a real guarded request through axum::serve and drop the socket

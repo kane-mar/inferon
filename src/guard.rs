@@ -118,6 +118,16 @@ pub fn guard_event(
     event
 }
 
+/// ITEM-026 AC1: guard event for a guarded request whose cheap response
+/// passed the flush gate and was served — outcome "flushed", no failure
+/// reason. Every guard outcome is recorded; this is the pass case.
+pub fn guard_flushed_event(guarded_model: &str) -> Value {
+    serde_json::json!({
+        "outcome": "flushed",
+        "guarded_model": guarded_model,
+    })
+}
+
 /// Validate the *container* of a buffered guarded SSE stream (ITEM-023 scope).
 /// Returns the concatenated raw SSE bytes only when the stream is a complete,
 /// well-formed chat-completions event stream: at least one JSON `data:` frame
