@@ -14,6 +14,46 @@
 //!   - ITEM-027 activation defaults + opt-out + smoke scenario
 
 use serde_json::Value;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Compiled-schema cache (ITEM-027 AC4): guarded requests repeat the same
+/// `response_format` schema contract, and compiling it with jsonschema on
+/// every flush gate dominates the <5ms hot-path budget on the durable host.
+/// Bounded LRU-ish cache keyed by the schema text (serde_json maps sort keys,
+/// so the same contract always yields the same key). Validator owns its
+/// compiled state (no borrow), so entries are shareable behind an Arc.
+const VALIDATOR_CACHE_CAPACITY: usize = 64;
+
+type ValidatorCache = Mutex<VecDeque<(String, Arc<jsonschema::Validator>)>>;
+
+fn validator_cache() -> &'static ValidatorCache {
+    static CACHE: OnceLock<ValidatorCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VecDeque::with_capacity(VALIDATOR_CACHE_CAPACITY)))
+}
+
+/// Compile (or fetch from the cache) a validator for `schema`. Compilation
+/// failures are the request-side `MalformedSchemaContract` class.
+fn compiled_validator(schema: &Value) -> Result<Arc<jsonschema::Validator>, GuardReason> {
+    let key = schema.to_string();
+    let mut cache = validator_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(pos) = cache.iter().position(|(k, _)| k == &key) {
+        let (key, validator) = cache.remove(pos).expect("position found above");
+        cache.push_back((key, Arc::clone(&validator))); // LRU touch
+        return Ok(validator);
+    }
+    let validator = Arc::new(
+        jsonschema::validator_for(schema)
+            .map_err(|_| GuardReason::MalformedSchemaContract)?,
+    );
+    if cache.len() >= VALIDATOR_CACHE_CAPACITY {
+        cache.pop_front();
+    }
+    cache.push_back((key, Arc::clone(&validator)));
+    Ok(validator)
+}
 
 /// Guard failure reasons — verbatim from the spec's `fallback_circuit.rs`
 /// list (ITEM-024 AC2). Kept here so every slice shares one vocabulary.
@@ -226,8 +266,7 @@ pub fn validate_content(bytes: &[u8], schema: Option<&Value>) -> Result<(), Guar
     };
     let instance: Value =
         serde_json::from_str(&content).map_err(|_| GuardReason::InvalidJsonSyntax)?;
-    let validator = jsonschema::validator_for(schema)
-        .map_err(|_| GuardReason::MalformedSchemaContract)?;
+    let validator = compiled_validator(schema)?;
     validator
         .validate(&instance)
         .map_err(|_| GuardReason::SchemaViolation)
@@ -561,6 +600,25 @@ mod tests {
             fallback_model(&serde_json::json!({ "messages": [] })),
             DEFAULT_GUARD_FRONTIER
         );
+    }
+
+    #[test]
+    fn repeated_schema_validation_is_stable_across_the_cache() {
+        // ITEM-027 AC4: repeated guarded requests share one compiled validator.
+        // Semantics must be identical whether the schema was cache-hit or
+        // compiled fresh (validate passes for conforming, rejects violating).
+        let good = stream_with_content(r#"{"answer":"42"}"#);
+        let bad = stream_with_content(r#"{"other":1}"#);
+        for _ in 0..3 {
+            assert_eq!(
+                validate_content(good.as_bytes(), Some(&answer_schema())),
+                Ok(())
+            );
+            assert_eq!(
+                validate_content(bad.as_bytes(), Some(&answer_schema())),
+                Err(GuardReason::SchemaViolation)
+            );
+        }
     }
 
     #[test]
