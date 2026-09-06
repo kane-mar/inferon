@@ -214,11 +214,11 @@ async fn aggregate_signals(
     // scan to the widest window; FILTERs pick the subsets.
     let row: (i64, i64, i64) = sqlx::query_as(
         "SELECT
-            COALESCE(ROUND(SUM(upstream_cost_usd) * 100)::bigint, 0) FILTER
-                (WHERE created_at >= NOW() - $2 * INTERVAL '1 hour'),
-            COALESCE(ROUND(SUM(upstream_cost_usd) * 100)::bigint, 0) FILTER
+            COALESCE(ROUND(SUM(upstream_cost_usd) FILTER
+                (WHERE created_at >= NOW() - $2 * INTERVAL '1 hour') * 100)::bigint, 0),
+            COALESCE(ROUND(SUM(upstream_cost_usd) FILTER
                 (WHERE created_at >= NOW() - $3 * INTERVAL '1 hour'
-                  AND created_at < NOW() - $2 * INTERVAL '1 hour'),
+                  AND created_at < NOW() - $2 * INTERVAL '1 hour') * 100)::bigint, 0),
             COUNT(*) FILTER
                 (WHERE created_at >= NOW() - $4 * INTERVAL '1 hour'
                   AND waste_detected IS NOT NULL AND waste_detected <> '{}'::jsonb)
