@@ -168,12 +168,16 @@ sum_models=$(curl -sS "$BASE/v1/dashboard/api/by-model?days=7" -H "Authorization
 echo "ok: summary total equals the by-model sum ($cost)"
 
 # ITEM-019 AC2: an empty tenant sees a meaningful empty state (the shell text
-# is present in the served page).
-curl -fsS "$BASE/v1/dashboard" | grep -qi "no requests yet" \
+# is present in the served page). Capture the body first: `curl | grep -q` is
+# racy under pipefail — grep -q exits on its first match, closing the pipe and
+# making curl die with SIGPIPE (exit 23) whenever the match is late in a
+# still-streaming body.
+dash=$(curl -fsS "$BASE/v1/dashboard")
+printf '%s' "$dash" | grep -qi "no requests yet" \
     || fail "dashboard lacks the empty-state guidance"
 echo "ok: empty-state guidance present in the dashboard shell"
 
-curl -fsS "$BASE/v1/dashboard" | grep -q "cost leaks" || fail "dashboard HTML not served"
+printf '%s' "$dash" | grep -q "cost leaks" || fail "dashboard HTML not served"
 echo "ok: dashboard HTML served"
 
 echo "-- operator surface (ITEM-020 alerts view) --"
