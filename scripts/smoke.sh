@@ -79,6 +79,38 @@ check_status "by-model with key -> 200" 200 \
 check_status "waste with key -> 200" 200 \
     "$BASE/v1/dashboard/api/waste?days=7" -H "Authorization: Bearer $DEV_KEY"
 
+# ITEM-019 AC4: the window selector works for 7/30/90 on every view.
+for d in 7 30 90; do
+    for view in summary by-model by-prompt waste; do
+        check_status "$view?days=$d -> 200" 200 \
+            "$BASE/v1/dashboard/api/$view?days=$d" -H "Authorization: Bearer $DEV_KEY"
+    done
+done
+
+# ITEM-019 AC3: currency comes back as a decimal string, never scientific
+# notation (1.6e-5) and never a bare float.
+cost=$(curl -sS "$BASE/v1/dashboard/api/summary?days=7" -H "Authorization: Bearer $DEV_KEY" \
+    | grep -o '"total_cost_usd":"[^"]*"' | cut -d'"' -f4)
+printf '%s' "$cost" | grep -Eq '^[0-9]+\.[0-9]+$' \
+    || fail "cost is not a decimal string (got: $cost)"
+printf '%s' "$cost" | grep -Eq 'e[-+]' \
+    && fail "cost rendered in scientific notation: $cost"
+echo "ok: currency renders as a plain decimal string (got \"$cost\")"
+
+# ITEM-019 AC3: totals are consistent across views — the summary total equals
+# the sum of the by-model rows (same trace-level math, ITEM-008).
+sum_models=$(curl -sS "$BASE/v1/dashboard/api/by-model?days=7" -H "Authorization: Bearer $DEV_KEY" \
+    | grep -o '"cost_usd":"[^"]*"' | cut -d'"' -f4 | awk '{ s += $1 } END { printf "%.6f", s }')
+[ "$sum_models" = "$cost" ] \
+    || fail "summary total ($cost) != by-model sum ($sum_models)"
+echo "ok: summary total equals the by-model sum ($cost)"
+
+# ITEM-019 AC2: an empty tenant sees a meaningful empty state (the shell text
+# is present in the served page).
+curl -fsS "$BASE/v1/dashboard" | grep -qi "no requests yet" \
+    || fail "dashboard lacks the empty-state guidance"
+echo "ok: empty-state guidance present in the dashboard shell"
+
 curl -fsS "$BASE/v1/dashboard" | grep -q "cost leaks" || fail "dashboard HTML not served"
 echo "ok: dashboard HTML served"
 

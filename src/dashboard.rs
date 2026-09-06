@@ -417,12 +417,16 @@ const HTML: &str = r#"<!doctype html>
   .bar { background: #3182ce; color: #fff; padding: 2px 8px; margin: 2px 0; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .wasteflag { margin: .35rem 0; }
   .err { color: #c53030; }
+  .empty { border: 1px dashed #cbd5e0; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; color: #4a5568; background: #f7fafc; }
+  .empty code { background: #edf2f7; padding: .1rem .35rem; border-radius: 3px; }
+  .why { color: #4a5568; font-size: .9rem; margin-top: .1rem; }
+  .muted { color: #718096; }
 </style>
 </head>
 <body>
 <h1>Inferon — cost leaks</h1>
 <p class="keyline">API key <input id="key" type="password" placeholder="sk-..." autocomplete="off">
-  <button onclick="setDays(1)">1d</button><button onclick="setDays(7)">7d</button><button onclick="setDays(30)">30d</button>
+  <button onclick="setDays(7)">7d</button><button onclick="setDays(30)">30d</button><button onclick="setDays(90)">90d</button>
   <span id="days"></span></p>
 <div class="cards" id="cards"></div>
 <h2>Spend by model</h2><div id="byModel"></div>
@@ -434,13 +438,32 @@ let days = 7;
 const KEY = () => document.getElementById('key').value.trim();
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// Render a USD amount from its decimal string without ever going through a
+// float (floats print 1.6e-5, strings print $0.000016 — ITEM-019 AC3).
+function usd(s) {
+  let v = String(s);
+  const neg = v.startsWith('-');
+  if (neg) v = v.slice(1);
+  let [whole, frac] = v.split('.');
+  if (frac !== undefined) {
+    frac = frac.replace(/0+$/, '');
+    v = frac ? whole + '.' + frac : whole;
+  }
+  if (v === '' || v === '0' || /^0\.0*$/.test(v)) v = '0.00';
+  // Thousands separators on the integer part only.
+  v = v.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return (neg ? '-' : '') + '$' + v;
+}
+function emptyBox(text) {
+  return '<div class="empty">' + text + '</div>';
+}
 function card(label, num) { return '<div class="card"><div>' + esc(label) + '</div><div class="num">' + esc(num) + '</div></div>'; }
 function bars(items, key) {
   const max = Math.max(...items.map(i => parseFloat(i[key])), 0);
   return items.map(i => {
     const w = max > 0 ? Math.max(3, Math.round(100 * parseFloat(i[key]) / max)) : 0;
-    return '<div class="bar" style="width:' + w + '%">' + esc(i.label) + ' — $' + esc(i[key]) + '</div>';
-  }).join('') || '<p>no data</p>';
+    return '<div class="bar" style="width:' + w + '%">' + esc(i.label) + ' — ' + usd(i[key]) + '</div>';
+  }).join('') || '<p class="muted">no data in this window</p>';
 }
 async function get(path) {
   const r = await fetch(path, { headers: { Authorization: 'Bearer ' + KEY() } });
@@ -454,23 +477,49 @@ async function load() {
     const q = '?days=' + days;
     const s = await get('/v1/dashboard/api/summary' + q);
     $('days').textContent = 'last ' + s.window_days + ' days';
+    if (s.requests === 0) {
+      // AC2: a meaningful empty state, not bare zeros.
+      $('cards').innerHTML = emptyBox('No requests yet — point your baseURL at us and make one, e.g. ' +
+        '<code>client = OpenAI(base_url=&quot;' + location.origin + '/v1&quot;, api_key=...)</code>');
+      $('byModel').innerHTML = ''; $('byPrompt').innerHTML = ''; $('waste').innerHTML = '';
+      return;
+    }
     $('cards').innerHTML =
-      card('Total spend', '$' + s.total_cost_usd) +
+      card('Total spend', usd(s.total_cost_usd)) +
       card('Requests', s.requests) +
       card('Errors (4xx/5xx)', s.errors) +
       card('Tenant', String(s.tenant_id).slice(0, 8) + '…');
     const m = await get('/v1/dashboard/api/by-model' + q);
-    $('byModel').innerHTML = bars(m.models.map(x => ({ label: x.model, cost_usd: x.cost_usd })), 'cost_usd');
+    $('byModel').innerHTML = m.models.length
+      ? bars(m.models.map(x => ({ label: x.model, cost_usd: x.cost_usd })), 'cost_usd')
+      : emptyBox('No requests in this window.');
     const p = await get('/v1/dashboard/api/by-prompt' + q);
-    $('byPrompt').innerHTML = bars(p.prompts.map(x => ({ label: x.system_prompt_hash.slice(0, 12), cost_usd: x.cost_usd })), 'cost_usd');
+    $('byPrompt').innerHTML = p.prompts.length
+      ? bars(p.prompts.map(x => ({ label: x.system_prompt_hash.slice(0, 12), cost_usd: x.cost_usd })), 'cost_usd')
+      : emptyBox('No system prompts in this window.');
     const w = await get('/v1/dashboard/api/waste' + q);
-    const names = { over_provisioned: 'Over-provisioned (gpt-4o, tiny output)', cache_miss: 'Cache-miss system prompts', model_misuse: 'gpt-4o on simple text' };
-    $('waste').innerHTML = Object.keys(names).map(k => {
+    // AC5: each rule explains *why* it is a leak, in one plain-English line.
+    const rules = {
+      over_provisioned: {
+        name: 'Over-provisioned (gpt-4o, tiny output)',
+        why: 'A gpt-4o-tier model answered a tiny request (<100 prompt / <50 completion tokens). gpt-4o-mini costs ~6% as much for replies like this.'
+      },
+      cache_miss: {
+        name: 'Cache-miss system prompts',
+        why: 'A 4,000+ token system prompt repeated with no provider cache benefit — every call re-bills the whole prefix. Ask DeepSeek to cache it or shorten the prompt.'
+      },
+      model_misuse: {
+        name: 'gpt-4o on simple text',
+        why: 'gpt-4o handled plain short text with no tools or formatting. gpt-4o-mini fits this shape and costs a fraction of the price.'
+      }
+    };
+    $('waste').innerHTML = Object.keys(rules).map(k => {
       const v = w[k];
       if (!v) return '';
-      return '<div class="wasteflag"><b>' + names[k] + '</b>: ' + v.requests + ' requests, $' +
-             v.spend_usd + ' spent' + (parseFloat(v.savings_est_usd) > 0 ? ' — ~$' + v.savings_est_usd + ' recoverable on gpt-4o-mini' : '') + '</div>';
-    }).join('') || '<p>no waste flagged — clean traffic</p>';
+      const saving = parseFloat(v.savings_est_usd) > 0 ? ' — ~' + usd(v.savings_est_usd) + ' recoverable on gpt-4o-mini' : '';
+      return '<div class="wasteflag"><b>' + esc(rules[k].name) + '</b>: ' + v.requests + ' requests, ' + usd(v.spend_usd) +
+             ' spent' + saving + '<div class="why">Why: ' + rules[k].why + '</div></div>';
+    }).join('') || emptyBox('No waste flagged — clean traffic. <span class="muted">(Waste rules only apply to gpt-4o-tier usage.)</span>');
   } catch (e) { $('err').textContent = 'error: ' + e.message; }
 }
 function setDays(d) { days = d; load(); }
@@ -623,5 +672,108 @@ mod tests {
         assert_eq!(Window { days: Some(0), limit: None }.days(), 1);
         assert_eq!(Window { days: None, limit: Some(500) }.limit(), 100);
         assert_eq!(Window { days: None, limit: Some(3) }.limit(), 3);
+    }
+
+    // --- ITEM-019 dashboard polish ---
+
+    /// AC1: the served HTML is fully self-contained and origin-relative — no
+    /// absolute http(s) URLs, no localhost/internal hostnames in markup or JS.
+    #[test]
+    fn html_has_no_absolute_or_internal_references() {
+        for forbidden in ["http://", "https://", "localhost", "127.0.0.1", "0.0.0.0"] {
+            assert!(
+                !HTML.contains(forbidden),
+                "served HTML must not contain {forbidden:?} (mixed-content / internal ref)"
+            );
+        }
+    }
+
+    /// AC1: every data fetch uses a same-origin relative path.
+    #[test]
+    fn html_fetches_are_origin_relative() {
+        for api in [
+            "/v1/dashboard/api/summary",
+            "/v1/dashboard/api/by-model",
+            "/v1/dashboard/api/by-prompt",
+            "/v1/dashboard/api/waste",
+        ] {
+            assert!(
+                HTML.contains(&format!("get('{api}'")),
+                "fetch for {api} must be a relative path"
+            );
+        }
+    }
+
+    /// AC2: a zero-request tenant sees a meaningful empty state, not bare zeros.
+    #[test]
+    fn html_empty_state_guides_a_new_developer() {
+        let lower = HTML.to_ascii_lowercase();
+        assert!(
+            lower.contains("no requests yet") && lower.contains("point your baseurl"),
+            "empty state must say 'no requests yet — point your baseURL at us and make one'"
+        );
+        // The message must render when the summary reports zero requests.
+        assert!(HTML.contains("s.requests === 0"), "empty state wired to the summary count");
+    }
+
+    /// AC3: currency is rendered from the decimal string, never through a
+    /// float that could print scientific notation like 1.6e-5.
+    #[test]
+    fn html_renders_currency_without_float_notation() {
+        assert!(
+            HTML.contains("function usd("),
+            "a string-based usd() formatter must exist"
+        );
+        assert!(
+            !HTML.contains("toExponential"),
+            "scientific notation is never used for display"
+        );
+        // Bar widths may scale from numbers; displayed $ amounts must not.
+        let scripts = HTML[HTML.find("<script>").unwrap()..].to_string();
+        let display_lines: Vec<&str> = scripts
+            .lines()
+            .filter(|l| l.contains("$") && l.contains("+"))
+            .collect();
+        for line in display_lines {
+            assert!(
+                !line.contains("parseFloat"),
+                "displayed currency must not pass through parseFloat: {line}"
+            );
+        }
+    }
+
+    /// AC4: the window selector offers 7/30/90 and the default is 7.
+    #[test]
+    fn html_window_selector_offers_7_30_90() {
+        assert!(HTML.contains("let days = 7"), "default window is 7 days");
+        for d in [7, 30, 90] {
+            assert!(
+                HTML.contains(&format!("setDays({d})")),
+                "window selector must offer {d} days"
+            );
+        }
+        assert!(
+            !HTML.contains("setDays(1)"),
+            "the old 1-day preset is gone (7/30/90 per ITEM-019 AC4)"
+        );
+    }
+
+    /// AC5: the waste view explains *why* each rule fires, in plain English.
+    #[test]
+    fn html_waste_view_explains_each_rule() {
+        for (flag, snippet) in [
+            ("over_provisioned", "tiny"),
+            ("cache_miss", "cache"),
+            ("model_misuse", "simple text"),
+        ] {
+            assert!(
+                HTML.contains(&format!("{flag}: {{")),
+                "waste rules must carry a why-explanation entry for {flag}"
+            );
+            assert!(
+                HTML.contains(snippet),
+                "{flag} explanation must mention: {snippet}"
+            );
+        }
     }
 }
