@@ -14,6 +14,9 @@ const DEFAULT_DATABASE_URL: &str = "postgres://inferon:inferon@localhost:5432/in
 const TELEMETRY_CHANNEL_CAPACITY: usize = 10_000;
 const TELEMETRY_FLUSH_INTERVAL_MS: u64 = 500;
 const TELEMETRY_BATCH_SIZE: usize = 100;
+/// Alert evaluation cadence (ITEM-020): an in-process interval task, no new
+/// daemon/service — the proxy binary stays the only deployment unit.
+const ALERT_EVAL_INTERVAL_SECS: u64 = 60;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,6 +45,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         TELEMETRY_BATCH_SIZE,
         initial_counts,
     ));
+
+    // Cost anomaly alerts (ITEM-020): one periodic evaluation pass; webhook
+    // delivery is best-effort from a compose env var (no new infra, AC4).
+    {
+        let pool = pool.clone();
+        let http_client = Client::new();
+        let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
+            .ok()
+            .filter(|u| !u.is_empty());
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
+                ALERT_EVAL_INTERVAL_SECS,
+            ));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                inferon::alerts::run_evaluation(&pool, webhook_url.as_deref(), &http_client).await;
+            }
+        });
+    }
 
     let state = Arc::new(AppState {
         http_client: Client::builder().pool_max_idle_per_host(100).build()?,

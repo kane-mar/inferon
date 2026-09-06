@@ -400,6 +400,38 @@ pub async fn operator_by_prompt(
     }
 }
 
+/// GET /v1/dashboard/api/operator/alerts?days=7 — cost anomaly episodes
+/// (ITEM-020 AC2: an operator view lists them, firing and cleared).
+pub async fn operator_alerts(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let alerts = match crate::alerts::list_alerts(&state.db, window.days()).await {
+        Ok(rows) => rows,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let items: Vec<Value> = alerts
+        .into_iter()
+        .map(|a| {
+            json!({
+                "tenant_id": a.tenant_id.to_string(),
+                "class": a.class,
+                "status": a.status,
+                "detail": a.detail,
+                "threshold": a.threshold,
+                "first_fired_at": a.first_fired_at,
+                "last_fired_at": a.last_fired_at,
+                "cleared_at": a.cleared_at,
+            })
+        })
+        .collect();
+    json_ok(json!({"alerts": items, "window_days": window.days()}))
+}
+
 /// Self-contained dashboard page: key input (kept in memory), window buttons,
 /// and CSS-bar charts fed by the JSON APIs above.
 const HTML: &str = r#"<!doctype html>
@@ -638,6 +670,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(op_on_tenant_view.status(), axum::http::StatusCode::FORBIDDEN);
+
+        // ITEM-020 AC2: the operator alerts view has the same gate.
+        let alerts_uri = "/v1/dashboard/api/operator/alerts?days=7";
+        let alerts_no_key = router.clone().oneshot(get(alerts_uri, None)).await.unwrap();
+        assert_eq!(alerts_no_key.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let alerts_tenant = router
+            .clone()
+            .oneshot(get(alerts_uri, Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(alerts_tenant.status(), axum::http::StatusCode::FORBIDDEN);
 
         // Scope resolution itself (pure, no DB): operator key -> Operator,
         // tenant key -> Tenant, unknown -> None.

@@ -15,6 +15,9 @@ BASE="http://127.0.0.1:$PORT"
 CONTAINER="inferon-postgres-1"
 # Unreachable upstream: authenticated requests must pass auth then fail fast.
 export UPSTREAM_URL="http://127.0.0.1:9/v1/chat/completions"
+# Operator credential (ITEM-013/020): enables the platform-wide operator views.
+# Generated here so the smoke run exercises the operator surface end-to-end.
+export OPERATOR_API_KEY="sk-smoke-op-$(openssl rand -hex 8)"
 
 psql() {
     docker exec "$CONTAINER" psql -U inferon -d inferon -tAc "$1"
@@ -113,5 +116,13 @@ echo "ok: empty-state guidance present in the dashboard shell"
 
 curl -fsS "$BASE/v1/dashboard" | grep -q "cost leaks" || fail "dashboard HTML not served"
 echo "ok: dashboard HTML served"
+
+echo "-- operator surface (ITEM-020 alerts view) --"
+check_status "operator alerts without key -> 401" 401 \
+    "$BASE/v1/dashboard/api/operator/alerts?days=7"
+check_status "operator alerts with tenant key -> 403" 403 \
+    "$BASE/v1/dashboard/api/operator/alerts?days=7" -H "Authorization: Bearer $DEV_KEY"
+check_status "operator alerts with operator key -> 200" 200 \
+    "$BASE/v1/dashboard/api/operator/alerts?days=7" -H "Authorization: Bearer $OPERATOR_API_KEY"
 
 echo "ALL SMOKE CHECKS PASSED"

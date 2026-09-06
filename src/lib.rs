@@ -1,3 +1,4 @@
+pub mod alerts;
 pub mod budget;
 pub mod cost;
 pub mod dashboard;
@@ -389,6 +390,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/operator/summary", get(dashboard::operator_summary))
         .route("/v1/dashboard/api/operator/by-model", get(dashboard::operator_by_model))
         .route("/v1/dashboard/api/operator/by-prompt", get(dashboard::operator_by_prompt))
+        .route("/v1/dashboard/api/operator/alerts", get(dashboard::operator_alerts))
         .with_state(state)
 }
 

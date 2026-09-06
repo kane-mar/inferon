@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -112,10 +112,24 @@ check_true "index idx_traces_tenant_created exists" \
 check_true "index idx_traces_prompt_hash exists" \
     "SELECT count(*) FROM pg_indexes WHERE tablename='traces' AND indexname='idx_traces_prompt_hash'"
 
+# ITEM-020 migration 003: alerts table + per-tenant alert thresholds.
+check_table alerts
+check_column alerts tenant_id uuid
+check_column alerts class "character varying"
+check_column alerts status "character varying"
+check_column alerts detail jsonb
+check_column alerts threshold jsonb
+check_column alerts first_fired_at "timestamp with time zone"
+check_column alerts last_fired_at "timestamp with time zone"
+check_column alerts cleared_at "timestamp with time zone"
+check_column tenant_configurations alert_spend_multiplier numeric
+check_column tenant_configurations alert_spend_floor_cents bigint
+check_column tenant_configurations alert_waste_daily_threshold integer
+
 echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002)"
+echo "ok: idempotent re-apply (001 + 002 + 003)"
 
 echo "ALL SCHEMA CHECKS PASSED"

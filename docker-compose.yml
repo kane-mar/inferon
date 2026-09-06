@@ -9,6 +9,7 @@ services:
       DATABASE_URL: postgres://inferon:inferon@postgres:5432/inferon
       UPSTREAM_URL: ${UPSTREAM_URL:-}
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
