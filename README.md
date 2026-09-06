@@ -25,6 +25,50 @@ linting, and a self-hosted cost-leak dashboard.
   $ impact.
 - **Dashboard** — `GET /v1/dashboard` (self-contained HTML + JSON APIs), tenant-scoped.
 
+## For developers
+
+**Base URL:** `https://inferon.agilefederation.com/v1` (OpenAI-compatible).
+
+Your team's API key is issued out-of-band by an Inferon operator (runbook:
+[`scripts/seed-tenant.sh`](scripts/seed-tenant.sh)) — no signup page yet. The key is
+shown exactly once, at mint time; the proxy only ever stores its SHA-256 hash. If a
+key is lost, an operator mints a replacement.
+
+**Supported surface:**
+
+- `POST /v1/chat/completions` — chat completions, streaming and non-streaming
+  (`stream: true|false`), OpenAI SDK-compatible
+- `GET /v1/dashboard` — your cost dashboard (per-tenant; only your traffic)
+  - JSON: `/v1/dashboard/api/summary`, `/by-model`, `/by-prompt`, `/waste` (all with `?days=7|30|90`)
+
+**2-minute example (OpenAI SDK):**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://inferon.agilefederation.com/v1",
+    api_key="sk-inferon-...",   # the key your operator gave you
+)
+
+chat = client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[{"role": "user", "content": "Say hi"}],
+)
+print(chat.choices[0].message.content)
+
+# Streaming works the same way:
+for chunk in client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[{"role": "user", "content": "Say hi"}],
+    stream=True,
+):
+    print(chunk.choices[0].delta.content or "", end="")
+```
+
+Point your existing OpenAI-SDK code at the base URL + key above and it works
+unchanged — Inferon is a drop-in proxy.
+
 ## Quickstart (Docker)
 
 ```bash
@@ -89,6 +133,11 @@ no tenant can see another tenant's data):
 - `GET /v1/dashboard/api/by-model?days=7`
 - `GET /v1/dashboard/api/by-prompt?days=7&limit=10`
 - `GET /v1/dashboard/api/waste?days=7`
+
+## Running your own instance
+
+`docker compose up -d --build` on any Docker host (see Quickstart above). The proxy
+listens on `PORT` (default 8080); point your base URL at `http://<host>:8080/v1`.
 
 ## Durable deployment (inferon.agilefederation.com)
 
