@@ -42,3 +42,23 @@
 **Status**: all automatable ACs verified live (2026-09-06); **residual gate = PO handoff
 of the staged key to a real developer outside the team** + that developer's first real
 request. Item NOT archived until that human step completes.
+
+## Breakdown note (2026-09-06 refinement)
+
+ITEM-018's remaining body is a single PO-gated human step, so it is kept whole
+rather than split into fake sub-items. Its tail decomposes as:
+
+1. **PO action (this item's gate)**: name the external developer; hand over the
+   staged bundle (`~/.cache/inferon-durable/second-real-developer.key` +
+   `.handoff.txt`) — the key itself already round-trips and authenticates.
+2. **Next pull once the PO acts**: run the developer's first real request with
+   them + capture AC5 findings (SDK quirks, missing endpoints, doc gaps) as new
+   items — the observation loop is specified in the verification record above.
+
+With the accounts horizon refined (ITEM-034..040), this out-of-band minting path
+is superseded for any FUTURE developer by self-serve signup (ITEM-036), and the
+migration is completed by ITEM-040. The staged second-real-developer key remains
+valid as an ordinary API key (ITEM-034 rows) — no migration needed for it.
+Ordering decision for the PO: hand the staged key out now (fastest real-traffic
+data point, feeds ITEM-036's signup UX) or let that developer self-serve once
+ITEM-036 ships — see REFINEMENT_LOG 2026-09-06.

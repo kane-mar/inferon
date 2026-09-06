@@ -16,3 +16,8 @@
 5. ~~Ranking~~ **ANSWERED (PO 2026-09-06): “wherever it's the least responsible moment”** — reading as least-disruptive position in the sequence (large work, don't let it block the small pullable cluster). Placed low; breaks down when it approaches the top.
 
 **Placement default:** bottom of pullable region (large, unrefined — progressive granularity). PO ranking guidance 2026-09-06: “wherever it's the least responsible moment” (read: least-disruptive position; keep small pullable work flowing). Remains at bottom pending confirmation of that reading.
+
+> **SUPERSEDED 2026-09-06** — refined into pullable backlog items ITEM-034..040
+> (api keys as rows, GitHub OAuth + sessions, self-serve signup, operator
+> console, tenant key management, tenant members, migrate out-of-band
+> onboarding). This file keeps the parent capture + the PO answers.

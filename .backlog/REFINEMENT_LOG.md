@@ -1,5 +1,47 @@
 # Refinement Log
 
+## 2026-09-06 (late) — ITEM-033 broken down; ITEM-018 tail structured
+
+Refinement session with the pullable region empty (guard chain delivered,
+OmniRouting staged). ITEM-033 (user accounts & logins) was the next large item
+— broken into seven refined, ranked pullable slices; parent archived as
+superseded (story/PO answers retained):
+
+- **ITEM-034 — API keys as rows**: `api_keys` table + backfill from
+  `tenants.api_key_hash`; auth resolves active keys → tenant (existing keys
+  keep working); operator mint/list/revoke API; foundation for all key work.
+- **ITEM-035 — GitHub OAuth + sessions**: /auth/login+callback, `users` rows,
+  signed session cookie, middleware; mock-GitHub testable; `/v1/chat` stays
+  key-authed (design principle recorded: humans get sessions for dashboards,
+  machines keep keys — the ITEM-004 hot path is untouched).
+- **ITEM-036 — Self-serve signup**: first sign-in auto-provisions tenant +
+  owner (`tenant_members`) + first key shown once; session-scoped tenant
+  dashboard added alongside key auth; README primary path flips to self-serve.
+- **ITEM-037 — Operator console**: platform operator role (bootstrap default:
+  env `OPERATOR_GITHUB_LOGINS`; decision recorded), the 4 operator JSON APIs
+  accept a session while `OPERATOR_API_KEY` survives for machines, first HTML
+  operator screen.
+- **ITEM-038 — Tenant key management (dashboard)**: create/label/revoke;
+  owners destructive, members view+create (decision recorded).
+- **ITEM-039 — Tenant members**: GitHub-claim-based invites (no email infra —
+  decision recorded); member scope + removal; isolation extended to sessions.
+- **ITEM-040 — Migrate out-of-band onboarding**: README/docs flip to
+  self-serve, seed-tenant.sh demoted to operator/machine, ITEM-018 handoff
+  path closes (staged key stays valid as an ITEM-034 key row).
+
+Ranking: the accounts horizon sits directly below ITEM-018 and above the
+staged OmniRouting cluster — the product goal's demand side (real external
+developers) precedes the autonomy roadmap; signup (036) precedes the operator
+console (037) for the same reason.
+
+**ITEM-018** stays whole at the top (verified; its residual is one PO-gated
+human handoff). Its tail is decomposed in the item file: [PO: name the
+developer + hand over the staged bundle] → [pull: run first request + capture
+AC5 findings]. Ordering decision for the PO: hand out the staged key now (the
+fastest real-traffic data point, feeds ITEM-036's signup UX) vs have that
+developer self-serve once ITEM-036 ships. Either way ITEM-040 later closes the
+out-of-band path for everyone.
+
 ## 2026-09-06 (late) — OmniRouting pull reviewed; ITEM-028..030 staged with evidence
 
 Engineering review after the ITEM-023..027 guard chain archived (all ACs,
