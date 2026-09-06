@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.98 AS chef
+# Builder pinned to -bookworm: the floating rust:1.98 tag drifted to a
+# trixie base whose binaries need GLIBC_2.38 — pinned bookworm (glibc 2.36)
+# matches the cc-debian12 runtime below.
+FROM rust:1.98-bookworm AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
