@@ -53,3 +53,34 @@
 - Kept as a single backlog item; slices are the in-item TDD progression
   (session tokens → users store + migration 007 → OAuth client seam →
   `/auth/*` routes → dashboard shell state).
+
+## Verification record (2026-09-07)
+
+- **AC1 (OAuth dance, seams)**: /auth/login redirects to GitHub's authorize
+  URL with the client id, an encoded redirect URI, a per-attempt CSRF `state`
+  nonce, and scope read:user; the nonce also lands in a short-lived
+  HttpOnly/SameSite=Lax oauth_state cookie. /auth/callback verifies the state
+  against the cookie (mismatch → 400, no session), exchanges the code through
+  the GithubClient seam (real impl: token POST + /user GET; tests use a fake —
+  no network, ITEM-035 AC3), and upserts the `users` row keyed by github_id
+  (migration 007, unique index). Upsert-on-real-PG verified via the throwaway
+  schema check (one row per github_id, login refreshed, idempotent re-apply).
+- **AC2 (session cookie)**: token = HMAC-SHA256-signed `<user_id>.<expiry>` —
+  HttpOnly, SameSite=Lax, Secure over TLS (X-Forwarded-Proto https, i.e.
+  behind Caddy), 30-day Max-Age. Forged/expired/unknown-user cookies are
+  signed out (401) — never an error (unit + route tests). /auth/logout
+  expires the cookie.
+- **AC3 (unconfigured + mock)**: with no GITHUB_CLIENT_ID/SECRET + SESSION_SECRET,
+  /auth/login answers 503 `oauth_not_configured` (live on the durable host).
+  All dance flows run against the in-test fake GithubClient (no external
+  calls). Migration 007 applied live; smoke passed live (51 checks) incl. the
+  new arms: /auth/me 401 without a session, /auth/login 503, shell still 200.
+- **AC4 (me + shell, no authZ change)**: /auth/me returns the signed-in user
+  (200) or 401; the dashboard shell renders sign-in/log-out state client-side
+  from a bearer-free /auth/me fetch (the tenant key never rides that call) —
+  shell content test + live smoke. /v1/chat + dashboard/operator bearer gates
+  are untouched (real tenant keys still 200 live after the redeploy).
+- Live status: **real GitHub sign-in needs a registered OAuth app** (PO):
+  set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET/SESSION_SECRET on the durable host
+  and re-deploy; until then the unconfigured surface (503/401) is the live
+  behavior. 151 tests green.
