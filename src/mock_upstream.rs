@@ -22,7 +22,11 @@ fn sse_with_content(content_json: &str) -> String {
         "id": "1",
         "choices": [{"delta": {"content": content_json}}]
     });
-    format!("data: {frame}\n\ndata: [DONE]\n\n")
+    // Usage frame: smoke's ITEM-019 currency checks need a non-zero cost to
+    // render as a decimal string.
+    format!(
+        "data: {frame}\n\ndata: {{\"choices\":[],\"usage\":{{\"prompt_tokens\":5,\"completion_tokens\":2}}}}\n\ndata: [DONE]\n\n"
+    )
 }
 
 async fn chat_completions(Json(payload): Json<Value>) -> axum::response::Response {

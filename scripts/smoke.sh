@@ -27,7 +27,8 @@ export UPSTREAM_URL="http://mock-upstream:8090/v1/chat/completions"
 export OPERATOR_API_KEY="sk-smoke-op-$(openssl rand -hex 8)"
 
 psql() {
-    docker exec "$CONTAINER" psql -U inferon -d inferon -tAc "$1"
+    # -q suppresses the command tag so INSERT ... RETURNING yields only the row.
+    docker exec "$CONTAINER" psql -U inferon -d inferon -qtAc "$1"
 }
 
 cleanup() {
@@ -105,8 +106,9 @@ resp=$(post_and_code "$DEV_KEY" "$GUARDED_BODY")
 code=$(printf '%s' "$resp" | tail -1)
 body=$(printf '%s' "$resp" | sed '$d')
 [ "$code" = "200" ] || fail "guarded request: expected fallback 200, got HTTP $code"
-printf '%s' "$body" | grep -q '"answer"' || fail "fallback body lacks the schema-valid answer: $body"
-printf '%s' "$body" | grep -q '"other"' && fail "cheap lying body leaked to the client: $body"
+# SSE double-encodes the content JSON (quotes escaped), so match bare words.
+printf '%s' "$body" | grep -q 'answer' || fail "fallback body lacks the schema-valid answer: $body"
+printf '%s' "$body" | grep -q 'other' && fail "cheap lying body leaked to the client: $body"
 echo "ok: guarded request answered with the frontier's schema-valid replay (HTTP $code)"
 
 # The opt-out tenant sees the raw (lying) cheap body — guard bypassed.
@@ -114,7 +116,7 @@ resp=$(post_and_code "$OPT_OUT_KEY" "$GUARDED_BODY")
 code=$(printf '%s' "$resp" | tail -1)
 body=$(printf '%s' "$resp" | sed '$d')
 [ "$code" = "200" ] || fail "opt-out request: expected raw 200, got HTTP $code"
-printf '%s' "$body" | grep -q '"other"' || fail "opt-out tenant should see the cheap body untouched: $body"
+printf '%s' "$body" | grep -q 'other' || fail "opt-out tenant should see the cheap body untouched: $body"
 echo "ok: opt-out tenant gets the raw cheap body, no fallback (ITEM-027 AC1)"
 
 # Traces settle in the DB after a telemetry flush; assert the guard events.
