@@ -15,7 +15,15 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-018 | First real developer onboarding | improvement | refined |
 | ITEM-019 | Dashboard polish for external developers | improvement | refined |
 | ITEM-020 | Cost anomaly alerts | feature | refined |
-| ITEM-021 | Self-healing schema guard (Slice 4) | feature | refined |
-| ITEM-022 | Autonomous OmniRouting (Slice 5) | feature | refined |
+| ITEM-023 | Schema guard: buffered validation seam | feature | refined |
+| ITEM-024 | Schema guard: compile + validate | feature | refined |
+| ITEM-025 | Schema guard: transparent fallback circuit | feature | refined |
+| ITEM-026 | Schema guard: guard telemetry | feature | refined |
+| ITEM-027 | Schema guard: activation + regression safety | feature | refined |
+| ITEM-028 | OmniRouting: FastEmbedder | feature | refined |
+| ITEM-029 | OmniRouting: task-centroid matching | feature | refined |
+| ITEM-030 | OmniRouting: Lagrangian budget solver | feature | refined |
+| ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — gated on Slice 3 (distillation, parked by PO) |
+| ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — gated on Slice 3 (distillation, parked by PO) |
 
-_Last updated: 2026-09-05_ — replenished (Rule 5): ITEM-018..020 refined (live-product, small at top), ITEM-021/022 refined with breakdowns (Slice 4/5 — both now scoped with hosted-model cores orderable above Slice 3; distillation-gated extensions staged, see REFINEMENT_LOG 2026-09-05). Archived ITEM-008..017 remain in `.backlog/ARCHIVED/`.
+_Last updated: 2026-09-05_ — ITEM-021/022 split into pullable slices (ITEM-023..032; parents superseded in `.backlog/ARCHIVED/`). ITEM-031/032 are staged and not pullable today. All slices were refined from the engineering spec — see `REFINEMENT_LOG.md` 2026-09-05.

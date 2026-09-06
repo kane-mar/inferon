@@ -32,3 +32,5 @@
 **Technical Notes:**
 - Source: `wiki/llm-inference/inferon-slice-engineering-spec.md` Slice 4 + roadmap Slice 4; failure-reason list and crate choices from the spec's code-level details
 - Extends the buffering introduced for trace-on-abort (ITEM-009) rather than fighting it; fallback replay reuses the tenant-key upstream path, not the linter
+
+> **SUPERSEDED 2026-09-05** — split into pullable backlog items ITEM-023..027 (buffered validation seam, compile + validate, fallback circuit, guard telemetry, activation + safety). This file keeps the parent story/ACs + open PO decisions.

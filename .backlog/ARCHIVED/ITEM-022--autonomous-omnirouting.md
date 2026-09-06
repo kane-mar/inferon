@@ -33,3 +33,5 @@
 - Source: `wiki/llm-inference/inferon-slice-engineering-spec.md` Slice 5 + roadmap Slice 5; solver formulas and embedder params from the spec's code-level details
 - The spec assumes gpt-4o/claude as frontier; in the DeepSeek-only world "frontier vs cheap" maps to the tenant's original requested model vs the downgrade target — consistent with the ITEM-021 fallback decision
 - Biggest remaining item in the backlog; deliberately chunky until it approaches the top
+
+> **SUPERSEDED 2026-09-05** — split into pullable backlog items ITEM-028..032 (FastEmbedder, task-centroid matching, Lagrangian solver, evolution loop [staged], PagedLoRA serving [staged]). This file keeps the parent story/ACs + open PO decisions.
