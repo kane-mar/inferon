@@ -204,6 +204,11 @@ for d in 7 30 90; do
         "$BASE/v1/dashboard/api/guard?days=$d" -H "Authorization: Bearer $DEV_KEY"
 done
 
+echo "-- ITEM-035 accounts surface (smoke stack has no GITHUB_*/SESSION_SECRET env) --"
+check_status "/auth/me without a session -> 401" 401 "$BASE/auth/me"
+check_status "/auth/login unconfigured -> 503" 503 "$BASE/auth/login"
+check_status "dashboard shell still serves -> 200" 200 "$BASE/v1/dashboard"
+
 echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
 KEYS_URL="$BASE/v1/dashboard/api/operator/keys"
 check_status "keys list without key -> 401" 401 "$KEYS_URL?tenant_id=$GUARDED_ID"

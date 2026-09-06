@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql db/init/007_users.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -164,10 +164,20 @@ echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006)"
+echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006 + 007)"
 # A re-applied 006 must not duplicate the earlier backfill: with the column
 # gone its backfill branch is skipped.
 check_true "re-applied 006 did not duplicate the backfilled key" \
     "SELECT count(*) FROM api_keys WHERE key_hash='legacyhash0001'"
+
+# ITEM-035 migration 007: users (human accounts keyed by GitHub id).
+check_table users
+check_column users id uuid
+check_column users github_id bigint
+check_column users github_login text
+check_column users created_at "timestamp with time zone"
+check_column users last_login_at "timestamp with time zone"
+check_true "users.github_id unique index exists" \
+    "SELECT count(*) FROM pg_indexes WHERE tablename='users' AND indexname='idx_users_github_id'"
 
 echo "ALL SCHEMA CHECKS PASSED"

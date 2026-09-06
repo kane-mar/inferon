@@ -1,6 +1,7 @@
 use inferon::{
-    build_router, load_system_prompt_counts, parse_port, ping_health, telemetry_worker, AppState,
-    PostgresTenantStore, PostgresTraceSink, TraceMessage,
+    auth::PostgresUserStore,
+    build_router, load_system_prompt_counts, parse_port, ping_health, telemetry_worker,
+    AppState, PostgresTenantStore, PostgresTraceSink, TraceMessage,
 };
 use reqwest::Client;
 use sqlx::postgres::PgPoolOptions;
@@ -74,8 +75,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    let http_client = Client::builder().pool_max_idle_per_host(100).build()?;
+    // Human accounts (ITEM-035): `None` when GitHub OAuth is unconfigured —
+    // /auth/login answers 503 then (fail closed on the login screen).
+    let accounts = inferon::auth::Accounts::from_env(
+        http_client.clone(),
+        std::sync::Arc::new(PostgresUserStore::new(pool.clone())),
+    );
+    if accounts.is_none() {
+        tracing::info!(
+            "GitHub OAuth not configured (need GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET) — /auth/login answers 503"
+        );
+    }
+
     let state = Arc::new(AppState {
-        http_client: Client::builder().pool_max_idle_per_host(100).build()?,
+        http_client,
         upstream_url: std::env::var("UPSTREAM_URL")
             .ok()
             .filter(|u| !u.is_empty())
@@ -84,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
+        accounts,
         db: pool,
     });
 

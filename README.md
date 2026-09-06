@@ -129,6 +129,22 @@ Set `UPSTREAM_URL` (full chat-completions URL) when starting the proxy/compose, 
 (kept in the page only, never stored). Views: spend by model, top system-prompt
 clusters, and waste flags with estimated $ impact. Time window: 1/7/30 days.
 
+### Signing in (GitHub OAuth, ITEM-035)
+
+Humans can sign in with GitHub for browser sessions — sessions gate nothing yet
+(the dashboard still reads your tenant API key; `/v1/chat` stays key-authed). With
+`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `SESSION_SECRET` set:
+
+- `GET /auth/login` — redirects to GitHub; unconfigured → HTTP 503
+  (`oauth_not_configured`)
+- `GET /auth/callback` — completes the dance, sets the signed session cookie
+  (HttpOnly, SameSite=Lax, Secure over TLS), redirects to `/v1/dashboard`
+- `GET /auth/me` — the signed-in user (`github_id`/`github_login`) or 401
+- `POST /auth/logout` — expires the session cookie
+
+Sessions are stateless signed cookies (HMAC-SHA256, 30-day expiry); a forged or
+expired cookie is treated as signed out, never an error.
+
 JSON APIs (all require `Authorization: Bearer <tenant key>` and are tenant-scoped —
 no tenant can see another tenant's data):
 

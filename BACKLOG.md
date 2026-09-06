@@ -13,7 +13,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-018 | First real developer onboarding | improvement | **verified** — AC1–AC5 system checks done live 2026-09-06; **awaiting PO handoff** of staged key (breakdown note in item file; ordering decision for the PO in REFINEMENT_LOG) |
-| ITEM-035 | Accounts: GitHub OAuth + sessions | feature | refined (from ITEM-033) — pullable |
+| ITEM-035 | Accounts: GitHub OAuth + sessions | feature | **in progress** (pulled 2026-09-07) — all slices green (151 tests); live verification pending |
 | ITEM-036 | Accounts: self-serve signup — tenant + key auto-provisioned | feature | refined (from ITEM-033) — pullable |
 | ITEM-037 | Accounts: operator console — platform role + HTML screen | feature | refined (from ITEM-033) — pullable |
 | ITEM-038 | Accounts: tenant key management (dashboard) | feature | refined (from ITEM-033) — pullable |

@@ -705,6 +705,7 @@ const HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <h1>Inferon — cost leaks</h1>
+<p class="muted" id="session"></p>
 <p class="keyline">API key <input id="key" type="password" placeholder="sk-..." autocomplete="off">
   <button onclick="setDays(7)">7d</button><button onclick="setDays(30)">30d</button><button onclick="setDays(90)">90d</button>
   <span id="days"></span></p>
@@ -804,6 +805,31 @@ async function load() {
 }
 function setDays(d) { days = d; load(); }
 document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+
+// Account strip (ITEM-035 AC4): /auth/me answers 200 when a session cookie
+// exists and 401 otherwise — the shell renders sign-in or log-out state
+// client-side. The API key stays out of this call (no Authorization header).
+async function renderSession() {
+  const el = $('session');
+  let signedIn = null;
+  try {
+    const r = await fetch('/auth/me', { headers: { Accept: 'application/json' } });
+    if (r.ok) signedIn = await r.json();
+  } catch (e) { /* signed out or unreachable — show the sign-in link */ }
+  if (signedIn) {
+    el.innerHTML = 'Signed in as <b>' + esc(signedIn.github_login) + '</b> · ' +
+      '<a id="signOutLink" href="/auth/logout">log out</a>';
+  } else {
+    el.innerHTML = '<a id="signOutLink" href="/auth/login">Sign in with GitHub</a>';
+  }
+  const link = $('signOutLink');
+  if (link && signedIn) link.onclick = e => { e.preventDefault(); signOut(); };
+}
+async function signOut() {
+  try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) { /* best effort */ }
+  location.reload();
+}
+renderSession();
 </script>
 </body>
 </html>"#;
@@ -838,6 +864,7 @@ mod tests {
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
+            accounts: None,
             db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
                 .unwrap(),
         })
@@ -1164,6 +1191,26 @@ mod tests {
         );
         // The message must render when the summary reports zero requests.
         assert!(HTML.contains("s.requests === 0"), "empty state wired to the summary count");
+    }
+
+    /// ITEM-035 AC4: the shell shows sign-in/log-out state, driven by /auth/me
+    /// without ever attaching the tenant API key (sessions are cookie-based).
+    #[test]
+    fn html_has_a_sign_in_state_affordance() {
+        assert!(HTML.contains("id=\"session\""), "session strip element");
+        assert!(HTML.contains("href=\"/auth/login\""), "sign-in link");
+        assert!(HTML.contains("Sign in with GitHub"), "sign-in text");
+        assert!(HTML.contains("fetch('/auth/me'"), "me fetched bearer-free");
+        assert!(
+            HTML.contains("fetch('/auth/logout', { method: 'POST' })"),
+            "logout is a POST"
+        );
+        assert!(HTML.contains("signedIn.github_login"), "renders the github login");
+        // The account calls must not ride the keyed get() helper.
+        assert!(
+            !HTML.contains("get('/auth/me'") && !HTML.contains("get('/auth/logout'"),
+            "me/logout are not keyed API calls"
+        );
     }
 
     /// AC3: currency is rendered from the decimal string, never through a

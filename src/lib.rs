@@ -4,9 +4,11 @@ pub mod guard;
 use guard::GuardReason;
 pub mod mock_upstream;
 pub mod cost;
+pub mod auth;
 pub mod dashboard;
 pub mod linter;
 pub mod router;
+pub mod session;
 
 use axum::{
     body::Body,
@@ -616,6 +618,9 @@ pub struct AppState {
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
     pub operator_key: Option<String>,
+    /// Human accounts (GitHub OAuth + signed sessions, ITEM-035). `None` when
+    /// OAuth is unconfigured — `/auth/login` answers 503 then (AC3).
+    pub accounts: Option<Arc<auth::Accounts>>,
     pub db: sqlx::PgPool,
 }
 
@@ -643,6 +648,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/operator/keys/:key_id/revoke",
             post(dashboard::operator_key_revoke),
         )
+        .route("/auth/login", get(auth::login))
+        .route("/auth/callback", get(auth::callback))
+        .route("/auth/logout", post(auth::logout))
+        .route("/auth/me", get(auth::me))
         .with_state(state)
 }
 
@@ -1659,6 +1668,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1719,6 +1729,7 @@ mod tests {
             budget_store,
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1848,6 +1859,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -1867,6 +1879,7 @@ mod tests {
             tenant_store: state.tenant_store.clone(),
             budget_store: state.budget_store.clone(),
             operator_key: state.operator_key.clone(),
+            accounts: None,
             db: state.db.clone(),
             telemetry_tx: tx,
         });
@@ -2405,6 +2418,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -2575,6 +2589,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -2639,6 +2654,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )
@@ -2928,6 +2944,7 @@ mod tests {
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
+            accounts: None,
             db: sqlx::PgPool::connect_lazy(
                 "postgres://inferon:inferon@localhost:5432/inferon",
             )

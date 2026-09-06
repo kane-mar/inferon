@@ -13,6 +13,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 hex = "0.4"
 sha2 = "0.10"
+hmac = "0.12"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json", "rust_decimal"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 rust_decimal = { version = "1", features = ["serde"] }

@@ -1087,6 +1087,7 @@ dependencies = [
  "axum",
  "futures-util",
  "hex",
+ "hmac",
  "jsonschema",
  "reqwest 0.12.28",
  "rust_decimal",

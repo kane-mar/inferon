@@ -31,3 +31,25 @@
   dashboard routes only
 - Cookie plumbing: hand-rolled Set-Cookie parsing vs a cookie crate — pick the
   smaller surface (decision recorded when pulled)
+
+## Decisions recorded at pull (2026-09-07)
+
+- **Cookie plumbing: hand-rolled** (`session.rs`). One read header + one write
+  header for two cookies (session + one-time OAuth state) — smaller surface
+  than a cookie crate. Only new dep: `hmac = "0.12"` (sha2 already present).
+  Session token = `<user_id>.<expiry_hex>.<hmac_hex>` (HMAC-SHA256 over the
+  payload with SESSION_SECRET); verification never errors — forged/expired →
+  signed out.
+- **Mock GitHub: in-test trait fake** (`GithubClient` seam, FakeGithub in
+  tests). No server/ports; the real OAuth dance needs a registered GitHub app
+  (PO dependency — live verification covers the unconfigured surface until
+  creds exist).
+- **Current-user resolution: request extractor** (`CurrentUser` via
+  FromRequestParts), not middleware — no authZ exists yet; a middleware layer
+  lands with ITEM-036/037 when routes actually gate.
+- **Module layout**: `session.rs` (pure token/cookie core) + `auth.rs` (users
+  store, OAuth client, `/auth/*` handlers). AppState gains one `accounts:
+  Option<Arc<Accounts>>` field (None = unconfigured).
+- Kept as a single backlog item; slices are the in-item TDD progression
+  (session tokens → users store + migration 007 → OAuth client seam →
+  `/auth/*` routes → dashboard shell state).
