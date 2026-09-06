@@ -738,7 +738,7 @@ async fn guarded_stream_response(
         }
     };
 
-    // Flush gate: container integrity now; schema conformance lands in 024.
+    // Flush gate: container integrity then schema conformance (ITEM-024).
     let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
     match guard::check_guarded_sse(&bytes, schema.as_ref()) {
         Ok(()) => {
@@ -971,6 +971,16 @@ mod tests {
     use tower::ServiceExt;
 
     const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
+    /// SSE body whose single delta content is `content_json` (a JSON object
+    /// double-encoded inside the delta string, like a real chat completion).
+    fn delta_only_stream(content_json: &str) -> String {
+        let frame = serde_json::json!({
+            "id": "1",
+            "choices": [{"delta": {"content": content_json}}]
+        });
+        format!("data: {frame}\n\ndata: [DONE]\n\n")
+    }
+
     const SSE_BODY_NO_USAGE: &str =
         "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
     const CLIENT_KEY: &str = "sk-client-dev-key";
@@ -1060,10 +1070,9 @@ mod tests {
                                 .unwrap()
                         }
                         Some("gpt-4o-mini") if {
-                            // Cheap tier + schema contract: the guard only
-                            // engages when the mock sends a truncated stream
-                            // (content marker "truncated") — valid streams hit
-                            // the generic SSE arm below.
+                            // Guard-triggered request (schema + cheap model):
+                            // frames arrive but [DONE] never does, so the
+                            // buffered guard must reject rather than forward.
                             payload["messages"][0]["content"].as_str() == Some("truncated")
                         } => {
                             axum::response::Response::builder()
@@ -1071,6 +1080,26 @@ mod tests {
                                 .body(Body::from(
                                     "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
                                 ))
+                                .unwrap()
+                        }
+                        Some("gpt-4o-mini") if {
+                            // Content that satisfies the request's answer schema
+                            // (well-formed JSON object) — must be flushed.
+                            payload["messages"][0]["content"].as_str() == Some("valid-json")
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                                .unwrap()
+                        }
+                        Some("gpt-4o-mini") if {
+                            // Well-formed JSON that violates the answer schema
+                            // (missing required "answer") — must be rejected.
+                            payload["messages"][0]["content"].as_str() == Some("wrong-shape")
+                        } => {
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
                                 .unwrap()
                         }
                         Some("gpt-4o-mini") if {
@@ -2053,7 +2082,7 @@ mod tests {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "answer",
-                    "schema": {"type": "object", "properties": {"answer": {"type": "string"}}}
+                    "schema": {"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}
                 }
             },
             "messages": [{"role": "user", "content": marker}]
@@ -2066,7 +2095,8 @@ mod tests {
         // gpt-4o-mini + schema contract + stream -> guarded path. The mock's
         // generic streaming route returns a well-formed SSE body; the client
         // must receive it whole (buffered, then flushed after [DONE]).
-        let (response, mut rx) = traced_request(&guarded_stream_body("gpt-4o-mini", "hi"), Some(CLIENT_KEY)).await;
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("gpt-4o-mini", "valid-json"), Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         assert_eq!(
             response.headers().get("content-type").unwrap(),
@@ -2075,10 +2105,33 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
             .unwrap();
-        assert_eq!(body.as_ref(), SSE_BODY.as_bytes(), "buffered body flushed whole");
+        let expected = delta_only_stream(r#"{"answer":"42"}"#);
+        assert_eq!(
+            body.as_ref(),
+            expected.as_bytes(),
+            "buffered schema-valid body flushed whole after [DONE]"
+        );
         let msg = rx.recv().await.expect("trace emitted");
         assert_eq!(msg.status_code, 200);
         assert!(!msg.truncated, "clean guarded flush is not truncated");
+    }
+
+    #[tokio::test]
+    async fn guarded_schema_violation_is_rejected_not_forwarded() {
+        // 024: content is well-formed JSON but violates the request's schema
+        // (mock marker "wrong-shape" streams {"other":1} against an answer
+        // schema requiring "answer") — the buffered response must not reach
+        // the client; classification itself is pinned by guard.rs unit tests.
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("gpt-4o-mini", "wrong-shape"), Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_GATEWAY);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["type"], "guard_rejected");
+        let msg = rx.recv().await.expect("trace emitted");
+        assert_eq!(msg.status_code, 200);
     }
 
     #[tokio::test]

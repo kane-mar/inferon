@@ -117,12 +117,68 @@ pub fn validate_sse_container(bytes: &[u8]) -> Result<(), GuardReason> {
     }
 }
 
-/// Full flush gate for a buffered guarded response: container integrity
-/// (this slice) and — from ITEM-024 — schema conformance of the extracted
+/// Full flush gate for a buffered guarded response (ITEM-023 + ITEM-024):
+/// container integrity first, then schema conformance of the extracted
 /// content against the request's contract. Returns the reason the response
 /// must not reach the client.
-pub fn check_guarded_sse(bytes: &[u8], _schema: Option<&Value>) -> Result<(), GuardReason> {
-    validate_sse_container(bytes)
+pub fn check_guarded_sse(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
+    validate_sse_container(bytes)?;
+    validate_content(bytes, schema)
+}
+
+/// Concatenated plain-text content of the response, per the spec: content
+/// under validation is `choices[0].message.content`. Streaming deltas arrive
+/// as successive `choices[0].delta.content` strings across frames; the
+/// assistant message (role present, non-empty delta) is assembled in order.
+/// Returns `None` when the stream carries no assistant content at all.
+pub fn extract_content(bytes: &[u8]) -> Option<String> {
+    let mut content = String::new();
+    for line in bytes.split(|&b| b == b'\n') {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let Some(data) = line.strip_prefix(b"data:") else {
+            continue;
+        };
+        let data = trim_ws(data);
+        if data == b"[DONE]" {
+            continue;
+        }
+        let Ok(frame) = serde_json::from_slice::<Value>(data) else {
+            continue;
+        };
+        let choice = frame["choices"].as_array().and_then(|a| a.first());
+        let delta = choice.and_then(|c| c["delta"]["content"].as_str());
+        if let Some(delta) = delta {
+            content.push_str(delta);
+        }
+    }
+    (!content.is_empty()).then_some(content)
+}
+
+/// ITEM-024: validate the accumulated guarded response against the request's
+/// JSON-schema contract. Failure classes per spec `fallback_circuit.rs`:
+///   - content is not valid JSON syntax  -> InvalidJsonSyntax
+///   - the request's schema does not compile -> MalformedSchemaContract
+///   - well-formed JSON violates the schema -> SchemaViolation
+/// Empty/missing content on an otherwise complete stream is a defined edge
+/// case (no content to validate -> schema violation, never a panic).
+pub fn validate_content(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
+    let Some(schema) = schema else {
+        // No contract to enforce — the guard has nothing to check. (Guarded
+        // requests always carry one; this keeps the function total.)
+        return Ok(());
+    };
+    let Some(content) = extract_content(bytes) else {
+        // Complete stream but no assistant content to validate — defined edge
+        // case (ITEM-024 AC3), classified as a schema violation, never a panic.
+        return Err(GuardReason::SchemaViolation);
+    };
+    let instance: Value =
+        serde_json::from_str(&content).map_err(|_| GuardReason::InvalidJsonSyntax)?;
+    let validator = jsonschema::validator_for(schema)
+        .map_err(|_| GuardReason::MalformedSchemaContract)?;
+    validator
+        .validate(&instance)
+        .map_err(|_| GuardReason::SchemaViolation)
 }
 
 fn trim_ws(mut bytes: &[u8]) -> &[u8] {
@@ -297,5 +353,132 @@ mod tests {
     fn carriage_returns_are_tolerated() {
         let crlf = complete_stream().replace("\n\n", "\r\n\r\n");
         assert_eq!(validate_sse_container(crlf.as_bytes()), Ok(()));
+    }
+
+    // --- ITEM-024: schema compile + validate ---
+
+    fn answer_schema() -> Value {
+        serde_json::json!({"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]})
+    }
+
+    /// SSE stream whose delta content is `payload` (a JSON string inside a
+    /// JSON string — double-encoded like a real chat completion).
+    fn stream_with_content(content_json: &str) -> String {
+        let escaped = content_json.replace('\\', "\\\\").replace('"', "\\\"");
+        format!(
+            "{}",
+            sse_frame(&format!(r#"{{"id":"1","choices":[{{"delta":{{"content":"{escaped}"}}}}]}}"#))
+        )
+        + &format!("data: [DONE]\n\n")
+    }
+
+    #[test]
+    fn extract_content_concatenates_deltas_in_order() {
+        // Content split across two delta frames must rejoin in order.
+        let stream = format!(
+            "{}{}{}",
+            sse_frame(r#"{"id":"1","choices":[{"delta":{"content":"{\"an"}}]}"#),
+            sse_frame(r#"{"id":"1","choices":[{"delta":{"content":"swer\":\"42\"}"}}]}"#),
+            "data: [DONE]\n\n"
+        );
+        assert_eq!(
+            extract_content(stream.as_bytes()).as_deref(),
+            Some("{\"answer\":\"42\"}")
+        );
+    }
+
+    #[test]
+    fn extract_content_skips_non_delta_frames() {
+        // Usage frames, role frames and [DONE] contribute nothing.
+        let stream = format!(
+            "{}{}{}",
+            sse_frame(r#"{"id":"1","choices":[{"delta":{"role":"assistant"}}]}"#),
+            sse_frame(r#"{"id":"1","choices":[{"delta":{"content":"hi"}}]}"#),
+            sse_frame(r#"{"id":"1","choices":[],"usage":{"prompt_tokens":5}}"#),
+        ) + "data: [DONE]\n\n";
+        assert_eq!(extract_content(stream.as_bytes()).as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn extract_content_is_none_when_no_assistant_content() {
+        let stream = format!("{}{}", sse_frame(r#"{"id":"1","choices":[]}"#), "data: [DONE]\n\n");
+        assert_eq!(extract_content(stream.as_bytes()), None);
+    }
+
+    #[test]
+    fn valid_json_matching_schema_passes() {
+        let stream = stream_with_content(r#"{"answer":"42"}"#);
+        assert_eq!(
+            validate_content(stream.as_bytes(), Some(&answer_schema())),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn invalid_json_syntax_is_classified() {
+        // Model emitted `{not valid json` — syntax failure, not schema.
+        let stream = stream_with_content("{not valid json");
+        assert_eq!(
+            validate_content(stream.as_bytes(), Some(&answer_schema())),
+            Err(GuardReason::InvalidJsonSyntax)
+        );
+    }
+
+    #[test]
+    fn well_formed_json_violating_schema_is_classified() {
+        // Valid JSON, missing the required "answer" property.
+        let stream = stream_with_content(r#"{"other":1}"#);
+        assert_eq!(
+            validate_content(stream.as_bytes(), Some(&answer_schema())),
+            Err(GuardReason::SchemaViolation)
+        );
+    }
+
+    #[test]
+    fn malformed_schema_contract_is_classified() {
+        // The request's own schema is not a valid JSON Schema.
+        let bad_schema = serde_json::json!({ "type": 42 });
+        let stream = stream_with_content(r#"{"answer":"42"}"#);
+        assert_eq!(
+            validate_content(stream.as_bytes(), Some(&bad_schema)),
+            Err(GuardReason::MalformedSchemaContract)
+        );
+    }
+
+    #[test]
+    fn missing_content_is_a_defined_schema_violation_not_a_panic() {
+        // Complete stream, no content to validate (ITEM-024 AC3 edge case).
+        let stream = format!("{}{}", sse_frame(r#"{"id":"1","choices":[]}"#), "data: [DONE]\n\n");
+        assert_eq!(
+            validate_content(stream.as_bytes(), Some(&answer_schema())),
+            Err(GuardReason::SchemaViolation)
+        );
+    }
+
+    #[test]
+    fn valid_stream_without_a_contract_passes_content_check() {
+        // Guard can't enforce what wasn't asked for (no schema).
+        let stream = stream_with_content("anything at all");
+        assert_eq!(validate_content(stream.as_bytes(), None), Ok(()));
+    }
+
+    #[test]
+    fn check_guarded_sse_runs_container_then_content_gate() {
+        let good = stream_with_content(r#"{"answer":"42"}"#);
+        assert_eq!(
+            check_guarded_sse(good.as_bytes(), Some(&answer_schema())),
+            Ok(())
+        );
+        // Schema violation inside a well-formed container -> SchemaViolation.
+        let bad = stream_with_content(r#"{"other":1}"#);
+        assert_eq!(
+            check_guarded_sse(bad.as_bytes(), Some(&answer_schema())),
+            Err(GuardReason::SchemaViolation)
+        );
+        // Truncated container fails before content even runs.
+        assert_eq!(
+            check_guarded_sse(b"data: {\"a\":1}\n\n", Some(&answer_schema())),
+            Err(GuardReason::UpstreamFailure)
+        );
     }
 }
