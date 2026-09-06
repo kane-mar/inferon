@@ -15,7 +15,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-018 | First real developer onboarding | improvement | refined |
 | ITEM-019 | Dashboard polish for external developers | improvement | refined |
 | ITEM-020 | Cost anomaly alerts | feature | refined |
-| ITEM-021 | Self-healing schema guard (Slice 4) | feature | captured |
-| ITEM-022 | Autonomous OmniRouting (Slice 5) | feature | captured |
+| ITEM-021 | Self-healing schema guard (Slice 4) | feature | refined |
+| ITEM-022 | Autonomous OmniRouting (Slice 5) | feature | refined |
 
-_Last updated: 2026-09-05_ — replenished (Rule 5): ITEM-018..020 refined (live-product, small at top), ITEM-021/022 captured (Slice 4/5, chunky at bottom). Slice 3 (LoRA distillation) deliberately **not** backlogged — parked last by PO (see REFINEMENT_LOG 2026-09-05). Archived ITEM-008..017 remain in `.backlog/ARCHIVED/`.
+_Last updated: 2026-09-05_ — replenished (Rule 5): ITEM-018..020 refined (live-product, small at top), ITEM-021/022 refined with breakdowns (Slice 4/5 — both now scoped with hosted-model cores orderable above Slice 3; distillation-gated extensions staged, see REFINEMENT_LOG 2026-09-05). Archived ITEM-008..017 remain in `.backlog/ARCHIVED/`.

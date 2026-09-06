@@ -8,6 +8,13 @@
 - **Backlog empty (Rule 5)** — replenish. Candidate order (Slice 3 moved to the END by product owner, 2026-09-05): fine-grained live-product items first (real developer onboarding / first external tenant, dashboard polish, anomaly alerts — these get full stories when the backlog is written), then Slice 4 self-healing schema guard, then Slice 5 autonomous OmniRouting, with **Slice 3 automated LoRA distillation last** (chunky at the bottom; needs breakdown only if it ever reaches the top). Roadmap reference: wiki/llm-inference/inferon-product-roadmap.md.
 - **Replenished (later same day)**: ITEM-018..020 added refined (stories + ACs), ITEM-021 (Slice 4) + ITEM-022 (Slice 5) added captured/chunky. Slice 3 not added — parked per PO. Commit 2d372e9.
 
+## 2026-09-05 (later) — ITEM-021 + ITEM-022 refined
+
+- Broke both roadmap items down from the engineering spec (`inferon-slice-engineering-spec.md` Slice 4/5 code-level details) into sprintable slices with mini-ACs (021a-e, 022a-e) + gates/open decisions.
+- **Key finding — the Slice 3 dependency evaporates for the MVP of both**: 021's schema guard protects the *hosted cheap tier* the Slice 2 router already sends traffic to (spec only frames distilled traffic; failure modes identical), and 022's Lagrangian/embedding core routes between *hosted* frontier vs cheap tiers. Only the extensions (021: guard distilled vLLM traffic; 022d/e: evolution loop + PagedLoRA pool) need Slice 3. Both items are now orderable above distillation — consistent with the PO parking Slice 3.
+- Decisions logged in-item: 021 schema source = response_format.json_schema.schema; fallback = original requested model (frontier in a DeepSeek-only world). 022 epsilon schedule verbatim from spec burn-ratio formulas (1.2/0.5 → 0.02/0.15/0.05), consuming ITEM-016's existing counters; embedding classifier additive over ITEM-015 heuristics.
+- Open PO decisions flagged: fallback frontier config, buffer-vs-incremental validation, guard default scope, embedding-model artifact shipping (affects snapshot size), and whether 022b/c should wait for real traffic (018/020) before building.
+
 ## 2026-09-04 — Slice 1 complete; backlog replenished
 
 - **Archived**: ITEM-001..007 (Slice 1: docker scaffold, schema, zero-copy proxy, tenant auth, telemetry, cost linter, dashboard) — all ACs verified live on disposable Vultr hosts; 45 tests green.
