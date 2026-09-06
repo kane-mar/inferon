@@ -2,9 +2,9 @@
 
 ## Product Goal
 
-Get Inferon in front of real developers at `https://inferon.agilefederation.com/v1` and make cost protection automatic: a durable, trustworthy deployment with **true** cost numbers, then Slice 2's automatic cost routing and budget enforcement.
+Inferon is live at `https://inferon.agilefederation.com/v1` with true cost numbers and automatic cost protection (Slice 1 + 2 delivered). The next horizon: put it in front of **real external developers**, make the dashboard and alerting trustworthy enough for them to stay, then walk the autonomy roadmap — schema guard, then OmniRouting — with LoRA distillation deliberately parked last.
 
-Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007) is complete and archived.
+Delivered: Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007), Slice 2 (heuristic router + budget circuit breaker — ITEM-015/016) plus ITEM-008..014, 017 — all archived (see `.backlog/ARCHIVED/`).
 
 Project decisions that shape this backlog (see `wiki/llm-inference/inferon-project-direction.md`): Docker everywhere (deployment unit = image), Postgres for telemetry/control plane, working name **inferon**, default AI **DeepSeek**, toolchain **Rust + bash only** (no Python, no Ruby — SQL migrations unaffected).
 
@@ -12,15 +12,10 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-008 | DeepSeek real pricing in the cost table | bug | **done — archived 2026-09-04** |
-| ITEM-009 | Trace emitted when a client aborts a stream | bug | **done — archived 2026-09-04** |
-| ITEM-017 | Cache-hit-aware cost accounting | bug | **done — archived 2026-09-04** |
-| ITEM-010 | Rule B repeat counts survive proxy restarts | bug | **done — archived 2026-09-04** |
-| ITEM-011 | Runbook: seed tenants, dashboard URL, ops notes | improvement | **done — archived 2026-09-04** |
-| ITEM-012 | smoke.sh exercises chat + dashboard endpoints | improvement | **done — archived 2026-09-04** |
-| ITEM-013 | Operator view across tenants | feature | **done — archived 2026-09-04** |
-| ITEM-014 | Durable deployment (live at inferon.agilefederation.com) | improvement | **done — archived 2026-09-05** |
-| ITEM-015 | Heuristic model router (Slice 2) | feature | **done — archived 2026-09-04** |
-| ITEM-016 | Postgres budget circuit breaker (Slice 2) | feature | **done — archived 2026-09-04** |
+| ITEM-018 | First real developer onboarding | improvement | refined |
+| ITEM-019 | Dashboard polish for external developers | improvement | refined |
+| ITEM-020 | Cost anomaly alerts | feature | refined |
+| ITEM-021 | Self-healing schema guard (Slice 4) | feature | captured |
+| ITEM-022 | Autonomous OmniRouting (Slice 5) | feature | captured |
 
-_Last updated: 2026-09-05_ — all items archived; **backlog is empty (Rule 5 — needs replenishment)**. Product goal delivered: https://inferon.agilefederation.com/v1 live on the durable host behind HTTPS with real tenants.
+_Last updated: 2026-09-05_ — replenished (Rule 5): ITEM-018..020 refined (live-product, small at top), ITEM-021/022 captured (Slice 4/5, chunky at bottom). Slice 3 (LoRA distillation) deliberately **not** backlogged — parked last by PO (see REFINEMENT_LOG 2026-09-05). Archived ITEM-008..017 remain in `.backlog/ARCHIVED/`.
