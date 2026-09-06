@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -70,7 +70,6 @@ check_table tenants
 check_table traces
 
 check_column tenants id uuid
-check_column tenants api_key_hash "character varying"
 check_column tenants upstream_openai_key text
 check_column tenants upstream_anthropic_key text
 check_column tenants created_at "timestamp with time zone"
@@ -103,9 +102,6 @@ check_column tenant_configurations budget_limit_cents bigint
 check_column tenant_configurations current_spend_cents bigint
 check_column tenant_configurations cheap_fallback_model text
 
-check_true "tenants.api_key_hash is unique" \
-    "SELECT count(*) FROM information_schema.table_constraints WHERE table_name='tenants' AND constraint_type='UNIQUE'"
-
 check_true "traces.tenant_id FK cascades" \
     "SELECT count(*) FROM information_schema.table_constraints tc JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='traces' AND tc.constraint_type='FOREIGN KEY' AND rc.delete_rule='CASCADE'"
 
@@ -133,10 +129,45 @@ check_column tenant_configurations guard_enabled boolean
 check_true "guard_enabled defaults to true" \
     "SELECT column_default = 'true' FROM information_schema.columns WHERE table_name='tenant_configurations' AND column_name='guard_enabled'"
 
+# ITEM-034 migration 006: api_keys rows (multi-key + revoke). On a fresh
+# volume the retired tenants.api_key_hash column is already gone — auth
+# resolves through api_keys.
+check_table api_keys
+check_column api_keys id uuid
+check_column api_keys tenant_id uuid
+check_column api_keys label text
+check_column api_keys key_hash "character varying"
+check_column api_keys created_at "timestamp with time zone"
+check_column api_keys revoked_at "timestamp with time zone"
+check_column api_keys last_used_at "timestamp with time zone"
+check_true "api_keys.key_hash unique index exists" \
+    "SELECT count(*) FROM pg_indexes WHERE tablename='api_keys' AND indexname='idx_api_keys_hash'"
+check_true "api_keys.tenant_id FK cascades" \
+    "SELECT count(*) FROM information_schema.table_constraints tc JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='api_keys' AND tc.constraint_type='FOREIGN KEY' AND rc.delete_rule='CASCADE'"
+check_true "tenants.api_key_hash retired on a fresh volume" \
+    "SELECT count(*) = 0 FROM information_schema.columns WHERE table_name='tenants' AND column_name='api_key_hash'"
+
+# ITEM-034 AC1 upgrade path: a pre-006 database (api_key_hash column present)
+# backfills each tenant's single key as its first api_keys row, then retires
+# the column. Simulated here by re-adding the column + a legacy tenant, then
+# re-applying 006.
+psql "ALTER TABLE tenants ADD COLUMN api_key_hash VARCHAR(64) UNIQUE;" >/dev/null 2>&1
+psql "INSERT INTO tenants (api_key_hash, upstream_openai_key)
+      VALUES ('legacyhash0001', 'sk-legacy-master');" >/dev/null 2>&1
+docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < db/init/006_api_keys.sql
+check_true "upgrade backfills the legacy key as an api_keys row" \
+    "SELECT count(*) FROM api_keys WHERE key_hash='legacyhash0001' AND label='migrated'"
+check_true "upgrade retires api_key_hash again" \
+    "SELECT count(*) = 0 FROM information_schema.columns WHERE table_name='tenants' AND column_name='api_key_hash'"
+
 echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005)"
+echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006)"
+# A re-applied 006 must not duplicate the earlier backfill: with the column
+# gone its backfill branch is skipped.
+check_true "re-applied 006 did not duplicate the backfilled key" \
+    "SELECT count(*) FROM api_keys WHERE key_hash='legacyhash0001'"
 
 echo "ALL SCHEMA CHECKS PASSED"

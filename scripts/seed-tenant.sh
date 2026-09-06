@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Mint a tenant (ITEM-011): stores sha256(dev key) + the tenant's upstream master
-# key, prints the developer-facing key.
+# Mint a tenant (ITEM-011, ITEM-034): stores sha256(dev key) as the tenant's
+# first api_keys row + the tenant's upstream master key, prints the
+# developer-facing key. Only the hash is stored; one tenant may hold several
+# revocable keys.
 #
 # Usage: seed-tenant.sh "<upstream master key>" [tenant-label]
 # Needs a running Postgres (docker compose up -d postgres) and psql on PATH,
@@ -27,8 +29,15 @@ psql_cmd() {
     fi
 }
 
-psql_cmd "INSERT INTO tenants (api_key_hash, upstream_openai_key)
-          VALUES ('$HASH', '$MASTER_KEY') ON CONFLICT (api_key_hash) DO NOTHING;" >/dev/null
+# Tenant + first key row in one statement (ITEM-034): tenants no longer
+# carries the key hash — api_keys does. Each run mints a fresh tenant with a
+# fresh random key (the pre-006 single-hash dedupe anchor is gone).
+psql_cmd "WITH t AS (
+              INSERT INTO tenants (upstream_openai_key) VALUES ('$MASTER_KEY')
+              RETURNING id
+          )
+          INSERT INTO api_keys (tenant_id, label, key_hash)
+          SELECT id, '$LABEL', '$HASH' FROM t;" >/dev/null
 
 echo "tenant seeded (label: $LABEL)"
 echo "developer API key: $DEV_KEY"

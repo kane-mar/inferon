@@ -33,31 +33,126 @@ const MAX_REQUEST_BYTES: usize = 10 * 1024 * 1024;
 
 /// A resolved tenant. The upstream key is Inferon-held (the tenant's master
 /// key); client-presented API keys are only ever stored/compared as SHA-256.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tenant {
     pub id: Uuid,
     pub upstream_openai_key: Option<String>,
 }
 
-/// Lookup seam: resolve a tenant from the SHA-256 hash of a client API key.
+/// Metadata for one `api_keys` row (ITEM-034). Only metadata is exposed — key
+/// hashes and key material are never returned by the store. Timestamps render
+/// as text so the store stays chrono-free.
+#[derive(Clone, Debug)]
+pub struct ApiKeyInfo {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub label: String,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
+    pub last_used_at: Option<String>,
+}
+
+impl ApiKeyInfo {
+    pub fn revoked(&self) -> bool {
+        self.revoked_at.is_some()
+    }
+}
+
+/// Lookup + key-management seam over tenants and their `api_keys` rows.
 /// InMemoryTenantStore backs unit tests; PostgresTenantStore is the production
-/// store (schema 001: tenants.api_key_hash UNIQUE, upstream_openai_key TEXT).
+/// store (schema: tenants + api_keys; auth resolves active keys only — a
+/// revoked key stops authenticating immediately, ITEM-034 AC2).
 #[async_trait::async_trait]
 pub trait TenantStore: Send + Sync {
+    /// Resolve a tenant from the SHA-256 hash of a client API key. `None` for
+    /// an unknown hash or a revoked key.
     async fn tenant_by_api_key_hash(
         &self,
         api_key_hash: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Resolve a tenant by id (used by key-mint validation).
+    async fn tenant_by_id(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Mint a key row: stores only the hash, returns the new key id. Errors
+    /// when the tenant does not exist.
+    async fn insert_api_key(
+        &self,
+        tenant_id: Uuid,
+        label: &str,
+        key_hash: &str,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// List a tenant's key metadata, oldest first.
+    async fn list_api_keys(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Revoke a key by id (idempotent). Returns true when a key was actually
+    /// revoked, false when no such active key exists.
+    async fn revoke_api_key(
+        &self,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+#[derive(Clone)]
+struct InMemoryApiKey {
+    id: Uuid,
+    tenant_id: Uuid,
+    label: String,
+    key_hash: String,
+    revoked: bool,
 }
 
 #[derive(Default)]
 pub struct InMemoryTenantStore {
-    tenants: HashMap<String, Tenant>,
+    tenants: HashMap<Uuid, Tenant>,
+    keys: std::sync::Mutex<Vec<InMemoryApiKey>>,
+}
+
+impl Clone for InMemoryTenantStore {
+    fn clone(&self) -> Self {
+        let keys = self.keys.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        Self {
+            tenants: self.tenants.clone(),
+            keys: std::sync::Mutex::new(keys),
+        }
+    }
 }
 
 impl InMemoryTenantStore {
-    pub fn new(tenants: HashMap<String, Tenant>) -> Self {
-        Self { tenants }
+    /// Legacy shape: one active key per (hash → tenant) entry — matches the
+    /// pre-ITEM-034 single-column model most tests seed with.
+    pub fn new(by_key_hash: HashMap<String, Tenant>) -> Self {
+        let mut store = Self::default();
+        for (hash, tenant) in by_key_hash {
+            let tenant_id = tenant.id;
+            store.tenants.insert(tenant_id, tenant);
+            store.keys.lock().unwrap_or_else(|p| p.into_inner()).push(InMemoryApiKey {
+                id: Uuid::new_v4(),
+                tenant_id,
+                label: "seeded".to_string(),
+                key_hash: hash,
+                revoked: false,
+            });
+        }
+        store
+    }
+
+    fn keys(&self) -> std::sync::MutexGuard<'_, Vec<InMemoryApiKey>> {
+        self.keys.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn now_text() -> String {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default()
     }
 }
 
@@ -67,7 +162,75 @@ impl TenantStore for InMemoryTenantStore {
         &self,
         api_key_hash: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.tenants.get(api_key_hash).cloned())
+        let found = self
+            .keys()
+            .iter()
+            .find(|k| !k.revoked && k.key_hash == api_key_hash)
+            .map(|k| k.tenant_id);
+        Ok(found.and_then(|id| self.tenants.get(&id).cloned()))
+    }
+
+    async fn tenant_by_id(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.tenants.get(&tenant_id).cloned())
+    }
+
+    async fn insert_api_key(
+        &self,
+        tenant_id: Uuid,
+        label: &str,
+        key_hash: &str,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+        if !self.tenants.contains_key(&tenant_id) {
+            return Err("tenant not found".into());
+        }
+        let id = Uuid::new_v4();
+        self.keys().push(InMemoryApiKey {
+            id,
+            tenant_id,
+            label: label.to_string(),
+            key_hash: key_hash.to_string(),
+            revoked: false,
+        });
+        Ok(id)
+    }
+
+    async fn list_api_keys(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let now = Self::now_text();
+        let mut keys: Vec<ApiKeyInfo> = self
+            .keys()
+            .iter()
+            .filter(|k| k.tenant_id == tenant_id)
+            .map(|k| ApiKeyInfo {
+                id: k.id,
+                tenant_id: k.tenant_id,
+                label: k.label.clone(),
+                created_at: now.clone(),
+                revoked_at: if k.revoked { Some(now.clone()) } else { None },
+                last_used_at: None,
+            })
+            .collect();
+        // Oldest first (in-memory keys are appended in mint order).
+        keys.sort_by_key(|k| k.created_at.clone());
+        Ok(keys)
+    }
+
+    async fn revoke_api_key(
+        &self,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut keys = self.keys();
+        if let Some(k) = keys.iter_mut().find(|k| k.id == key_id && !k.revoked) {
+            k.revoked = true;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -88,7 +251,9 @@ impl TenantStore for PostgresTenantStore {
         api_key_hash: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
         let row = sqlx::query_as::<_, (Uuid, Option<String>)>(
-            "SELECT id, upstream_openai_key FROM tenants WHERE api_key_hash = $1",
+            "SELECT t.id, t.upstream_openai_key
+             FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
+             WHERE k.key_hash = $1 AND k.revoked_at IS NULL",
         )
         .bind(api_key_hash)
         .fetch_optional(&self.pool)
@@ -97,6 +262,75 @@ impl TenantStore for PostgresTenantStore {
             id,
             upstream_openai_key,
         }))
+    }
+
+    async fn tenant_by_id(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+        let row = sqlx::query_as::<_, (Uuid, Option<String>)>(
+            "SELECT id, upstream_openai_key FROM tenants WHERE id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(id, upstream_openai_key)| Tenant {
+            id,
+            upstream_openai_key,
+        }))
+    }
+
+    async fn insert_api_key(
+        &self,
+        tenant_id: Uuid,
+        label: &str,
+        key_hash: &str,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+        let row: (Uuid,) = sqlx::query_as(
+            "INSERT INTO api_keys (tenant_id, label, key_hash)
+             VALUES ($1, $2, $3) RETURNING id",
+        )
+        .bind(tenant_id)
+        .bind(label)
+        .bind(key_hash)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    async fn list_api_keys(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>)>(
+            "SELECT id, tenant_id, label, created_at::text, revoked_at::text, last_used_at::text
+             FROM api_keys WHERE tenant_id = $1 ORDER BY created_at",
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, tenant_id, label, created_at, revoked_at, last_used_at)| ApiKeyInfo {
+                id,
+                tenant_id,
+                label,
+                created_at,
+                revoked_at,
+                last_used_at,
+            })
+            .collect())
+    }
+
+    async fn revoke_api_key(
+        &self,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let result = sqlx::query("UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL")
+            .bind(key_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 
@@ -401,6 +635,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/operator/by-prompt", get(dashboard::operator_by_prompt))
         .route("/v1/dashboard/api/operator/alerts", get(dashboard::operator_alerts))
         .route("/v1/dashboard/api/operator/guard", get(dashboard::operator_guard))
+        .route(
+            "/v1/dashboard/api/operator/keys",
+            get(dashboard::operator_keys).post(dashboard::operator_keys_create),
+        )
+        .route(
+            "/v1/dashboard/api/operator/keys/:key_id/revoke",
+            post(dashboard::operator_key_revoke),
+        )
         .with_state(state)
 }
 
@@ -692,9 +934,18 @@ pub(crate) async fn authenticate(
 
 /// SHA-256 hex digest of an API key — the only form of a client key that is
 /// ever stored, compared, or logged (AC5).
-fn tenant_hash(key: &str) -> String {
+pub(crate) fn tenant_hash(key: &str) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(key.as_bytes()))
+}
+
+/// Key prefix for client API keys (ITEM-034 mints). Raw keys are shown once
+/// at mint time; only the SHA-256 hash is persisted.
+pub(crate) const CLIENT_KEY_PREFIX: &str = "sk-inferon-";
+
+/// Mint a fresh raw client key (128 bits of randomness, UUID v4 backend).
+pub(crate) fn mint_client_key() -> String {
+    format!("{CLIENT_KEY_PREFIX}{}", Uuid::new_v4().simple())
 }
 
 /// OpenAI-style JSON error response.
@@ -1128,15 +1379,15 @@ mod tests {
     }
 
     fn seeded_store() -> InMemoryTenantStore {
-        let mut tenants = std::collections::HashMap::new();
-        tenants.insert(
+        let mut by_hash = std::collections::HashMap::new();
+        by_hash.insert(
             tenant_hash(CLIENT_KEY),
             Tenant {
                 id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 upstream_openai_key: Some(MASTER_KEY.to_string()),
             },
         );
-        InMemoryTenantStore { tenants }
+        InMemoryTenantStore::new(by_hash)
     }
 
     struct FailingStore;
@@ -1147,6 +1398,36 @@ mod tests {
             &self,
             _api_key_hash: &str,
         ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
+
+        async fn tenant_by_id(
+            &self,
+            _tenant_id: Uuid,
+        ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
+
+        async fn insert_api_key(
+            &self,
+            _tenant_id: Uuid,
+            _label: &str,
+            _key_hash: &str,
+        ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
+
+        async fn list_api_keys(
+            &self,
+            _tenant_id: Uuid,
+        ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
+
+        async fn revoke_api_key(
+            &self,
+            _key_id: Uuid,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Err("tenant store unavailable".into())
         }
     }
@@ -1794,6 +2075,120 @@ mod tests {
         let response = chat_request("this is not json", Some(CLIENT_KEY)).await;
 
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    // --- ITEM-034: api keys as rows (multi-key + revoke) ---
+
+    const SECOND_KEY: &str = "sk-client-dev-key-2";
+
+    /// `seeded_store` plus a second active key (SECOND_KEY) for the same tenant.
+    async fn store_with_second_key() -> (InMemoryTenantStore, uuid::Uuid) {
+        let store = seeded_store();
+        let id = store
+            .insert_api_key(
+                uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+                "ci",
+                &tenant_hash(SECOND_KEY),
+            )
+            .await
+            .expect("mint succeeds");
+        (store, id)
+    }
+
+    #[tokio::test]
+    async fn a_second_active_key_authenticates_to_the_same_tenant() {
+        let (store, _) = store_with_second_key().await;
+        let tenant = store
+            .tenant_by_api_key_hash(&tenant_hash(SECOND_KEY))
+            .await
+            .expect("store ok")
+            .expect("second key resolves");
+        assert_eq!(tenant.id.to_string(), TENANT_ID);
+        // Both keys share the tenant's upstream key.
+        assert_eq!(tenant.upstream_openai_key.as_deref(), Some(MASTER_KEY));
+    }
+
+    #[tokio::test]
+    async fn revoking_a_key_stops_it_authenticating_immediately() {
+        let (store, second_key_id) = store_with_second_key().await;
+        assert!(store
+            .revoke_api_key(second_key_id)
+            .await
+            .expect("revoke ok"), "revoked a live key");
+        assert_eq!(
+            store
+                .tenant_by_api_key_hash(&tenant_hash(SECOND_KEY))
+                .await
+                .expect("store ok"),
+            None,
+            "revoked key resolves to nothing"
+        );
+        // The original key is untouched.
+        assert!(store
+            .tenant_by_api_key_hash(&tenant_hash(CLIENT_KEY))
+            .await
+            .expect("store ok")
+            .is_some());
+        // Revoking again (or an unknown id) reports no-op.
+        assert!(!store
+            .revoke_api_key(second_key_id)
+            .await
+            .expect("revoke ok"), "already revoked");
+        assert!(!store
+            .revoke_api_key(uuid::Uuid::new_v4())
+            .await
+            .expect("revoke ok"), "unknown key id");
+    }
+
+    #[tokio::test]
+    async fn key_mint_rejects_unknown_tenants_and_list_reports_revocation() {
+        let store = seeded_store();
+        assert!(store
+            .insert_api_key(uuid::Uuid::new_v4(), "ci", &tenant_hash("sk-x"))
+            .await
+            .is_err(), "minting for a missing tenant fails");
+        let (store, second_key_id) = store_with_second_key().await;
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let listed = store.list_api_keys(tenant_id).await.expect("list ok");
+        assert_eq!(listed.len(), 2, "seeded + minted key");
+        assert!(listed.iter().any(|k| k.label == "ci" && !k.revoked()));
+        store.revoke_api_key(second_key_id).await.expect("revoke ok");
+        let listed = store.list_api_keys(tenant_id).await.expect("list ok");
+        assert!(listed.iter().any(|k| k.label == "ci" && k.revoked()));
+        assert_eq!(
+            store.list_api_keys(uuid::Uuid::new_v4()).await.expect("list ok").len(),
+            0,
+            "no keys for other tenants"
+        );
+    }
+
+    /// Proxy-level check: chat request against a custom store + custom key.
+    async fn chat_request_with_store(body: &str, key: &str, store: InMemoryTenantStore) -> axum::response::Response {
+        let state = state_with_store(
+            &mock_upstream().await,
+            std::sync::Arc::new(store),
+        );
+        build_router(state)
+            .oneshot(chat_request_builder(body, Some(key)))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn revoked_key_returns_401_while_other_keys_keep_working() {
+        let body = r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#;
+        // Second active key works end-to-end.
+        let (store, _) = store_with_second_key().await;
+        let ok = chat_request_with_store(body, SECOND_KEY, store).await;
+        assert_eq!(ok.status(), axum::http::StatusCode::OK);
+
+        // After revocation the same key is 401; the original key still works.
+        let (store, second_key_id) = store_with_second_key().await;
+        store.revoke_api_key(second_key_id).await.expect("revoke ok");
+        let denied = chat_request_with_store(body, SECOND_KEY, store.clone()).await;
+        assert_eq!(denied.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let ok2 = chat_request_with_store(body, CLIENT_KEY, store).await;
+        assert_eq!(ok2.status(), axum::http::StatusCode::OK);
     }
 
     #[tokio::test]

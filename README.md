@@ -12,9 +12,10 @@ linting, and a self-hosted cost-leak dashboard.
   pipe upstream bytes through zero-copy (SSE, `text/event-stream`); non-streaming
   responses pass through as JSON. TTFT is measured at the first upstream chunk.
 - **Tenant auth** — every request needs `Authorization: Bearer <tenant key>`. Keys are
-  SHA-256 hashed and looked up against `tenants.api_key_hash`; the upstream
-  `Authorization` header is swapped to the tenant's master key (client keys never
-  reach the upstream and are never logged).
+  SHA-256 hashed and stored as `api_keys` rows; a tenant can hold several keys and each
+  is revocable individually (a revoked key stops authenticating immediately). The
+  upstream `Authorization` header is swapped to the tenant's master key (client keys
+  never reach the upstream and are never logged).
 - **Telemetry** — every completed request (stream or not, success or error) is traced
   asynchronously into Postgres `traces`: tokens (usage parsed from the final SSE chunk
   for streams), ttft, total duration, raw prompt/completion, per-trace cost
@@ -32,7 +33,8 @@ linting, and a self-hosted cost-leak dashboard.
 Your team's API key is issued out-of-band by an Inferon operator (runbook:
 [`scripts/seed-tenant.sh`](scripts/seed-tenant.sh)) — no signup page yet. The key is
 shown exactly once, at mint time; the proxy only ever stores its SHA-256 hash. If a
-key is lost, an operator mints a replacement.
+key is lost or leaked, an operator mints a replacement and revokes the compromised
+key.
 
 **Supported surface:**
 
@@ -91,9 +93,10 @@ proxy uses to call the provider on the tenant's behalf) is stored plaintext in
 # prints the developer-facing key, e.g. sk-inferon-<random>
 ```
 
-The script inserts `sha256(<dev key>)` into `tenants.api_key_hash` and stores the
-master key. Developers paste the printed key as their API key and point their SDK at
-your proxy base URL.
+The script creates a tenant and inserts `sha256(<dev key>)` as its first `api_keys`
+row (label `default`); the upstream master key is stored on the tenant. Only the hash
+is ever stored — the printed key is the only time the raw key exists. Developers
+paste it as their API key and point their SDK at your proxy base URL.
 
 To verify by hand:
 
@@ -194,7 +197,7 @@ src/linter.rs    waste rules (over-provisioned / cache-miss / model misuse)
 src/dashboard.rs dashboard HTML + tenant-scoped JSON APIs
 src/lib.rs       proxy hot path, auth, telemetry worker, trace sink
 src/main.rs      wiring (env, Postgres pool, worker)
-db/init/         idempotent migrations (001 schema, 002 extensions)
+db/init/         idempotent migrations (001 schema … 006 api_keys rows)
 .backlog/        product backlog (single-ranked) + archived items + refinement log
 wiki/ raw/       design knowledge base (Karpathy-style wiki + immutable sources)
 ```

@@ -32,11 +32,13 @@ psql() {
 }
 
 cleanup() {
+    # api_keys rows cascade on tenant delete; match tenants through their key
+    # rows (ITEM-034: key hashes live on api_keys, not tenants).
     if [ -n "${DEV_KEY_HASH:-}" ]; then
-        psql "DELETE FROM tenants WHERE api_key_hash = '$DEV_KEY_HASH';" >/dev/null 2>&1 || true
+        psql "DELETE FROM tenants t USING api_keys k WHERE k.tenant_id = t.id AND k.key_hash = '$DEV_KEY_HASH';" >/dev/null 2>&1 || true
     fi
     if [ -n "${OPT_OUT_HASH:-}" ]; then
-        psql "DELETE FROM tenants WHERE api_key_hash = '$OPT_OUT_HASH';" >/dev/null 2>&1 || true
+        psql "DELETE FROM tenants t USING api_keys k WHERE k.tenant_id = t.id AND k.key_hash = '$OPT_OUT_HASH';" >/dev/null 2>&1 || true
     fi
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
 }
@@ -66,18 +68,20 @@ done
 
 # Seed a guarded tenant plus an opt-out tenant (ITEM-027 AC1): sha256 hashes
 # + a placeholder master key; the opt-out tenant's configuration row disables
-# the schema guard.
+# the schema guard. ITEM-034: key hashes live on api_keys (one row per key).
 DEV_KEY="sk-smoke-$(openssl rand -hex 8)"
 DEV_KEY_HASH=$(printf '%s' "$DEV_KEY" | shasum -a 256 | awk '{print $1}')
-psql "INSERT INTO tenants (api_key_hash, upstream_openai_key)
-      VALUES ('$DEV_KEY_HASH', 'sk-smoke-master') ON CONFLICT DO NOTHING;" >/dev/null
+GUARDED_ID=$(psql "INSERT INTO tenants (upstream_openai_key) VALUES ('sk-smoke-master') RETURNING id;")
+psql "INSERT INTO api_keys (tenant_id, label, key_hash)
+      VALUES ('$GUARDED_ID', 'smoke', '$DEV_KEY_HASH') ON CONFLICT (key_hash) DO NOTHING;" >/dev/null
 OPT_OUT_KEY="sk-smoke-opt-$(openssl rand -hex 8)"
 OPT_OUT_HASH=$(printf '%s' "$OPT_OUT_KEY" | shasum -a 256 | awk '{print $1}')
-OPT_OUT_ID=$(psql "INSERT INTO tenants (api_key_hash, upstream_openai_key)
-      VALUES ('$OPT_OUT_HASH', 'sk-smoke-master') RETURNING id;")
+OPT_OUT_ID=$(psql "INSERT INTO tenants (upstream_openai_key) VALUES ('sk-smoke-master') RETURNING id;")
+psql "INSERT INTO api_keys (tenant_id, label, key_hash)
+      VALUES ('$OPT_OUT_ID', 'smoke-opt', '$OPT_OUT_HASH') ON CONFLICT (key_hash) DO NOTHING;" >/dev/null
 psql "INSERT INTO tenant_configurations (tenant_id, guard_enabled)
       VALUES ('$OPT_OUT_ID', false);" >/dev/null
-echo "ok: seeded guarded + opt-out tenants"
+echo "ok: seeded guarded + opt-out tenants (api_keys rows)"
 
 echo "-- auth boundary (no external calls: the mock answers 502 to unguarded traffic) --"
 check_status "chat without key -> 401" 401 \
@@ -121,10 +125,10 @@ echo "ok: opt-out tenant gets the raw cheap body, no fallback (ITEM-027 AC1)"
 
 # Traces settle in the DB after a telemetry flush; assert the guard events.
 sleep 2
-fb=$(psql "SELECT count(*) FROM traces t JOIN tenants tn ON tn.id = t.tenant_id WHERE tn.api_key_hash = '$DEV_KEY_HASH' AND t.guard_event->>'outcome' = 'fallback';")
+fb=$(psql "SELECT count(*) FROM traces t JOIN api_keys k ON k.tenant_id = t.tenant_id WHERE k.key_hash = '$DEV_KEY_HASH' AND t.guard_event->>'outcome' = 'fallback';")
 [ "$fb" -ge 1 ] || fail "no fallback guard event recorded for the guarded tenant (rows: $fb)"
 echo "ok: fallback guard event persisted (outcome=fallback)"
-noev=$(psql "SELECT count(*) FROM traces t JOIN tenants tn ON tn.id = t.tenant_id WHERE tn.api_key_hash = '$OPT_OUT_HASH' AND t.guard_event IS NOT NULL;")
+noev=$(psql "SELECT count(*) FROM traces t JOIN api_keys k ON k.tenant_id = t.tenant_id WHERE k.key_hash = '$OPT_OUT_HASH' AND t.guard_event IS NOT NULL;")
 [ "$noev" = "0" ] || fail "opt-out tenant must record no guard event (rows: $noev)"
 echo "ok: opt-out tenant traces carry no guard event (additive telemetry)"
 
@@ -195,5 +199,47 @@ for d in 7 30 90; do
     check_status "guard?days=$d -> 200" 200 \
         "$BASE/v1/dashboard/api/guard?days=$d" -H "Authorization: Bearer $DEV_KEY"
 done
+
+echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
+KEYS_URL="$BASE/v1/dashboard/api/operator/keys"
+check_status "keys list without key -> 401" 401 "$KEYS_URL?tenant_id=$GUARDED_ID"
+check_status "keys list with tenant key -> 403" 403 \
+    "$KEYS_URL?tenant_id=$GUARDED_ID" -H "Authorization: Bearer $DEV_KEY"
+check_status "keys list with operator key -> 200" 200 \
+    "$KEYS_URL?tenant_id=$GUARDED_ID" -H "Authorization: Bearer $OPERATOR_API_KEY"
+
+# Mint a second key for the guarded tenant via the operator API (AC3).
+mint=$(curl -sS -X POST "$KEYS_URL" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $OPERATOR_API_KEY" \
+    -d "{\"tenant_id\":\"$GUARDED_ID\",\"label\":\"smoke-minted\"}")
+MINTED_KEY=$(printf '%s' "$mint" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')
+MINTED_KEY_ID=$(printf '%s' "$mint" | sed -n 's/.*"key_id":"\([^"]*\)".*/\1/p')
+[ -n "$MINTED_KEY" ] && [ -n "$MINTED_KEY_ID" ] || fail "mint returned no key/key_id: $mint"
+printf '%s' "$MINTED_KEY" | grep -q '^sk-inferon-' || fail "minted key has the wrong prefix: $MINTED_KEY"
+echo "ok: minted a second tenant key via the operator API (label smoke-minted)"
+
+# The minted key authenticates (mock answers 502 to unguarded traffic: auth
+# boundary crossed, upstream refused — same as the seeded key).
+check_status "chat with minted key -> 502 (auth passed)" 502 \
+    -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $MINTED_KEY" \
+    -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+
+# List shows metadata only — never key material (AC3).
+listed=$(curl -sS "$KEYS_URL?tenant_id=$GUARDED_ID" -H "Authorization: Bearer $OPERATOR_API_KEY")
+printf '%s' "$listed" | grep -q 'smoke-minted' || fail "list lacks the minted key label: $listed"
+printf '%s' "$listed" | grep -q "$MINTED_KEY" && fail "list leaked key material: $listed"
+echo "ok: key list shows lifecycle metadata, no key material"
+
+# Revoke via the operator API; the same raw key now returns 401 (AC2).
+code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+    "$BASE/v1/dashboard/api/operator/keys/$MINTED_KEY_ID/revoke" \
+    -H "Authorization: Bearer $OPERATOR_API_KEY")
+[ "$code" = "200" ] || fail "revoke expected 200, got $code"
+check_status "chat with revoked key -> 401 (AC2)" 401 \
+    -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $MINTED_KEY" \
+    -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+echo "ok: revoked key stopped authenticating immediately"
 
 echo "ALL SMOKE CHECKS PASSED"

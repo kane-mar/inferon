@@ -7,7 +7,7 @@
 use crate::cost;
 use crate::AppState;
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     Json,
@@ -456,6 +456,109 @@ pub async fn operator_guard(
     }
 }
 
+#[derive(serde::Deserialize)]
+pub struct KeyQuery {
+    tenant_id: uuid::Uuid,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreateKeyBody {
+    tenant_id: uuid::Uuid,
+    label: Option<String>,
+}
+
+/// GET /v1/dashboard/api/operator/keys?tenant_id=… — a tenant's key metadata
+/// (ITEM-034 AC3). Key material is never returned — only lifecycle metadata.
+pub async fn operator_keys(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<KeyQuery>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    match state.tenant_store.list_api_keys(query.tenant_id).await {
+        Ok(keys) => {
+            let rows: Vec<Value> = keys
+                .into_iter()
+                .map(|k| {
+                    json!({
+                        "id": k.id.to_string(),
+                        "tenant_id": k.tenant_id.to_string(),
+                        "label": k.label,
+                        "created_at": k.created_at,
+                        "revoked": k.revoked(),
+                        "revoked_at": k.revoked_at,
+                        "last_used_at": k.last_used_at,
+                    })
+                })
+                .collect();
+            json_ok(json!({"keys": rows}))
+        }
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/operator/keys — mint a tenant key (ITEM-034 AC3).
+/// The raw key is returned exactly once; only its hash is stored.
+pub async fn operator_keys_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<CreateKeyBody>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let tenant = match state.tenant_store.tenant_by_id(body.tenant_id).await {
+        Ok(Some(tenant)) => tenant,
+        Ok(None) => {
+            return crate::json_error(
+                StatusCode::NOT_FOUND,
+                "tenant_not_found",
+                "no such tenant",
+            )
+        }
+        Err(e) => return internal(&e.to_string()),
+    };
+    let raw = crate::mint_client_key();
+    let hash = crate::tenant_hash(&raw);
+    let label = body.label.unwrap_or_else(|| "default".to_string());
+    match state
+        .tenant_store
+        .insert_api_key(tenant.id, &label, &hash)
+        .await
+    {
+        Ok(key_id) => json_ok(json!({
+            "key_id": key_id.to_string(),
+            "tenant_id": tenant.id.to_string(),
+            "label": label,
+            "key": raw, // shown exactly once
+        })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/operator/keys/{key_id}/revoke — revoke a key
+/// (ITEM-034 AC2: the next request with it is 401).
+pub async fn operator_key_revoke(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(key_id): Path<uuid::Uuid>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    match state.tenant_store.revoke_api_key(key_id).await {
+        Ok(true) => json_ok(json!({"key_id": key_id.to_string(), "revoked": true})),
+        Ok(false) => crate::json_error(
+            StatusCode::NOT_FOUND,
+            "key_not_found",
+            "no such active key",
+        ),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// Guard telemetry aggregate over the additive `guard_event` JSONB on traces
 /// (ITEM-026 AC2/AC3). `tenant` is Some(id) for tenant scope, None for the
 /// operator platform-wide view — same shape trick as the other queries.
@@ -746,6 +849,146 @@ mod tests {
             builder = builder.header("authorization", format!("Bearer {key}"));
         }
         builder.body(Body::empty()).unwrap()
+    }
+
+    fn post(uri: &str, key: Option<&str>, body: &str) -> axum::http::Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(key) = key {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn operator_key_endpoints_gate_then_manage_keys() {
+        // ITEM-034 AC2/AC3: the operator key API is gated like the other
+        // operator views and drives the mint/list/revoke lifecycle over the
+        // in-memory store (same semantics as the Postgres store).
+        let state = dashboard_state();
+        let router = crate::build_router(state);
+        const TID: &str = "22222222-2222-2222-2222-222222222222";
+        let keys_uri = "/v1/dashboard/api/operator/keys";
+        let list_uri = format!("{keys_uri}?tenant_id={TID}");
+
+        // Scope gates (no key -> 401, tenant key -> 403).
+        let missing_list = router.clone().oneshot(get(&list_uri, None)).await.unwrap();
+        assert_eq!(missing_list.status(), axum::http::StatusCode::UNAUTHORIZED, "list no key");
+        let tenant_list = router
+            .clone()
+            .oneshot(get(&list_uri, Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(tenant_list.status(), axum::http::StatusCode::FORBIDDEN, "list tenant key");
+        let tenant_create = router
+            .clone()
+            .oneshot(post(
+                keys_uri,
+                Some("sk-dashboard-dev"),
+                &format!(r#"{{"tenant_id":"{TID}"}}"#),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(tenant_create.status(), axum::http::StatusCode::FORBIDDEN, "create tenant key");
+
+        // Mint: operator key -> raw key shown once, key id returned.
+        let create = router
+            .clone()
+            .oneshot(post(
+                keys_uri,
+                Some("op-secret"),
+                &format!(r#"{{"tenant_id":"{TID}","label":"ci"}}"#),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(create.status(), axum::http::StatusCode::OK);
+        let created: Value = serde_json::from_slice(
+            &axum::body::to_bytes(create.into_body(), 1024 * 1024).await.unwrap(),
+        )
+        .unwrap();
+        let raw_key = created["key"].as_str().expect("raw key shown once").to_string();
+        let key_id = created["key_id"].as_str().expect("key id").to_string();
+        assert!(raw_key.starts_with(crate::CLIENT_KEY_PREFIX));
+
+        // List shows metadata — never key material.
+        let listed = router
+            .clone()
+            .oneshot(get(&list_uri, Some("op-secret")))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), axum::http::StatusCode::OK);
+        let list_json: Value = serde_json::from_slice(
+            &axum::body::to_bytes(listed.into_body(), 1024 * 1024).await.unwrap(),
+        )
+        .unwrap();
+        let list_text = list_json.to_string();
+        assert!(list_text.contains("ci"), "label present");
+        assert!(
+            !list_text.contains(&raw_key) && !list_text.contains("sk-inferon-"),
+            "list never returns key material"
+        );
+
+        // Revoke -> listed as revoked; the raw key stops authenticating is
+        // pinned by the proxy seam test (lib.rs).
+        let revoke = router
+            .clone()
+            .oneshot(post(
+                &format!("/v1/dashboard/api/operator/keys/{key_id}/revoke"),
+                Some("op-secret"),
+                "",
+            ))
+            .await
+            .unwrap();
+        let revoke_status = revoke.status();
+        let revoke_body = axum::body::to_bytes(revoke.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            revoke_status,
+            axum::http::StatusCode::OK,
+            "revoke body: {} (key_id {key_id})",
+            String::from_utf8_lossy(&revoke_body)
+        );
+        let listed = router
+            .clone()
+            .oneshot(get(&list_uri, Some("op-secret")))
+            .await
+            .unwrap();
+        let list_json: Value = serde_json::from_slice(
+            &axum::body::to_bytes(listed.into_body(), 1024 * 1024).await.unwrap(),
+        )
+        .unwrap();
+        let ci = list_json["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|k| k["label"] == "ci")
+            .expect("ci key listed");
+        assert_eq!(ci["revoked"], true);
+
+        // Unknown tenant mint -> 404; unknown key revoke -> 404.
+        let unknown_tenant = router
+            .clone()
+            .oneshot(post(
+                keys_uri,
+                Some("op-secret"),
+                r#"{"tenant_id":"99999999-9999-9999-9999-999999999999","label":"x"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(unknown_tenant.status(), axum::http::StatusCode::NOT_FOUND);
+        let unknown_key = router
+            .clone()
+            .oneshot(post(
+                "/v1/dashboard/api/operator/keys/99999999-9999-9999-9999-999999999999/revoke",
+                Some("op-secret"),
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(unknown_key.status(), axum::http::StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
