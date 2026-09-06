@@ -1,5 +1,11 @@
 # Refinement Log
 
+## 2026-09-06 — ITEM-033 captured (PO backlog review)
+
+- **New item captured**: user accounts & logins (ITEM-033, feature, captured). Human-facing accounts + login — distinct from ITEM-004 (machine API-key auth, done) and ITEM-018 (out-of-band key minting). Placed at bottom of pullable region (large/unrefined). Open PO questions logged in-item: who logs in (external devs vs operators), account↔tenant model, self-serve vs invite signup, auth mechanism, and ranking vs the ITEM-018/019/020 cluster.
+- **Q1 answered (PO)**: operator views **do** move to accounts — the 4 `/api/operator/*` JSON APIs (today authed by the shared `OPERATOR_API_KEY`) become account-authenticated, which also introduces the first human-facing operator screen. **Operator key sub-question answered**: the shared `OPERATOR_API_KEY` survives for scripting/machine access alongside accounts (accounts = humans; key = deploy scripts/cron/curl).
+- **Q2–Q5 answered (PO, same session)**: account model = **tenants with multiple users (owner + members), accounts manage the tenant's API keys** (replacing operator-run `seed-tenant.sh` minting for humans); signup = **self-serve** (auto-provisioned tenant + key); mechanism = **OAuth with GitHub initially**; ranking = “least responsible moment” (read: least-disruptive position — large body of work stays low, not blocking the small pullable cluster). ITEM-033 still captured/unrefined; now clearly chunky enough to break down when it approaches the top.
+
 ## 2026-09-05 — ITEM-014 archived; backlog empty
 
 - **Hostname decision**: live endpoint is `https://inferon.agilefederation.com/v1` — a subdomain of the existing company domain (one A record in DNSimple, no registrar delegation). The sav.com/delegation path for api.inferon.dev was abandoned (registrar action blocked); inferon.dev remains parked at sav.com. This supersedes the Vultr-DNS-zone + NS-delegation approach noted 2026-09-04 (whose Vultr-side zone also turned out never to have been created).

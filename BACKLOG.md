@@ -23,7 +23,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-028 | OmniRouting: FastEmbedder | feature | refined |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | refined |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | refined |
+| ITEM-033 | User accounts & logins | feature | **captured** — PO 2026-09-06; scope/ranking questions open (see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-09-05_ — ITEM-021/022 split into pullable slices (ITEM-023..032; parents superseded in `.backlog/ARCHIVED/`). ITEM-031/032 are staged and not pullable today. All slices were refined from the engineering spec — see `REFINEMENT_LOG.md` 2026-09-05.
+_Last updated: 2026-09-06_ — ITEM-033 (user accounts & logins) captured at the bottom of the pullable region, unrefined (PO backlog review). ITEM-031/032 are staged and not pullable today (unpark = backlog order). ITEM-021/022 parents archived as superseded; their slices (ITEM-023..030) refined from the engineering spec — see `REFINEMENT_LOG.md`.
