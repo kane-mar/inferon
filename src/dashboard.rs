@@ -3,12 +3,13 @@
 //!
 //! Data views are JSON APIs consumed by a small self-contained HTML page;
 //! charts are CSS bars so there is no external asset or CDN dependency.
+//! The operator console (ITEM-037) is the one server-rendered page.
 
 use crate::cost;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     Json,
 };
@@ -124,7 +125,20 @@ async fn scope_from_session(
     else {
         return Ok(None);
     };
-    match accounts.users.tenant_for_user(user_id).await {
+    let user = match accounts.users.find_by_id(user_id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => return Ok(None),
+        Err(e) => {
+            tracing::error!("user lookup failed: {e}");
+            return Err(internal("user lookup failed"));
+        }
+    };
+    // A platform operator's session scopes to the operator views (ITEM-037) —
+    // and, like the operator key, is rejected from tenant-scoped routes.
+    if user.is_operator {
+        return Ok(Some(Scope::Operator));
+    }
+    match accounts.users.tenant_for_user(user.id).await {
         Ok(Some((tenant_id, _))) => Ok(Some(Scope::Tenant(tenant_id))),
         Ok(None) => Ok(None),
         Err(e) => {
@@ -496,6 +510,172 @@ pub async fn guard(
         Ok(id) => query_guard(&state, Some(id), &window, "tenant").await,
         Err(resp) => resp,
     }
+}
+
+/// One per-tenant row for the operator console (ITEM-037 AC3).
+struct ConsoleTenant {
+    tenant_id: String,
+    requests: i64,
+    errors: i64,
+    guard_fallbacks: i64,
+    cost: rust_decimal::Decimal,
+}
+
+async fn console_tenant_rows(
+    pool: &sqlx::PgPool,
+    days: i64,
+) -> Result<Vec<ConsoleTenant>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (String, i64, i64, i64, rust_decimal::Decimal)>(
+        "SELECT tenant_id::text,
+                COUNT(*),
+                COUNT(*) FILTER (WHERE status_code >= 400),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
+                COALESCE(SUM(upstream_cost_usd), 0)
+         FROM traces
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 day')
+         GROUP BY tenant_id ORDER BY 5 DESC",
+    )
+    .bind(days)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(tenant_id, requests, errors, guard_fallbacks, cost)| ConsoleTenant {
+            tenant_id,
+            requests,
+            errors,
+            guard_fallbacks,
+            cost,
+        })
+        .collect())
+}
+
+async fn console_guard_outcomes(
+    pool: &sqlx::PgPool,
+    days: i64,
+) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT guard_event->>'outcome', COUNT(*)
+         FROM traces
+         WHERE created_at >= NOW() - ($1 * INTERVAL '1 day') AND guard_event IS NOT NULL
+         GROUP BY 1 ORDER BY 2 DESC",
+    )
+    .bind(days)
+    .fetch_all(pool)
+    .await
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Render the server-side operator console page (ITEM-037 AC3): platform
+/// totals, the per-tenant list (spend, requests, guard fallbacks), guard
+/// outcome counts and the current alerts — read-only, no JS data fetches.
+fn console_html(
+    tenants: &[ConsoleTenant],
+    guard_outcomes: &[(String, i64)],
+    alerts: &[crate::alerts::AlertViewRow],
+    days: i64,
+) -> String {
+    let totals_cost: rust_decimal::Decimal = tenants.iter().map(|t| t.cost).sum();
+    let total_requests: i64 = tenants.iter().map(|t| t.requests).sum();
+    let total_errors: i64 = tenants.iter().map(|t| t.errors).sum();
+    let total_fallbacks: i64 = tenants.iter().map(|t| t.guard_fallbacks).sum();
+    let tenant_rows = tenants
+        .iter()
+        .map(|t| {
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                html_escape(&t.tenant_id),
+                t.requests,
+                t.errors,
+                t.guard_fallbacks,
+                t.cost.to_string(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let guard_rows = guard_outcomes
+        .iter()
+        .map(|(outcome, count)| {
+            format!(
+                "<tr><td>{}</td><td>{count}</td></tr>",
+                html_escape(outcome)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let alert_rows = alerts
+        .iter()
+        .map(|a| {
+            let detail = a.detail.to_string();
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                html_escape(&a.tenant_id.to_string()),
+                html_escape(&a.class),
+                html_escape(&a.status),
+                html_escape(&detail),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Inferon — operator console</title>\
+<style>body{{font:14px/1.5 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1a202c}}\
+h1{{font-size:1.3rem}}table{{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem}}\
+th,td{{border:1px solid #e2e8f0;padding:.25rem .6rem;text-align:left;font-size:.9rem}}\
+.muted{{color:#718096}}</style></head>\
+<body><h1>Inferon — operator console</h1>\
+<p class=\"muted\">last {days} days · read-only</p>\
+<p><b>{}</b> tenants · {total_requests} requests · {total_errors} errors · {total_fallbacks} guard fallbacks · <b>{totals_cost}</b> spend</p>\
+<h2>Tenants</h2>\
+<table><tr><th>tenant</th><th>requests</th><th>errors</th><th>guard fallbacks</th><th>spend</th></tr>\
+{tenant_rows}</table>\
+<h2>Schema guard outcomes</h2>\
+<table><tr><th>outcome</th><th>count</th></tr>{guard_rows}</table>\
+<h2>Alerts</h2>\
+<table><tr><th>tenant</th><th>class</th><th>status</th><th>detail</th></tr>{alert_rows}</table>\
+</body></html>",
+        tenants.len(),
+    )
+}
+
+/// GET /v1/dashboard/operator — the server-rendered operator console (ITEM-037
+/// AC3). Gated exactly like the operator JSON APIs: an operator key or an
+/// operator session; tenant credentials are 403.
+pub async fn operator_console(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let days = window.days();
+    let tenants = match console_tenant_rows(&state.db, days).await {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let guard_outcomes = match console_guard_outcomes(&state.db, days).await {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let alerts = match crate::alerts::list_alerts(&state.db, days).await {
+        Ok(rows) => rows,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let html = console_html(&tenants, &guard_outcomes, &alerts, days);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
 }
 
 /// GET /v1/dashboard/api/operator/guard?days=7 — platform-wide (ITEM-026 AC2).
@@ -1375,7 +1555,7 @@ mod tests {
     async fn signed_in_state() -> (std::sync::Arc<crate::AppState>, String, uuid::Uuid) {
         let users: std::sync::Arc<dyn crate::auth::UserStore> =
             std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
-        let user = users.upsert_github_user(42, "octocat").await.expect("ok");
+        let user = users.upsert_github_user(42, "octocat", false).await.expect("ok");
         let tenant_id = uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
         users.add_membership(tenant_id, user.id, "owner").await.expect("ok");
         let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
@@ -1418,7 +1598,7 @@ mod tests {
     async fn a_memberless_signed_in_user_stays_unauthorized() {
         let users: std::sync::Arc<dyn crate::auth::UserStore> =
             std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
-        let user = users.upsert_github_user(7, "nobody").await.expect("ok");
+        let user = users.upsert_github_user(7, "nobody", false).await.expect("ok");
         let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
         let token = crate::session::issue_session(
             user.id,
@@ -1437,7 +1617,7 @@ mod tests {
         // bearer paths must resolve first (SDKs stay key-authed, additive).
         let users: std::sync::Arc<dyn crate::auth::UserStore> =
             std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
-        let user = users.upsert_github_user(9, "owner").await.expect("ok");
+        let user = users.upsert_github_user(9, "owner", false).await.expect("ok");
         users
             .add_membership(
                 uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
@@ -1466,6 +1646,55 @@ mod tests {
         assert!(matches!(scope, Scope::Operator), "operator key wins over the session");
     }
 
+    // --- ITEM-037 AC1/AC4: operator sessions + isolation ---
+
+    async fn operator_session_state() -> (std::sync::Arc<crate::AppState>, String) {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(42, "octocat", true).await.expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        (state, token)
+    }
+
+    #[tokio::test]
+    async fn an_operator_session_scopes_to_operator_without_a_membership() {
+        let (state, token) = operator_session_state().await;
+        let scope = resolve_scope(&state, &cookie_headers(&token)).await.expect("resolved");
+        assert!(matches!(scope, Scope::Operator), "operator session -> platform scope");
+    }
+
+    #[tokio::test]
+    async fn operator_and_tenant_sessions_stay_isolated_from_each_others_routes() {
+        // An operator session is rejected by tenant-scoped gates (403).
+        let (state, op_token) = operator_session_state().await;
+        let err = tenant_or(&state, &cookie_headers(&op_token)).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN, "operator on tenant route");
+
+        // A tenant-member session is rejected by operator gates (403).
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let member = users.upsert_github_user(7, "bob", false).await.expect("ok");
+        users
+            .add_membership(uuid::Uuid::new_v4(), member.id, "member")
+            .await
+            .expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let member_token = crate::session::issue_session(
+            member.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        let err = operator_or(&state, &cookie_headers(&member_token)).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN, "member on operator route");
+    }
+
     #[tokio::test]
     async fn session_scoped_request_reaches_the_dashboard_handler() {
         // A session cookie alone must pass the route gate (the lazy pool makes
@@ -1486,5 +1715,89 @@ mod tests {
             "session is not ignored at the route seam"
         );
         assert_ne!(response.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    // --- ITEM-037 AC3: the server-rendered operator console ---
+
+    fn fixture_tenant(tenant_id: &str, cost: &str) -> ConsoleTenant {
+        ConsoleTenant {
+            tenant_id: tenant_id.to_string(),
+            requests: 12,
+            errors: 1,
+            guard_fallbacks: 2,
+            cost: cost.parse().unwrap(),
+        }
+    }
+
+    #[test]
+    fn console_html_renders_totals_tenants_guard_and_alerts() {
+        let tenants = vec![
+            fixture_tenant("11111111-1111-1111-1111-111111111111", "0.001234"),
+            fixture_tenant("22222222-2222-2222-2222-222222222222", "0.000005"),
+        ];
+        let guard = vec![("fallback".to_string(), 2), ("flushed".to_string(), 5)];
+        let alerts = vec![];
+        let html = console_html(&tenants, &guard, &alerts, 7);
+        assert!(html.contains("operator console"));
+        assert!(html.contains("<b>2</b> tenants"), "tenant count");
+        assert!(html.contains("24 requests"), "total requests (12+12)");
+        assert!(html.contains("4 guard fallbacks"), "total fallbacks (2+2)");
+        assert!(html.contains("0.001234"), "per-tenant spend as a decimal string");
+        assert!(html.contains("11111111-1111-1111-1111-111111111111"));
+        assert!(html.contains("guard fallbacks") && html.contains("flushed"), "guard view");
+        assert!(html.contains("Alerts"), "alerts view present (empty state ok)");
+        assert!(!html.contains("$1.6e-5"), "no float/scientific currency");
+    }
+
+    #[test]
+    fn console_html_escapes_row_data() {
+        // A hostile tenant id or alert payload must never inject markup.
+        let tenants = vec![fixture_tenant("<script>alert(1)</script>", "0.001")];
+        let alert = crate::alerts::AlertViewRow {
+            tenant_id: uuid::Uuid::new_v4(),
+            class: "spend".to_string(),
+            status: "firing".to_string(),
+            detail: serde_json::json!("<img src=x onerror=alert(1)>"),
+            threshold: serde_json::json!({}),
+            first_fired_at: "now".to_string(),
+            last_fired_at: "now".to_string(),
+            cleared_at: None,
+        };
+        let html = console_html(&tenants, &[], &[alert], 7);
+        assert!(html.contains("&lt;script&gt;"), "tenant id escaped");
+        assert!(!html.contains("<script>"), "no raw script tag");
+        assert!(!html.contains("<img"), "no raw img/onerror tag");
+        assert!(
+            html.contains("&lt;img src=x onerror=alert(1)&gt;"),
+            "alert payload escaped, not executable"
+        );
+    }
+
+    #[tokio::test]
+    async fn operator_console_route_is_gated_by_scope() {
+        // No session/key -> 401; tenant-member session -> 403; operator key
+        // reaches the handler (the lazy pool then 500s — 401/403 would mean the
+        // gate let nobody through).
+        let state = dashboard_state();
+        let router = crate::build_router(state);
+        let anon = router.clone().oneshot(get("/v1/dashboard/operator", None)).await.unwrap();
+        assert_eq!(anon.status(), axum::http::StatusCode::UNAUTHORIZED, "no credential");
+        let member = router
+            .clone()
+            .oneshot(get("/v1/dashboard/operator", Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN, "tenant key rejected");
+        let operator = router
+            .clone()
+            .oneshot(get("/v1/dashboard/operator", Some("op-secret")))
+            .await
+            .unwrap();
+        assert_ne!(
+            operator.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "operator key reaches the console handler"
+        );
+        assert_ne!(operator.status(), axum::http::StatusCode::FORBIDDEN);
     }
 }

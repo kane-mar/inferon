@@ -40,6 +40,10 @@ export SESSION_SECRET="sk-smoke-session-$(openssl rand -hex 16)"
 # mock answers guarded replays 200 for any bearer, so the signup key gets a
 # real 200 end-to-end.
 export UPSTREAM_MASTER_KEY="sk-smoke-master"
+# The mock GitHub's one identity (smoke-dev) is also the platform operator
+# (ITEM-037): its session must open the operator console, while a plain
+# tenant-member session must be 403.
+export OPERATOR_GITHUB_LOGINS="smoke-dev"
 
 psql() {
     # -q suppresses the command tag so INSERT ... RETURNING yields only the row.
@@ -60,6 +64,9 @@ cleanup() {
     if [ -n "${SMOKE_USER_ID:-}" ]; then
         psql "DELETE FROM tenants WHERE id IN (SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_USER_ID');" >/dev/null 2>&1 || true
         psql "DELETE FROM users WHERE id = '$SMOKE_USER_ID';" >/dev/null 2>&1 || true
+    fi
+    if [ -n "${SMOKE_MEMBER_ID:-}" ]; then
+        psql "DELETE FROM users WHERE id = '$SMOKE_MEMBER_ID';" >/dev/null 2>&1 || true
     fi
     rm -f "${DANCE_JAR:-}"
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
@@ -283,6 +290,46 @@ printf '%s' "$BODY2" | grep -q 'sk-inferon-' && fail "returning sign-in showed k
 [ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "1" ] \
     || fail "returning sign-in minted another key"
 echo "ok: returning sign-in lands on the dashboard with no second key"
+
+echo "-- ITEM-037 operator console (session-scoped; isolation) --"
+# smoke-dev's session (from the dance above) is a platform operator
+# (OPERATOR_GITHUB_LOGINS=smoke-dev): the console + operator APIs open.
+CONSOLE="$BASE/v1/dashboard/operator"
+console=$(curl -sS -b "$DANCE_JAR" "$CONSOLE?days=7")
+printf '%s' "$console" | grep -q 'operator console' \
+    || fail "operator session did not get the console page: $console"
+printf '%s' "$console" | grep -q 'Tenants' \
+    || fail "console page lacks the per-tenant list"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" "$BASE/v1/dashboard/api/operator/summary?days=7")
+[ "$code" = "200" ] || fail "operator session on the operator JSON API: expected 200, got $code"
+echo "ok: operator session opens the console + operator APIs"
+
+# The shared operator key still works for machines (console page too).
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Authorization: Bearer $OPERATOR_API_KEY")
+[ "$code" = "200" ] || fail "operator key on the console: expected 200, got $code"
+echo "ok: OPERATOR_API_KEY still opens the console (machine access)"
+
+# Isolation: a real tenant key (DEV_KEY) on the console -> 403.
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Authorization: Bearer $DEV_KEY")
+[ "$code" = "403" ] || fail "tenant key on the console: expected 403, got $code"
+echo "ok: tenant key is 403 on the operator console"
+
+# Isolation at the session seam: a valid tenant-member session (seeded user,
+# membership, forged-but-signed cookie) is 403 on the console. The cookie is
+# minted with the same SESSION_SECRET the proxy uses, so it verifies.
+SMOKE_MEMBER_ID=$(psql "INSERT INTO users (github_id, github_login) VALUES (6660001, 'smoke-member') RETURNING id;")
+psql "INSERT INTO tenant_members (tenant_id, user_id, role)
+      SELECT id, '$SMOKE_MEMBER_ID', 'member' FROM tenants LIMIT 1;" >/dev/null
+MEM_EXP=$(printf '%x' "$(( $(date +%s) + 3600 ))")
+MEM_PAYLOAD="$SMOKE_MEMBER_ID.$MEM_EXP"
+MEM_MAC=$(printf '%s' "$MEM_PAYLOAD" | openssl dgst -sha256 -hmac "$SESSION_SECRET" -hex | awk '{print $NF}')
+MEM_TOKEN="$MEM_PAYLOAD.$MEM_MAC"
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Cookie: inferon_session=$MEM_TOKEN")
+[ "$code" = "403" ] || fail "tenant-member session on the console: expected 403, got $code"
+me=$(curl -sS -H "Cookie: inferon_session=$MEM_TOKEN" "$BASE/auth/me")
+printf '%s' "$me" | grep -q '"github_login":"smoke-member"' \
+    || fail "member session cookie did not verify (auth/me): $me"
+echo "ok: tenant-member session is 403 on the console (session isolation)"
 
 echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
 KEYS_URL="$BASE/v1/dashboard/api/operator/keys"

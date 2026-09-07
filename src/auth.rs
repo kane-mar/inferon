@@ -22,12 +22,15 @@ use std::sync::Arc;
 
 use crate::AppState;
 
-/// A human account, keyed by GitHub id (migration 007).
+/// A human account, keyed by GitHub id (migration 007). `is_operator` flags a
+/// platform operator (ITEM-037, migration 009) — their session scopes to the
+/// platform-wide operator views.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct User {
     pub id: Uuid,
     pub github_id: i64,
     pub github_login: String,
+    pub is_operator: bool,
 }
 
 /// Lookup/upsert seam over `users`. InMemoryUserStore backs unit tests;
@@ -37,11 +40,22 @@ pub struct User {
 pub trait UserStore: Send + Sync {
     /// Record a successful GitHub sign-in: insert on first login, refresh the
     /// login/last_login on later ones. Returns the canonical user row.
+    /// `is_operator` is the env-authoritative operator flag (ITEM-037: the
+    /// user's login is in OPERATOR_GITHUB_LOGINS).
     async fn upsert_github_user(
         &self,
         github_id: i64,
         github_login: &str,
+        is_operator: bool,
     ) -> Result<User, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Mark every existing user whose github_login is in `logins` as an
+    /// operator (boot backfill from OPERATOR_GITHUB_LOGINS, ITEM-037 AC1).
+    /// Returns how many rows were actually promoted.
+    async fn promote_logins(
+        &self,
+        logins: &[&str],
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Resolve a user by id (session cookie carries the id). `None` when the
     /// row is gone — treated as signed out, never an error.
@@ -90,19 +104,37 @@ impl UserStore for InMemoryUserStore {
         &self,
         github_id: i64,
         github_login: &str,
+        is_operator: bool,
     ) -> Result<User, Box<dyn std::error::Error + Send + Sync>> {
         let mut users = self.lock_users();
         if let Some(existing) = users.iter_mut().find(|u| u.github_id == github_id) {
             existing.github_login = github_login.to_string();
+            existing.is_operator = is_operator;
             return Ok(existing.clone());
         }
         let user = User {
             id: Uuid::new_v4(),
             github_id,
             github_login: github_login.to_string(),
+            is_operator,
         };
         users.push(user.clone());
         Ok(user)
+    }
+
+    async fn promote_logins(
+        &self,
+        logins: &[&str],
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let mut users = self.lock_users();
+        let mut promoted = 0;
+        for user in users.iter_mut() {
+            if !user.is_operator && logins.contains(&user.github_login.as_str()) {
+                user.is_operator = true;
+                promoted += 1;
+            }
+        }
+        Ok(promoted)
     }
 
     async fn find_by_id(
@@ -156,39 +188,59 @@ impl UserStore for PostgresUserStore {
         &self,
         github_id: i64,
         github_login: &str,
+        is_operator: bool,
     ) -> Result<User, Box<dyn std::error::Error + Send + Sync>> {
-        let row = sqlx::query_as::<_, (Uuid, i64, String)>(
-            "INSERT INTO users (github_id, github_login)
-             VALUES ($1, $2)
+        let row = sqlx::query_as::<_, (Uuid, i64, String, bool)>(
+            "INSERT INTO users (github_id, github_login, is_operator)
+             VALUES ($1, $2, $3)
              ON CONFLICT (github_id) DO UPDATE
-               SET github_login = EXCLUDED.github_login, last_login_at = NOW()
-             RETURNING id, github_id, github_login",
+               SET github_login = EXCLUDED.github_login,
+                   is_operator = EXCLUDED.is_operator,
+                   last_login_at = NOW()
+             RETURNING id, github_id, github_login, is_operator",
         )
         .bind(github_id)
         .bind(github_login)
+        .bind(is_operator)
         .fetch_one(&self.pool)
         .await?;
         Ok(User {
             id: row.0,
             github_id: row.1,
             github_login: row.2,
+            is_operator: row.3,
         })
+    }
+
+    async fn promote_logins(
+        &self,
+        logins: &[&str],
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let result = sqlx::query(
+            "UPDATE users SET is_operator = true
+             WHERE github_login = ANY($1) AND NOT is_operator",
+        )
+        .bind(logins)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
     }
 
     async fn find_by_id(
         &self,
         user_id: Uuid,
     ) -> Result<Option<User>, Box<dyn std::error::Error + Send + Sync>> {
-        let row = sqlx::query_as::<_, (Uuid, i64, String)>(
-            "SELECT id, github_id, github_login FROM users WHERE id = $1",
+        let row = sqlx::query_as::<_, (Uuid, i64, String, bool)>(
+            "SELECT id, github_id, github_login, is_operator FROM users WHERE id = $1",
         )
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(id, github_id, github_login)| User {
+        Ok(row.map(|(id, github_id, github_login, is_operator)| User {
             id,
             github_id,
             github_login,
+            is_operator,
         }))
     }
 
@@ -333,6 +385,10 @@ impl GithubClient for RealGithub {
 pub struct Accounts {
     pub oauth: OauthConfig,
     pub session_secret: String,
+    /// GitHub logins granted the platform-operator role (env
+    /// `OPERATOR_GITHUB_LOGINS`, comma-separated; ITEM-037 AC1). Applied at
+    /// sign-in and backfilled to existing users at boot.
+    pub operator_logins: std::collections::HashSet<String>,
     /// Upstream master key given to auto-provisioned tenants (env
     /// `UPSTREAM_MASTER_KEY`, ITEM-036 AC1): the platform's shared DeepSeek
     /// key — signup yields immediately-working LLM calls. `None` provisions
@@ -359,6 +415,15 @@ impl Accounts {
         let provision_upstream_key = std::env::var("UPSTREAM_MASTER_KEY")
             .ok()
             .filter(|k| !k.is_empty());
+        let operator_logins = std::env::var("OPERATOR_GITHUB_LOGINS")
+            .ok()
+            .map(|list| {
+                list.split(',')
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         let oauth = OauthConfig {
             client_id,
             client_secret,
@@ -375,6 +440,7 @@ impl Accounts {
         Some(std::sync::Arc::new(Accounts {
             oauth: oauth.clone(),
             session_secret,
+            operator_logins,
             provision_upstream_key,
             users,
             github: std::sync::Arc::new(RealGithub::new(http, oauth)),
@@ -550,7 +616,11 @@ pub async fn callback(
             }
             Ok(github_user) => match accounts
                 .users
-                .upsert_github_user(github_user.github_id, &github_user.login)
+                .upsert_github_user(
+                    github_user.github_id,
+                    &github_user.login,
+                    accounts.operator_logins.contains(&github_user.login),
+                )
                 .await
             {
                 Err(e) => {
@@ -768,6 +838,7 @@ pub(crate) mod test_helpers {
                 api_url: "https://api.github.com".to_string(),
             },
             session_secret: TEST_SESSION_SECRET.to_string(),
+            operator_logins: std::collections::HashSet::new(),
             provision_upstream_key: None,
             users,
             github: std::sync::Arc::new(NeverGithub),
@@ -788,7 +859,7 @@ mod tests {
     async fn first_sign_in_creates_a_user_row() {
         let store = store();
         let user = store
-            .upsert_github_user(42, "kane")
+            .upsert_github_user(42, "kane", false)
             .await
             .expect("store ok");
         assert_eq!(user.github_id, 42);
@@ -800,8 +871,8 @@ mod tests {
     #[tokio::test]
     async fn repeated_sign_ins_update_login_and_keep_one_row() {
         let store = store();
-        let first = store.upsert_github_user(42, "kane").await.expect("store ok");
-        let second = store.upsert_github_user(42, "KaneMar").await.expect("store ok");
+        let first = store.upsert_github_user(42, "kane", false).await.expect("store ok");
+        let second = store.upsert_github_user(42, "KaneMar", false).await.expect("store ok");
         assert_eq!(second.id, first.id, "same GitHub id keeps the same user row");
         assert_eq!(second.github_login, "KaneMar");
         // Still exactly one row for that GitHub id.
@@ -812,8 +883,8 @@ mod tests {
     #[tokio::test]
     async fn different_github_ids_are_distinct_users() {
         let store = store();
-        let a = store.upsert_github_user(1, "alice").await.expect("store ok");
-        let b = store.upsert_github_user(2, "bob").await.expect("store ok");
+        let a = store.upsert_github_user(1, "alice", false).await.expect("store ok");
+        let b = store.upsert_github_user(2, "bob", false).await.expect("store ok");
         assert_ne!(a.id, b.id);
         assert!(store.find_by_id(a.id).await.expect("ok").is_some());
         assert!(store.find_by_id(b.id).await.expect("ok").is_some());
@@ -833,7 +904,7 @@ mod tests {
     #[tokio::test]
     async fn add_membership_makes_the_user_a_tenant_member() {
         let store = store();
-        let user = store.upsert_github_user(42, "kane").await.expect("ok");
+        let user = store.upsert_github_user(42, "kane", false).await.expect("ok");
         let tenant_id = Uuid::new_v4();
         assert_eq!(store.tenant_for_user(user.id).await.expect("ok"), None, "no membership yet");
         store.add_membership(tenant_id, user.id, "owner").await.expect("ok");
@@ -846,7 +917,7 @@ mod tests {
     #[tokio::test]
     async fn membership_add_is_idempotent_and_unknown_users_have_none() {
         let store = store();
-        let user = store.upsert_github_user(7, "bob").await.expect("ok");
+        let user = store.upsert_github_user(7, "bob", false).await.expect("ok");
         let tenant_id = Uuid::new_v4();
         store.add_membership(tenant_id, user.id, "member").await.expect("ok");
         store.add_membership(tenant_id, user.id, "member").await.expect("ok");
@@ -856,6 +927,45 @@ mod tests {
             "role kept on re-add"
         );
         assert_eq!(store.tenant_for_user(Uuid::new_v4()).await.expect("ok"), None);
+    }
+
+    // --- ITEM-037: platform-operator flag (migration 009) ---
+
+    #[tokio::test]
+    async fn upsert_carries_the_operator_flag_and_re_sign_in_is_authoritative() {
+        let store = store();
+        let first = store.upsert_github_user(42, "octocat", true).await.expect("ok");
+        assert!(first.is_operator, "flagged operator on insert");
+        // Same GitHub id signs in again while in the operator env list.
+        let again = store.upsert_github_user(42, "octocat", true).await.expect("ok");
+        assert!(again.is_operator);
+        assert_eq!(again.id, first.id, "one row");
+        // Env is authoritative at sign-in: a later sign-in outside the list demotes.
+        let demoted = store.upsert_github_user(42, "octocat", false).await.expect("ok");
+        assert!(!demoted.is_operator, "re-sign-in outside the env list demotes");
+        assert_eq!(demoted.id, first.id);
+    }
+
+    #[tokio::test]
+    async fn non_operators_are_not_flagged_and_the_flag_survives_find() {
+        let store = store();
+        let user = store.upsert_github_user(7, "bob", false).await.expect("ok");
+        assert!(!user.is_operator);
+        let found = store.find_by_id(user.id).await.expect("ok").expect("present");
+        assert!(!found.is_operator);
+    }
+
+    #[tokio::test]
+    async fn promote_logins_backfills_existing_users_at_boot() {
+        let store = store();
+        let user = store.upsert_github_user(7, "boss", false).await.expect("ok");
+        let other = store.upsert_github_user(8, "dev", false).await.expect("ok");
+        let promoted = store.promote_logins(&["boss"]).await.expect("ok");
+        assert_eq!(promoted, 1, "only the listed login is promoted");
+        assert!(store.find_by_id(user.id).await.expect("ok").unwrap().is_operator);
+        assert!(!store.find_by_id(other.id).await.expect("ok").unwrap().is_operator);
+        // Idempotent at boot: nothing left to promote.
+        assert_eq!(store.promote_logins(&["boss", "nobody"]).await.expect("ok"), 0);
     }
 
     // --- ITEM-035 AC1/AC3: OAuth authorize URL + query encoding ---
@@ -950,6 +1060,7 @@ mod tests {
                 api_url: "https://api.github.com".to_string(),
             },
             session_secret: SECRET.to_string(),
+            operator_logins: std::collections::HashSet::new(),
             provision_upstream_key: Some("sk-platform".to_string()),
             users,
             github,

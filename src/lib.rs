@@ -676,6 +676,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/dashboard", get(dashboard::index))
+        .route("/v1/dashboard/operator", get(dashboard::operator_console))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))

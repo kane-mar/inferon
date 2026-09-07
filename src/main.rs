@@ -93,6 +93,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GitHub OAuth not configured (need GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, SESSION_SECRET) — /auth/login answers 503"
         );
     }
+    // ITEM-037 AC1: OPERATOR_GITHUB_LOGINS bootstrap — promote existing users
+    // whose login is on the list (new sign-ins get flagged by the same list).
+    if let Some(accounts) = &accounts {
+        let logins: Vec<&str> = accounts.operator_logins.iter().map(String::as_str).collect();
+        if !logins.is_empty() {
+            match accounts.users.promote_logins(&logins).await {
+                Ok(n) => tracing::info!("operator bootstrap: promoted {n} existing user(s)"),
+                Err(e) => tracing::warn!("operator bootstrap failed: {e}"),
+            }
+        }
+    }
 
     let state = Arc::new(AppState {
         http_client,

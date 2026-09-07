@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql db/init/007_users.sql db/init/008_tenant_members.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql db/init/007_users.sql db/init/008_tenant_members.sql db/init/009_users_operator.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -164,7 +164,7 @@ echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006 + 007 + 008)"
+echo "ok: idempotent re-apply (001..009)"
 # A re-applied 006 must not duplicate the earlier backfill: with the column
 # gone its backfill branch is skipped.
 check_true "re-applied 006 did not duplicate the backfilled key" \
@@ -194,5 +194,10 @@ check_true "tenant_members.user_id FK cascades" \
     "SELECT count(*) FROM information_schema.table_constraints tc JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='tenant_members' AND tc.constraint_type='FOREIGN KEY' AND rc.delete_rule='CASCADE'"
 check_true "tenant_members.role restricted to owner|member" \
     "SELECT count(*) FROM pg_constraint WHERE conrelid = 'tenant_members'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%owner%'"
+
+# ITEM-037 migration 009: users.is_operator (platform operator flag).
+check_column users is_operator boolean
+check_true "users.is_operator defaults to false" \
+    "SELECT column_default = 'false' FROM information_schema.columns WHERE table_name='users' AND column_name='is_operator'"
 
 echo "ALL SCHEMA CHECKS PASSED"
