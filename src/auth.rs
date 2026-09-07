@@ -49,16 +49,38 @@ pub trait UserStore: Send + Sync {
         &self,
         user_id: Uuid,
     ) -> Result<Option<User>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// The user's tenant membership (tenant_id, role). `None` when the user
+    /// belongs to no tenant (ITEM-036: such a user gets auto-provisioned on
+    /// their next sign-in).
+    async fn tenant_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<(Uuid, String)>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Record a user's membership of a tenant (migration 008). Idempotent for
+    /// an existing (tenant, user) pair.
+    async fn add_membership(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
 
 #[derive(Clone, Default)]
 pub struct InMemoryUserStore {
     users: std::sync::Arc<std::sync::Mutex<Vec<User>>>,
+    memberships: std::sync::Arc<std::sync::Mutex<Vec<(Uuid, Uuid, String)>>>, // (tenant, user, role)
 }
 
 impl InMemoryUserStore {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<User>> {
+    fn lock_users(&self) -> std::sync::MutexGuard<'_, Vec<User>> {
         self.users.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn lock_memberships(&self) -> std::sync::MutexGuard<'_, Vec<(Uuid, Uuid, String)>> {
+        self.memberships.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -69,7 +91,7 @@ impl UserStore for InMemoryUserStore {
         github_id: i64,
         github_login: &str,
     ) -> Result<User, Box<dyn std::error::Error + Send + Sync>> {
-        let mut users = self.lock();
+        let mut users = self.lock_users();
         if let Some(existing) = users.iter_mut().find(|u| u.github_id == github_id) {
             existing.github_login = github_login.to_string();
             return Ok(existing.clone());
@@ -87,8 +109,33 @@ impl UserStore for InMemoryUserStore {
         &self,
         user_id: Uuid,
     ) -> Result<Option<User>, Box<dyn std::error::Error + Send + Sync>> {
-        let users = self.lock();
+        let users = self.lock_users();
         Ok(users.iter().find(|u| u.id == user_id).cloned())
+    }
+
+    async fn tenant_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<(Uuid, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        let memberships = self.lock_memberships();
+        Ok(memberships
+            .iter()
+            .find(|(_, uid, _)| *uid == user_id)
+            .map(|(tid, _, role)| (*tid, role.clone())))
+    }
+
+    async fn add_membership(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut memberships = self.lock_memberships();
+        if memberships.iter().any(|(tid, uid, _)| *tid == tenant_id && *uid == user_id) {
+            return Ok(());
+        }
+        memberships.push((tenant_id, user_id, role.to_string()));
+        Ok(())
     }
 }
 
@@ -144,15 +191,58 @@ impl UserStore for PostgresUserStore {
             github_login,
         }))
     }
+
+    async fn tenant_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<(Uuid, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        let row = sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT tenant_id, role FROM tenant_members WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    async fn add_membership(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        role: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        sqlx::query(
+            "INSERT INTO tenant_members (tenant_id, user_id, role)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (tenant_id, user_id) DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .bind(role)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
-/// OAuth credentials (env: GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET). Endpoints
-/// are GitHub constants — no env surface for them (YAGNI; tests never hit the
-/// network, they inject a fake `GithubClient`).
+/// OAuth endpoints + credentials. Credentials come from env
+/// (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET); the three endpoint URLs default
+/// to GitHub and can be overridden (GITHUB_AUTHORIZE_URL / GITHUB_TOKEN_URL /
+/// GITHUB_API_URL) so the smoke can point the real client at the in-binary
+/// mock GitHub (ITEM-036 AC4).
 #[derive(Clone, Debug)]
 pub struct OauthConfig {
     pub client_id: String,
     pub client_secret: String,
+    pub authorize_url: String,
+    pub token_url: String,
+    pub api_url: String,
+}
+
+impl OauthConfig {
+    fn env(key: &str, fallback: &str) -> String {
+        std::env::var(key).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| fallback.to_string())
+    }
 }
 
 /// A GitHub identity returned by an OAuth code exchange.
@@ -196,7 +286,7 @@ impl GithubClient for RealGithub {
     ) -> Result<GithubUser, String> {
         let token_resp = self
             .http
-            .post("https://github.com/login/oauth/access_token")
+            .post(&self.config.token_url)
             .header("Accept", "application/json")
             .form(&[
                 ("client_id", self.config.client_id.as_str()),
@@ -216,7 +306,7 @@ impl GithubClient for RealGithub {
             .ok_or_else(|| "no access_token in the exchange response".to_string())?;
         let user_resp = self
             .http
-            .get("https://api.github.com/user")
+            .get(format!("{}/user", self.config.api_url))
             .header("Authorization", format!("Bearer {access_token}"))
             .header("User-Agent", "inferon")
             .send()
@@ -243,6 +333,11 @@ impl GithubClient for RealGithub {
 pub struct Accounts {
     pub oauth: OauthConfig,
     pub session_secret: String,
+    /// Upstream master key given to auto-provisioned tenants (env
+    /// `UPSTREAM_MASTER_KEY`, ITEM-036 AC1): the platform's shared DeepSeek
+    /// key — signup yields immediately-working LLM calls. `None` provisions
+    /// keyless tenants.
+    pub provision_upstream_key: Option<String>,
     pub users: std::sync::Arc<dyn UserStore>,
     pub github: std::sync::Arc<dyn GithubClient>,
 }
@@ -261,13 +356,26 @@ impl Accounts {
         if client_id.is_empty() || client_secret.is_empty() || session_secret.is_empty() {
             return None;
         }
+        let provision_upstream_key = std::env::var("UPSTREAM_MASTER_KEY")
+            .ok()
+            .filter(|k| !k.is_empty());
         let oauth = OauthConfig {
             client_id,
             client_secret,
+            authorize_url: OauthConfig::env(
+                "GITHUB_AUTHORIZE_URL",
+                "https://github.com/login/oauth/authorize",
+            ),
+            token_url: OauthConfig::env(
+                "GITHUB_TOKEN_URL",
+                "https://github.com/login/oauth/access_token",
+            ),
+            api_url: OauthConfig::env("GITHUB_API_URL", "https://api.github.com"),
         };
         Some(std::sync::Arc::new(Accounts {
             oauth: oauth.clone(),
             session_secret,
+            provision_upstream_key,
             users,
             github: std::sync::Arc::new(RealGithub::new(http, oauth)),
         }))
@@ -278,7 +386,8 @@ impl Accounts {
 /// CSRF nonce; `redirect_uri` is where GitHub sends the code back.
 pub fn authorize_url(config: &OauthConfig, redirect_uri: &str, state: &str) -> String {
     format!(
-        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=read:user",
+        "{}?client_id={}&redirect_uri={}&state={}&scope=read:user",
+        config.authorize_url,
         encode_query(&config.client_id),
         encode_query(redirect_uri),
         encode_query(state)
@@ -459,9 +568,33 @@ pub async fn callback(
                         now_secs(),
                         crate::session::SESSION_TTL_SECS,
                     );
-                    let mut response = redirect_to("/v1/dashboard");
-                    add_cookie(&mut response, &crate::session::set_cookie(&token, secure));
-                    response
+                    let session_cookie = crate::session::set_cookie(&token, secure);
+                    match accounts.users.tenant_for_user(user.id).await {
+                        Err(e) => {
+                            tracing::error!("membership lookup failed: {e}");
+                            crate::json_error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "user_store_error",
+                                "could not resolve the sign-in",
+                            )
+                        }
+                        // Returning user: straight to their dashboard (ITEM-036 AC2).
+                        Ok(Some(_)) => {
+                            let mut response = redirect_to("/v1/dashboard");
+                            add_cookie(&mut response, &session_cookie);
+                            response
+                        }
+                        // First-time user: auto-provision a tenant + owner + key,
+                        // and show the key exactly once (ITEM-036 AC1).
+                        Ok(None) => match provision_first_tenant(&state, accounts, user).await {
+                            Err(e) => e,
+                            Ok(raw_key) => {
+                                let mut response = success_screen(&raw_key);
+                                add_cookie(&mut response, &session_cookie);
+                                response
+                            }
+                        },
+                    }
                 }
             },
         },
@@ -481,6 +614,72 @@ pub async fn logout(headers: HeaderMap) -> Response {
     let mut response = redirect_to("/v1/dashboard");
     add_cookie(&mut response, &crate::session::clear_cookie(is_secure(&headers)));
     response
+}
+
+fn provisioning_failed() -> Response {
+    crate::json_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "provisioning_failed",
+        "could not set up your tenant — please try signing in again",
+    )
+}
+
+/// ITEM-036 AC1: create the tenant, record the user as its owner, and mint the
+/// tenant's first key (ITEM-034 path). Returns the raw key — the only moment
+/// it exists; only its hash is stored.
+async fn provision_first_tenant(
+    state: &Arc<AppState>,
+    accounts: &Accounts,
+    user: User,
+) -> Result<String, Response> {
+    let tenant_id = match state
+        .tenant_store
+        .insert_tenant(accounts.provision_upstream_key.as_deref())
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("tenant insert failed: {e}");
+            return Err(provisioning_failed());
+        }
+    };
+    if let Err(e) = accounts.users.add_membership(tenant_id, user.id, "owner").await {
+        tracing::error!("membership insert failed: {e}");
+        return Err(provisioning_failed());
+    }
+    let raw_key = crate::mint_client_key();
+    if let Err(e) = state
+        .tenant_store
+        .insert_api_key(tenant_id, "default", &crate::tenant_hash(&raw_key))
+        .await
+    {
+        tracing::error!("key insert failed: {e}");
+        return Err(provisioning_failed());
+    }
+    Ok(raw_key)
+}
+
+const SIGNUP_CSS: &str = "body{font:14px/1.5 system-ui,sans-serif;max-width:640px;margin:3rem auto;padding:0 1rem;color:#1a202c}h1{font-size:1.4rem}code{background:#edf2f7;padding:.2rem .4rem;border-radius:4px;word-break:break-all}button{margin-left:.5rem}.note{color:#4a5568}";
+
+/// The one-time success screen (ITEM-036 AC1): the raw key rendered exactly
+/// once, with a copy affordance and the hash-only warning. The key exists only
+/// in this response — never stored, never shown again.
+fn success_screen(raw_key: &str) -> Response {
+    let body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<title>Inferon — your API key</title><style>{SIGNUP_CSS}</style></head>\
+<body><h1>Welcome — here is your API key</h1>\
+<p class=\"note\">Stored hashed, <b>not shown again</b>. Copy it now:</p>\
+<p><code id=\"key\">{raw_key}</code>\
+<button onclick=\"navigator.clipboard.writeText(document.getElementById('key').textContent); this.textContent='copied'\">copy</button></p>\
+<p><a href=\"/v1/dashboard\">Continue to your dashboard</a></p></body></html>"
+    );
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        body,
+    )
+        .into_response()
 }
 
 /// The signed-in user, resolved from the session cookie by `me` (AC4). A
@@ -536,8 +735,50 @@ pub async fn me(CurrentUser(user): CurrentUser) -> Response {
 }
 
 #[cfg(test)]
+pub(crate) mod test_helpers {
+    use super::*;
+
+    /// Session secret shared by test-only account fixtures.
+    pub(crate) const TEST_SESSION_SECRET: &str = "test-session-secret";
+
+    struct NeverGithub;
+
+    #[async_trait::async_trait]
+    impl GithubClient for NeverGithub {
+        async fn exchange_code(
+            &self,
+            _code: &str,
+            _redirect_uri: &str,
+        ) -> Result<GithubUser, String> {
+            Err("no network in unit tests".to_string())
+        }
+    }
+
+    /// An OAuth-configured `Accounts` over the given user store (dashboard
+    /// session-scope tests, ITEM-036 AC2).
+    pub(crate) fn dummy_accounts(
+        users: std::sync::Arc<dyn UserStore>,
+    ) -> std::sync::Arc<Accounts> {
+        std::sync::Arc::new(Accounts {
+            oauth: OauthConfig {
+                client_id: "client-123".to_string(),
+                client_secret: "secret".to_string(),
+                authorize_url: "https://github.com/login/oauth/authorize".to_string(),
+                token_url: "https://github.com/login/oauth/access_token".to_string(),
+                api_url: "https://api.github.com".to_string(),
+            },
+            session_secret: TEST_SESSION_SECRET.to_string(),
+            provision_upstream_key: None,
+            users,
+            github: std::sync::Arc::new(NeverGithub),
+        })
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TenantStore;
 
     fn store() -> InMemoryUserStore {
         InMemoryUserStore::default()
@@ -587,12 +828,45 @@ mod tests {
         );
     }
 
+    // --- ITEM-036: tenant membership (migration 008) ---
+
+    #[tokio::test]
+    async fn add_membership_makes_the_user_a_tenant_member() {
+        let store = store();
+        let user = store.upsert_github_user(42, "kane").await.expect("ok");
+        let tenant_id = Uuid::new_v4();
+        assert_eq!(store.tenant_for_user(user.id).await.expect("ok"), None, "no membership yet");
+        store.add_membership(tenant_id, user.id, "owner").await.expect("ok");
+        assert_eq!(
+            store.tenant_for_user(user.id).await.expect("ok"),
+            Some((tenant_id, "owner".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn membership_add_is_idempotent_and_unknown_users_have_none() {
+        let store = store();
+        let user = store.upsert_github_user(7, "bob").await.expect("ok");
+        let tenant_id = Uuid::new_v4();
+        store.add_membership(tenant_id, user.id, "member").await.expect("ok");
+        store.add_membership(tenant_id, user.id, "member").await.expect("ok");
+        assert_eq!(
+            store.tenant_for_user(user.id).await.expect("ok"),
+            Some((tenant_id, "member".to_string())),
+            "role kept on re-add"
+        );
+        assert_eq!(store.tenant_for_user(Uuid::new_v4()).await.expect("ok"), None);
+    }
+
     // --- ITEM-035 AC1/AC3: OAuth authorize URL + query encoding ---
 
     fn config() -> OauthConfig {
         OauthConfig {
             client_id: "client-123".to_string(),
             client_secret: "secret".to_string(),
+            authorize_url: "https://github.com/login/oauth/authorize".to_string(),
+            token_url: "https://github.com/login/oauth/access_token".to_string(),
+            api_url: "https://api.github.com".to_string(),
         }
     }
 
@@ -671,19 +945,26 @@ mod tests {
             oauth: OauthConfig {
                 client_id: "client-123".to_string(),
                 client_secret: "secret".to_string(),
+                authorize_url: "https://github.com/login/oauth/authorize".to_string(),
+                token_url: "https://github.com/login/oauth/access_token".to_string(),
+                api_url: "https://api.github.com".to_string(),
             },
             session_secret: SECRET.to_string(),
+            provision_upstream_key: Some("sk-platform".to_string()),
             users,
             github,
         }))
     }
 
-    fn test_state(accounts: Option<std::sync::Arc<Accounts>>) -> std::sync::Arc<crate::AppState> {
+    fn test_state_full(
+        accounts: Option<std::sync::Arc<Accounts>>,
+        tenant_store: std::sync::Arc<dyn crate::TenantStore>,
+    ) -> std::sync::Arc<crate::AppState> {
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         std::sync::Arc::new(crate::AppState {
             http_client: reqwest::Client::new(),
             upstream_url: "http://127.0.0.1:1/".to_string(),
-            tenant_store: std::sync::Arc::new(crate::InMemoryTenantStore::default()),
+            tenant_store,
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -691,6 +972,10 @@ mod tests {
             db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
                 .unwrap(),
         })
+    }
+
+    fn test_state(accounts: Option<std::sync::Arc<Accounts>>) -> std::sync::Arc<crate::AppState> {
+        test_state_full(accounts, std::sync::Arc::new(crate::InMemoryTenantStore::default()))
     }
 
     fn request(uri: &str, method: &str, cookies: &[(&str, &str)], secure: bool) -> Request<Body> {
@@ -769,19 +1054,15 @@ mod tests {
         assert!(state_cookie.contains("HttpOnly") && state_cookie.contains("Secure"));
     }
 
-    #[tokio::test]
-    async fn callback_establishes_a_session_and_upserts_the_user() {
-        let users = std::sync::Arc::new(InMemoryUserStore::default());
-        let github = std::sync::Arc::new(FakeGithub::default());
-        let state = test_state(test_accounts(users.clone(), github.clone()));
-        let router = crate::build_router(state);
-
-        // Login -> capture the state nonce and cookie.
+    /// Run login -> callback with the freshly issued state cookie; returns the
+    /// callback response.
+    async fn oauth_dance(router: &axum::Router, code: &str) -> axum::response::Response {
         let login = router
             .clone()
             .oneshot(request("/auth/login", "GET", &[], false))
             .await
             .unwrap();
+        assert_eq!(login.status(), axum::http::StatusCode::FOUND);
         let nonce = login.headers()[header::LOCATION]
             .to_str()
             .unwrap()
@@ -796,60 +1077,125 @@ mod tests {
             .get(crate::session::OAUTH_STATE_COOKIE)
             .expect("state cookie")
             .to_string();
-
-        // Callback with the right code + state.
-        let callback = router
+        router
             .clone()
             .oneshot(request(
-                &format!("/auth/callback?code=the-code&state={nonce}"),
+                &format!("/auth/callback?code={code}&state={nonce}"),
                 "GET",
                 &[(crate::session::OAUTH_STATE_COOKIE, &state_cookie)],
                 false,
             ))
             .await
-            .unwrap();
-        assert_eq!(callback.status(), axum::http::StatusCode::FOUND, "lands on the dashboard");
-        assert_eq!(callback.headers()[header::LOCATION], "/v1/dashboard");
+            .unwrap()
+    }
+
+    /// The raw `sk-inferon-…` key inside an HTML body (the success screen).
+    fn raw_key_in(body: &str) -> Option<&str> {
+        let marker = "sk-inferon-";
+        let start = body.find(marker)?;
+        Some(&body[start..start + marker.len() + 32])
+    }
+
+    #[tokio::test]
+    async fn first_sign_in_shows_the_key_once_and_provisions_the_tenant() {
+        let users = std::sync::Arc::new(InMemoryUserStore::default());
+        let tenants: std::sync::Arc<crate::InMemoryTenantStore> =
+            std::sync::Arc::new(crate::InMemoryTenantStore::default());
+        let state = test_state_full(
+            test_accounts(users.clone(), std::sync::Arc::new(FakeGithub::default())),
+            tenants.clone(),
+        );
+        let router = crate::build_router(state);
+
+        let callback = oauth_dance(&router, "the-code").await;
+        assert_eq!(callback.status(), axum::http::StatusCode::OK, "success screen, not a redirect");
+        let content_type = callback
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(content_type.starts_with("text/html"), "html: {content_type}");
         let cookies = set_cookies(&callback);
-        let token = cookies
-            .get(crate::session::SESSION_COOKIE)
-            .expect("session cookie set")
-            .to_string();
-        // The one-time state cookie is cleared (present with an empty value).
-        assert_eq!(
-            cookies.get(crate::session::OAUTH_STATE_COOKIE).map(String::as_str),
-            Some(""),
-            "state cookie cleared"
-        );
+        let body = String::from_utf8(
+            axum::body::to_bytes(callback.into_body(), 1024 * 1024).await.unwrap().to_vec(),
+        )
+        .unwrap();
+        let key = raw_key_in(&body).expect("the raw key is shown on the screen").to_string();
+        assert!(key.starts_with("sk-inferon-"));
+        assert!(body.contains("not shown again"), "hash-only note: {body}");
+        assert_eq!(body.matches(&key).count(), 1, "the raw key appears exactly once");
 
-        // The session token resolves to the upserted user.
+        // A session cookie was set for the new user.
+        let token = cookies.get(crate::session::SESSION_COOKIE).expect("session cookie").to_string();
         let user_id =
-            crate::session::verify_session(&token, SECRET, now_secs()).expect("fresh token valid");
-        let user = users.find_by_id(user_id).await.expect("store ok").expect("user present");
-        assert_eq!((user.github_id, user.github_login.as_str()), (42, "octocat"));
+            crate::session::verify_session(&token, SECRET, now_secs()).expect("fresh token");
+        let user = users.find_by_id(user_id).await.expect("ok").expect("user present");
+        assert_eq!(user.github_login, "octocat");
 
-        // The exchange saw the code and the http redirect URI (plain-http test hop).
-        let recorded = github.calls.lock().unwrap().clone();
-        assert_eq!(
-            recorded,
-            vec![("the-code".to_string(), "http://inferon.example/auth/callback".to_string())]
-        );
-
-        // /auth/me with the session cookie returns the user.
-        let me = router
-            .clone()
-            .oneshot(request(
-                "/auth/me",
-                "GET",
-                &[(crate::session::SESSION_COOKIE, &token)],
-                false,
-            ))
+        // Membership: the user owns exactly one auto-provisioned tenant.
+        let (tenant_id, role) = users
+            .tenant_for_user(user.id)
             .await
-            .unwrap();
-        assert_eq!(me.status(), axum::http::StatusCode::OK);
-        let json = body_json(me).await;
-        assert_eq!(json["github_id"], 42);
-        assert_eq!(json["github_login"], "octocat");
+            .expect("ok")
+            .expect("owner membership");
+        assert_eq!(role, "owner");
+        let tenant = tenants
+            .tenant_by_id(tenant_id)
+            .await
+            .expect("ok")
+            .expect("provisioned tenant");
+        assert_eq!(tenant.upstream_openai_key.as_deref(), Some("sk-platform"));
+
+        // Exactly one key exists (the revealed one) and it authenticates.
+        let keys = tenants.list_api_keys(tenant_id).await.expect("ok");
+        assert_eq!(keys.len(), 1, "one first key, hash-only");
+        let resolved = tenants
+            .tenant_by_api_key_hash(&crate::tenant_hash(&key))
+            .await
+            .expect("ok");
+        assert_eq!(resolved.map(|t| t.id), Some(tenant_id), "the key is accepted immediately");
+    }
+
+    #[tokio::test]
+    async fn returning_sign_in_lands_on_the_dashboard_without_another_key() {
+        let users = std::sync::Arc::new(InMemoryUserStore::default());
+        let tenants: std::sync::Arc<crate::InMemoryTenantStore> =
+            std::sync::Arc::new(crate::InMemoryTenantStore::default());
+        let state = test_state_full(
+            test_accounts(users.clone(), std::sync::Arc::new(FakeGithub::default())),
+            tenants.clone(),
+        );
+        let router = crate::build_router(state);
+
+        // First sign-in: success screen + provisioning.
+        let first = oauth_dance(&router, "code-1").await;
+        assert_eq!(first.status(), axum::http::StatusCode::OK);
+        let user_id = crate::session::verify_session(
+            set_cookies(&first)
+                .get(crate::session::SESSION_COOKIE)
+                .expect("session")
+                .as_str(),
+            SECRET,
+            now_secs(),
+        )
+        .expect("valid");
+        let (tenant_id, _) = users.tenant_for_user(user_id).await.expect("ok").expect("membership");
+
+        // Second sign-in (same GitHub user): straight to the dashboard, no key.
+        let second = oauth_dance(&router, "code-2").await;
+        assert_eq!(second.status(), axum::http::StatusCode::FOUND);
+        assert_eq!(second.headers()[header::LOCATION], "/v1/dashboard");
+        let second_body = String::from_utf8(
+            axum::body::to_bytes(second.into_body(), 1024 * 1024).await.unwrap().to_vec(),
+        )
+        .unwrap();
+        assert!(
+            !second_body.contains("sk-inferon-"),
+            "no key material on a returning sign-in: {second_body}"
+        );
+        // Still one tenant, one membership, one key — sign-in never re-provisions.
+        assert_eq!(users.tenant_for_user(user_id).await.expect("ok"), Some((tenant_id, "owner".to_string())));
+        assert_eq!(tenants.list_api_keys(tenant_id).await.expect("ok").len(), 1);
     }
 
     #[tokio::test]

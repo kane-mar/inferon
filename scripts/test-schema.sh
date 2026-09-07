@@ -9,7 +9,7 @@ set -euo pipefail
 
 COMPOSE=(docker compose -f docker-compose.yml)
 CONTAINER="inferon-postgres-1"
-MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql db/init/007_users.sql"
+MIGRATIONS="db/init/001_init.sql db/init/002_extensions.sql db/init/003_alerts.sql db/init/004_guard.sql db/init/005_guard_optout.sql db/init/006_api_keys.sql db/init/007_users.sql db/init/008_tenant_members.sql"
 
 cleanup() {
     "${COMPOSE[@]}" down -v >/dev/null 2>&1 || true
@@ -164,7 +164,7 @@ echo "re-applying migrations (idempotency)..."
 for m in $MIGRATIONS; do
     docker exec -i "$CONTAINER" psql -U inferon -d inferon -q < "$m" || fail "idempotent re-apply errored on $m"
 done
-echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006 + 007)"
+echo "ok: idempotent re-apply (001 + 002 + 003 + 004 + 005 + 006 + 007 + 008)"
 # A re-applied 006 must not duplicate the earlier backfill: with the column
 # gone its backfill branch is skipped.
 check_true "re-applied 006 did not duplicate the backfilled key" \
@@ -179,5 +179,20 @@ check_column users created_at "timestamp with time zone"
 check_column users last_login_at "timestamp with time zone"
 check_true "users.github_id unique index exists" \
     "SELECT count(*) FROM pg_indexes WHERE tablename='users' AND indexname='idx_users_github_id'"
+
+# ITEM-036 migration 008: tenant_members (owner/member links).
+check_table tenant_members
+check_column tenant_members tenant_id uuid
+check_column tenant_members user_id uuid
+check_column tenant_members role text
+check_column tenant_members created_at "timestamp with time zone"
+check_true "tenant_members PK covers (tenant, user)" \
+    "SELECT count(*) FROM information_schema.table_constraints WHERE table_name='tenant_members' AND constraint_type='PRIMARY KEY'"
+check_true "tenant_members.tenant_id FK cascades" \
+    "SELECT count(*) FROM information_schema.table_constraints tc JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='tenant_members' AND tc.constraint_type='FOREIGN KEY' AND rc.delete_rule='CASCADE'"
+check_true "tenant_members.user_id FK cascades" \
+    "SELECT count(*) FROM information_schema.table_constraints tc JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name WHERE tc.table_name='tenant_members' AND tc.constraint_type='FOREIGN KEY' AND rc.delete_rule='CASCADE'"
+check_true "tenant_members.role restricted to owner|member" \
+    "SELECT count(*) FROM pg_constraint WHERE conrelid = 'tenant_members'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%owner%'"
 
 echo "ALL SCHEMA CHECKS PASSED"

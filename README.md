@@ -30,17 +30,19 @@ linting, and a self-hosted cost-leak dashboard.
 
 **Base URL:** `https://inferon.agilefederation.com/v1` (OpenAI-compatible).
 
-Your team's API key is issued out-of-band by an Inferon operator (runbook:
-[`scripts/seed-tenant.sh`](scripts/seed-tenant.sh)) — no signup page yet. The key is
-shown exactly once, at mint time; the proxy only ever stores its SHA-256 hash. If a
-key is lost or leaked, an operator mints a replacement and revokes the compromised
-key.
+### 1. Sign in (self-serve)
+
+Open `https://inferon.agilefederation.com/auth/login` and sign in with GitHub.
+First-time sign-in **auto-provisions your tenant** and shows your API key exactly
+once (stored hashed, never shown again) — copy it there. Returning sign-in drops
+you straight on your dashboard.
 
 **Supported surface:**
 
 - `POST /v1/chat/completions` — chat completions, streaming and non-streaming
   (`stream: true|false`), OpenAI SDK-compatible
-- `GET /v1/dashboard` — your cost dashboard (per-tenant; only your traffic)
+- `GET /v1/dashboard` — your cost dashboard (per-tenant; only your traffic; works
+  with either your API key or your browser sign-in)
   - JSON: `/v1/dashboard/api/summary`, `/by-model`, `/by-prompt`, `/waste` (all with `?days=7|30|90`)
 
 **2-minute example (OpenAI SDK):**
@@ -50,7 +52,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="https://inferon.agilefederation.com/v1",
-    api_key="sk-inferon-...",   # the key your operator gave you
+    api_key="sk-inferon-...",   # the key shown once at sign-up
 )
 
 chat = client.chat.completions.create(
@@ -82,11 +84,18 @@ curl http://localhost:8080/healthz   # → ok
 The stack: `proxy` (axum), `postgres` (schema auto-applied from `db/init/` on first
 boot), `redis` (reserved for later slices).
 
-## Minting a tenant key (the operator task)
+## Minting a tenant key (operator / machine-only runbook)
+
+> Self-serve sign-in is the primary onboarding (see For developers above).
+> `seed-tenant.sh` is the out-of-band path for operators provisioning tenants
+> on behalf of others, and for machines/scripts — not what a developer should
+> use day to day.
 
 Tenant keys are stored **hashed**; the tenant's *upstream master key* (the key the
 proxy uses to call the provider on the tenant's behalf) is stored plaintext in
-`tenants.upstream_openai_key` (DeepSeek is OpenAI-compatible → this column).
+`tenants.upstream_openai_key` (DeepSeek is OpenAI-compatible → this column). On the
+self-serve path a new tenant starts on the platform's shared upstream key
+(`UPSTREAM_MASTER_KEY`); a tenant with its own provider key replaces it here.
 
 ```bash
 ./scripts/seed-tenant.sh "<tenant master upstream key>"

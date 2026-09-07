@@ -25,6 +25,21 @@ export UPSTREAM_URL="http://mock-upstream:8090/v1/chat/completions"
 # Operator credential (ITEM-013/020): enables the platform-wide operator views.
 # Generated here so the smoke run exercises the operator surface end-to-end.
 export OPERATOR_API_KEY="sk-smoke-op-$(openssl rand -hex 8)"
+# GitHub OAuth configured at the in-binary mock (ITEM-036 AC4): the smoke signs
+# a developer up through the real /auth flow and asserts provisioning. The
+# authorize URL must be reachable by the smoke's curl (host port 8091); the
+# token/api URLs are called by the proxy inside the compose network. The
+# unconfigured surface (login 503) is verified on the prod host instead.
+export GITHUB_AUTHORIZE_URL="http://127.0.0.1:8091/login/oauth/authorize"
+export GITHUB_TOKEN_URL="http://github-mock:8091/login/oauth/access_token"
+export GITHUB_API_URL="http://github-mock:8091"
+export GITHUB_CLIENT_ID="smoke-client"
+export GITHUB_CLIENT_SECRET="smoke-secret"
+export SESSION_SECRET="sk-smoke-session-$(openssl rand -hex 16)"
+# Auto-provisioned tenants (ITEM-036) start on this shared upstream key — the
+# mock answers guarded replays 200 for any bearer, so the signup key gets a
+# real 200 end-to-end.
+export UPSTREAM_MASTER_KEY="sk-smoke-master"
 
 psql() {
     # -q suppresses the command tag so INSERT ... RETURNING yields only the row.
@@ -40,6 +55,13 @@ cleanup() {
     if [ -n "${OPT_OUT_HASH:-}" ]; then
         psql "DELETE FROM tenants t USING api_keys k WHERE k.tenant_id = t.id AND k.key_hash = '$OPT_OUT_HASH';" >/dev/null 2>&1 || true
     fi
+    # The self-serve signup tenant from the ITEM-036 dance (cascade clears its
+    # keys + memberships); then the user row itself.
+    if [ -n "${SMOKE_USER_ID:-}" ]; then
+        psql "DELETE FROM tenants WHERE id IN (SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_USER_ID');" >/dev/null 2>&1 || true
+        psql "DELETE FROM users WHERE id = '$SMOKE_USER_ID';" >/dev/null 2>&1 || true
+    fi
+    rm -f "${DANCE_JAR:-}"
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -204,10 +226,63 @@ for d in 7 30 90; do
         "$BASE/v1/dashboard/api/guard?days=$d" -H "Authorization: Bearer $DEV_KEY"
 done
 
-echo "-- ITEM-035 accounts surface (smoke stack has no GITHUB_*/SESSION_SECRET env) --"
+echo "-- ITEM-036 self-serve signup (mock GitHub OAuth, one fixed identity) --"
 check_status "/auth/me without a session -> 401" 401 "$BASE/auth/me"
-check_status "/auth/login unconfigured -> 503" 503 "$BASE/auth/login"
-check_status "dashboard shell still serves -> 200" 200 "$BASE/v1/dashboard"
+
+# OAuth dance: /auth/login -> (mock) GitHub authorize -> /auth/callback. Follows
+# redirects with a cookie jar so the CSRF-state and session cookies flow.
+DANCE_JAR=$(mktemp)
+oauth_dance() {
+    local location
+    location=$(curl -sS -o /dev/null -w '%{redirect_url}' -c "$DANCE_JAR" "$BASE/auth/login")
+    [ -n "$location" ] || return 1
+    curl -sS -L -b "$DANCE_JAR" -c "$DANCE_JAR" "$location"
+}
+
+# First sign-in: success screen showing the raw key exactly once.
+BODY1=$(oauth_dance) || fail "first OAuth dance failed"
+printf '%s' "$BODY1" | grep -q 'not shown again' || fail "success screen lacks the hash-only note: $BODY1"
+SIGNUP_KEY=$(printf '%s' "$BODY1" | grep -o 'sk-inferon-[0-9a-f]\{32\}' | head -1)
+[ -n "$SIGNUP_KEY" ] || fail "no key on the success screen: $BODY1"
+[ "$(printf '%s' "$BODY1" | grep -o "$SIGNUP_KEY" | wc -l | tr -d ' ')" = "1" ] \
+    || fail "the raw key was rendered more than once"
+echo "ok: first sign-in shows the key once (self-serve provisioned)"
+
+# Provisioning rows in Postgres: user, owner membership, tenant with the shared
+# upstream key, exactly one hashed key.
+SMOKE_USER_ID=$(psql "SELECT id FROM users WHERE github_login = 'smoke-dev';")
+[ -n "$SMOKE_USER_ID" ] || fail "no user row for the signed-up developer"
+MEMBER_COUNT=$(psql "SELECT count(*) FROM tenant_members WHERE user_id = '$SMOKE_USER_ID' AND role = 'owner';")
+[ "$MEMBER_COUNT" = "1" ] || fail "no owner membership (rows: $MEMBER_COUNT)"
+SIGNUP_TID=$(psql "SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_USER_ID' AND role = 'owner';")
+[ -n "$SIGNUP_TID" ] || fail "no provisioned tenant"
+[ "$(psql "SELECT upstream_openai_key = 'sk-smoke-master' FROM tenants WHERE id = '$SIGNUP_TID';")" = "t" ] \
+    || fail "provisioned tenant lacks the shared upstream key"
+[ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "1" ] \
+    || fail "expected exactly one first key"
+echo "ok: tenant + owner membership + one hashed key in Postgres"
+
+# The session cookie from the dance resolves /auth/me.
+ME=$(curl -sS -b "$DANCE_JAR" "$BASE/auth/me")
+printf '%s' "$ME" | grep -q '"github_login":"smoke-dev"' || fail "auth/me not signed in after the dance: $ME"
+echo "ok: session established (auth/me -> smoke-dev)"
+
+# The revealed key authenticates end-to-end: a guarded request gets the 200
+# schema-valid replay (same arms as the seeded guarded tenant).
+resp=$(post_and_code "$SIGNUP_KEY" "$GUARDED_BODY")
+code=$(printf '%s' "$resp" | tail -1)
+body=$(printf '%s' "$resp" | sed '$d')
+[ "$code" = "200" ] || fail "signup key: expected guarded 200, got HTTP $code"
+printf '%s' "$body" | grep -q 'answer' || fail "signup key request lacked the schema-valid answer: $body"
+printf '%s' "$body" | grep -q 'other' && fail "signup key request leaked the cheap lying body: $body"
+echo "ok: the revealed key authenticates end-to-end (HTTP 200)"
+
+# Second sign-in (same GitHub identity): lands on the dashboard, no key.
+BODY2=$(oauth_dance) || fail "second OAuth dance failed"
+printf '%s' "$BODY2" | grep -q 'sk-inferon-' && fail "returning sign-in showed key material"
+[ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "1" ] \
+    || fail "returning sign-in minted another key"
+echo "ok: returning sign-in lands on the dashboard with no second key"
 
 echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
 KEYS_URL="$BASE/v1/dashboard/api/operator/keys"

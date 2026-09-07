@@ -39,6 +39,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // ITEM-036 AC4 smoke harness: mock GitHub OAuth (same single image).
+    if std::env::args().nth(1).as_deref() == Some("--mock-github") {
+        inferon::mock_github::serve(port).await?;
+        return Ok(());
+    }
+
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
     let pool = PgPoolOptions::new()
         .max_connections(5)

@@ -10,6 +10,13 @@ services:
       UPSTREAM_URL: ${UPSTREAM_URL:-}
       OPERATOR_API_KEY: ${OPERATOR_API_KEY:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_AUTHORIZE_URL: ${GITHUB_AUTHORIZE_URL:-}
+      GITHUB_TOKEN_URL: ${GITHUB_TOKEN_URL:-}
+      GITHUB_API_URL: ${GITHUB_API_URL:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      UPSTREAM_MASTER_KEY: ${UPSTREAM_MASTER_KEY:-}
       RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       postgres:
@@ -61,6 +68,20 @@ services:
       PORT: 8090
       RUST_LOG: ${RUST_LOG:-info}
     command: ["--mock-upstream"]
+
+  # Mock GitHub OAuth for the self-serve signup smoke (ITEM-036 AC4): same
+  # binary in --mock-github mode — one fixed identity the smoke signs up twice
+  # (fresh sign-in provisions, the repeat lands on the dashboard).
+  github-mock:
+    build: .
+    profiles: ["mock"]
+    restart: "no"
+    ports:
+      - "8091:8091"
+    environment:
+      PORT: 8091
+      RUST_LOG: ${RUST_LOG:-info}
+    command: ["--mock-github"]
 
   # TLS ingress for the public hostname (ITEM-014c); enabled via --profile prod.
   caddy:

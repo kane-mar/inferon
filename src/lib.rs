@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod budget;
 pub mod guard;
 use guard::GuardReason;
+pub mod mock_github;
 pub mod mock_upstream;
 pub mod cost;
 pub mod auth;
@@ -100,6 +101,14 @@ pub trait TenantStore: Send + Sync {
         &self,
         key_id: Uuid,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Create a tenant row (ITEM-036 self-serve provisioning). Returns the new
+    /// tenant id. `upstream_key` is the tenant's master upstream key — `None`
+    /// for a keyless tenant.
+    async fn insert_tenant(
+        &self,
+        upstream_key: Option<&str>,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 #[derive(Clone)]
@@ -113,16 +122,19 @@ struct InMemoryApiKey {
 
 #[derive(Default)]
 pub struct InMemoryTenantStore {
-    tenants: HashMap<Uuid, Tenant>,
+    tenants: std::sync::Mutex<HashMap<Uuid, Tenant>>,
     keys: std::sync::Mutex<Vec<InMemoryApiKey>>,
 }
 
 impl Clone for InMemoryTenantStore {
     fn clone(&self) -> Self {
-        let keys = self.keys.lock().unwrap_or_else(|p| p.into_inner()).clone();
         Self {
-            tenants: self.tenants.clone(),
-            keys: std::sync::Mutex::new(keys),
+            tenants: std::sync::Mutex::new(
+                self.tenants.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+            ),
+            keys: std::sync::Mutex::new(
+                self.keys.lock().unwrap_or_else(|p| p.into_inner()).clone(),
+            ),
         }
     }
 }
@@ -131,11 +143,11 @@ impl InMemoryTenantStore {
     /// Legacy shape: one active key per (hash → tenant) entry — matches the
     /// pre-ITEM-034 single-column model most tests seed with.
     pub fn new(by_key_hash: HashMap<String, Tenant>) -> Self {
-        let mut store = Self::default();
+        let store = Self::default();
         for (hash, tenant) in by_key_hash {
             let tenant_id = tenant.id;
-            store.tenants.insert(tenant_id, tenant);
-            store.keys.lock().unwrap_or_else(|p| p.into_inner()).push(InMemoryApiKey {
+            store.tenants().insert(tenant_id, tenant);
+            store.keys().push(InMemoryApiKey {
                 id: Uuid::new_v4(),
                 tenant_id,
                 label: "seeded".to_string(),
@@ -144,6 +156,10 @@ impl InMemoryTenantStore {
             });
         }
         store
+    }
+
+    fn tenants(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Tenant>> {
+        self.tenants.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn keys(&self) -> std::sync::MutexGuard<'_, Vec<InMemoryApiKey>> {
@@ -169,14 +185,17 @@ impl TenantStore for InMemoryTenantStore {
             .iter()
             .find(|k| !k.revoked && k.key_hash == api_key_hash)
             .map(|k| k.tenant_id);
-        Ok(found.and_then(|id| self.tenants.get(&id).cloned()))
+        match found {
+            Some(id) => Ok(self.tenants().get(&id).cloned()),
+            None => Ok(None),
+        }
     }
 
     async fn tenant_by_id(
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.tenants.get(&tenant_id).cloned())
+        Ok(self.tenants().get(&tenant_id).cloned())
     }
 
     async fn insert_api_key(
@@ -185,7 +204,7 @@ impl TenantStore for InMemoryTenantStore {
         label: &str,
         key_hash: &str,
     ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
-        if !self.tenants.contains_key(&tenant_id) {
+        if !self.tenants().contains_key(&tenant_id) {
             return Err("tenant not found".into());
         }
         let id = Uuid::new_v4();
@@ -233,6 +252,21 @@ impl TenantStore for InMemoryTenantStore {
         } else {
             Ok(false)
         }
+    }
+
+    async fn insert_tenant(
+        &self,
+        upstream_key: Option<&str>,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+        let id = Uuid::new_v4();
+        self.tenants().insert(
+            id,
+            Tenant {
+                id,
+                upstream_openai_key: upstream_key.map(str::to_string),
+            },
+        );
+        Ok(id)
     }
 }
 
@@ -333,6 +367,19 @@ impl TenantStore for PostgresTenantStore {
             .execute(&self.pool)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn insert_tenant(
+        &self,
+        upstream_key: Option<&str>,
+    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+        let row: (Uuid,) = sqlx::query_as(
+            "INSERT INTO tenants (upstream_openai_key) VALUES ($1) RETURNING id",
+        )
+        .bind(upstream_key)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
     }
 }
 
@@ -1439,6 +1486,13 @@ mod tests {
         ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Err("tenant store unavailable".into())
         }
+
+        async fn insert_tenant(
+            &self,
+            _upstream_key: Option<&str>,
+        ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
     }
 
     async fn mock_upstream() -> String {
@@ -2093,7 +2147,6 @@ mod tests {
     // --- ITEM-034: api keys as rows (multi-key + revoke) ---
 
     const SECOND_KEY: &str = "sk-client-dev-key-2";
-
     /// `seeded_store` plus a second active key (SECOND_KEY) for the same tenant.
     async fn store_with_second_key() -> (InMemoryTenantStore, uuid::Uuid) {
         let store = seeded_store();
@@ -2106,6 +2159,25 @@ mod tests {
             .await
             .expect("mint succeeds");
         (store, id)
+    }
+
+    #[tokio::test]
+    async fn insert_tenant_creates_a_tenant_keys_can_attach_to() {
+        // ITEM-036: self-serve provisioning mints a tenant row, then attaches
+        // an owner membership and a first key through the ITEM-034 path.
+        let store = InMemoryTenantStore::default();
+        let upstream = store.insert_tenant(Some("sk-upstream")).await.expect("ok");
+        let tenant = store.tenant_by_id(upstream).await.expect("ok").expect("tenant present");
+        assert_eq!(tenant.upstream_openai_key.as_deref(), Some("sk-upstream"));
+
+        let keyless = store.insert_tenant(None).await.expect("ok");
+        assert!(store.tenant_by_id(keyless).await.expect("ok").unwrap().upstream_openai_key.is_none());
+
+        // A minted key on the provisioned tenant resolves back to it.
+        let hash = tenant_hash("sk-provisioned-dev");
+        store.insert_api_key(upstream, "default", &hash).await.expect("key minted");
+        let resolved = store.tenant_by_api_key_hash(&hash).await.expect("ok");
+        assert_eq!(resolved.map(|t| t.id), Some(upstream));
     }
 
     #[tokio::test]

@@ -41,6 +41,13 @@ fn unauthorized() -> Response {
     )
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 fn forbidden() -> Response {
     crate::json_error(
         StatusCode::FORBIDDEN,
@@ -63,35 +70,82 @@ fn db_err(e: sqlx::Error) -> Response {
 }
 
 /// Scope of an authenticated dashboard caller.
+#[derive(Debug, PartialEq, Eq)]
 enum Scope {
     Tenant(uuid::Uuid),
     Operator,
 }
 
-/// Resolve the bearer key against the operator secret first, then the tenant
-/// store (same seam as the proxy hot path). Operator access is disabled when
-/// no OPERATOR_API_KEY is configured (ITEM-013).
-async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Scope, Response> {
+/// Bearer-only resolution (ITEM-004/013 semantics, unchanged): operator key
+/// first, then the tenant key lookup. `Ok(None)` when no usable credential was
+/// presented — the caller may still fall through to the session path.
+async fn bearer_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Option<Scope>, Response> {
     let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
-        return Err(unauthorized());
+        return Ok(None);
     };
     let Some(key) = auth.strip_prefix("Bearer ") else {
-        return Err(unauthorized());
+        return Ok(None);
     };
     if key.is_empty() {
-        return Err(unauthorized());
+        return Ok(None);
     }
     if state.operator_key.as_deref() == Some(key) {
-        return Ok(Scope::Operator);
+        return Ok(Some(Scope::Operator));
     }
     match crate::authenticate(state, headers).await {
-        Ok(Some(tenant)) => Ok(Scope::Tenant(tenant.id)),
-        Ok(None) => Err(unauthorized()),
+        Ok(Some(tenant)) => Ok(Some(Scope::Tenant(tenant.id))),
+        Ok(None) => Ok(None),
         Err(e) => {
             tracing::error!("tenant lookup failed: {e}");
             Err(internal("tenant lookup failed"))
         }
     }
+}
+
+/// Session-based resolution (ITEM-036 AC2): a signed-in owner/member reaches
+/// their tenant scope through the session cookie — no API key needed. Missing,
+/// forged, or expired cookies (or a memberless user) yield `Ok(None)`, never
+/// an error.
+async fn scope_from_session(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<Option<Scope>, Response> {
+    let Some(accounts) = &state.accounts else {
+        return Ok(None);
+    };
+    let Some(cookie) = headers.get("cookie").and_then(|v| v.to_str().ok()) else {
+        return Ok(None);
+    };
+    let Some(token) = crate::session::cookie_value(cookie, crate::session::SESSION_COOKIE) else {
+        return Ok(None);
+    };
+    let Some(user_id) =
+        crate::session::verify_session(token, &accounts.session_secret, now_secs())
+    else {
+        return Ok(None);
+    };
+    match accounts.users.tenant_for_user(user_id).await {
+        Ok(Some((tenant_id, _))) => Ok(Some(Scope::Tenant(tenant_id))),
+        Ok(None) => Ok(None),
+        Err(e) => {
+            tracing::error!("membership lookup failed: {e}");
+            Err(internal("membership lookup failed"))
+        }
+    }
+}
+
+/// Resolve the caller's scope: the bearer credential (operator key, then
+/// tenant key — SDKs/scripts, ITEM-004) first, then the session cookie
+/// (humans, ITEM-036). Additive: key auth is unchanged, sessions only add a
+/// path.
+async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Scope, Response> {
+    if let Some(scope) = bearer_scope(state, headers).await? {
+        return Ok(scope);
+    }
+    if let Some(scope) = scope_from_session(state, headers).await? {
+        return Ok(scope);
+    }
+    Err(unauthorized())
 }
 
 /// Tenant-scoped handlers only: an operator credential is rejected (403).
@@ -716,6 +770,7 @@ const HTML: &str = r#"<!doctype html>
 <p class="err" id="err"></p>
 <script>
 let days = 7;
+let session = null; // set by renderSession(): the signed-in user or null
 const KEY = () => document.getElementById('key').value.trim();
 const $ = id => document.getElementById(id);
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -747,13 +802,18 @@ function bars(items, key) {
   }).join('') || '<p class="muted">no data in this window</p>';
 }
 async function get(path) {
-  const r = await fetch(path, { headers: { Authorization: 'Bearer ' + KEY() } });
+  // A signed-in session needs no API key (ITEM-036 AC2); the key is only
+  // attached when one was entered.
+  const h = {};
+  const k = KEY();
+  if (k) h.Authorization = 'Bearer ' + k;
+  const r = await fetch(path, { headers: h });
   if (!r.ok) throw new Error((await r.json()).error?.message || r.status);
   return r.json();
 }
 async function load() {
   $('err').textContent = '';
-  if (!KEY()) { $('err').textContent = 'enter your API key'; return; }
+  if (!KEY() && !session) { $('err').textContent = 'enter your API key or sign in'; return; }
   try {
     const q = '?days=' + days;
     const s = await get('/v1/dashboard/api/summary' + q);
@@ -816,6 +876,7 @@ async function renderSession() {
     const r = await fetch('/auth/me', { headers: { Accept: 'application/json' } });
     if (r.ok) signedIn = await r.json();
   } catch (e) { /* signed out or unreachable — show the sign-in link */ }
+  session = signedIn;
   if (signedIn) {
     el.innerHTML = 'Signed in as <b>' + esc(signedIn.github_login) + '</b> · ' +
       '<a id="signOutLink" href="/auth/logout">log out</a>';
@@ -844,6 +905,14 @@ mod tests {
     /// Router state with an InMemory tenant store; `db` is a lazy pool that is
     /// never actually queried by the auth/index tests below.
     fn dashboard_state() -> std::sync::Arc<crate::AppState> {
+        dashboard_state_full(None)
+    }
+
+    /// Same seeded state, with the given accounts (ITEM-036 session-scope
+    /// tests inject an OAuth-configured `accounts` here).
+    fn dashboard_state_full(
+        accounts: Option<std::sync::Arc<crate::auth::Accounts>>,
+    ) -> std::sync::Arc<crate::AppState> {
         let mut tenants = std::collections::HashMap::new();
         let hash = {
             use sha2::{Digest, Sha256};
@@ -864,8 +933,10 @@ mod tests {
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+            accounts,
+            db: sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(300))
+                .connect_lazy("postgres://inferon:inferon@127.0.0.1:1/inferon")
                 .unwrap(),
         })
     }
@@ -1211,6 +1282,12 @@ mod tests {
             !HTML.contains("get('/auth/me'") && !HTML.contains("get('/auth/logout'"),
             "me/logout are not keyed API calls"
         );
+        // ITEM-036 AC2: a signed-in session lets the shell load without a key.
+        assert!(HTML.contains("if (k) h.Authorization"), "key attached only when entered");
+        assert!(
+            HTML.contains("!KEY() && !session"),
+            "the shell loads for a signed-in session with no key"
+        );
     }
 
     /// AC3: currency is rendered from the decimal string, never through a
@@ -1272,5 +1349,142 @@ mod tests {
                 "{flag} explanation must mention: {snippet}"
             );
         }
+    }
+
+    // --- ITEM-036 AC2: a signed-in owner/member reaches tenant scope via the
+    // session cookie (dashboard resolve_scope session path) ---
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    fn cookie_headers(token: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("inferon_session={token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    /// State where user 42 owns tenant 2222… (the seeded tenant) and holds a
+    /// valid session token; returns (state, token, tenant_id).
+    async fn signed_in_state() -> (std::sync::Arc<crate::AppState>, String, uuid::Uuid) {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(42, "octocat").await.expect("ok");
+        let tenant_id = uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+        users.add_membership(tenant_id, user.id, "owner").await.expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        (state, token, tenant_id)
+    }
+
+    #[tokio::test]
+    async fn session_cookie_grants_the_owners_tenant_scope_without_a_key() {
+        let (state, token, tenant_id) = signed_in_state().await;
+        let scope = resolve_scope(&state, &cookie_headers(&token)).await.expect("resolved");
+        assert!(matches!(scope, Scope::Tenant(id) if id == tenant_id));
+    }
+
+    #[tokio::test]
+    async fn missing_or_forged_session_stays_unauthorized() {
+        // No accounts configured: the session path is inert (pre-036 behavior).
+        let state = dashboard_state();
+        let err = resolve_scope(&state, &axum::http::HeaderMap::new()).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        // Forged cookie (wrong secret) with accounts configured.
+        let (state, _, _) = signed_in_state().await;
+        let forged = crate::session::issue_session(
+            uuid::Uuid::new_v4(),
+            "not-the-secret",
+            now_secs(),
+            3600,
+        );
+        let err = resolve_scope(&state, &cookie_headers(&forged)).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_memberless_signed_in_user_stays_unauthorized() {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(7, "nobody").await.expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        let err = resolve_scope(&state, &cookie_headers(&token)).await.unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn bearer_keys_and_operator_credentials_win_over_the_session() {
+        // The user's session points at tenant A, but the bearer key belongs to
+        // the seeded tenant 2222… and the operator key is op-secret — the
+        // bearer paths must resolve first (SDKs stay key-authed, additive).
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(9, "owner").await.expect("ok");
+        users
+            .add_membership(
+                uuid::Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+                user.id,
+                "owner",
+            )
+            .await
+            .expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        let mut headers = cookie_headers(&token);
+        headers.insert("authorization", "Bearer sk-dashboard-dev".parse().unwrap());
+        let scope = resolve_scope(&state, &headers).await.expect("resolved");
+        assert!(
+            matches!(scope, Scope::Tenant(id) if id.to_string() == "22222222-2222-2222-2222-222222222222"),
+            "tenant key wins over the session"
+        );
+        let mut headers = cookie_headers(&token);
+        headers.insert("authorization", "Bearer op-secret".parse().unwrap());
+        let scope = resolve_scope(&state, &headers).await.expect("resolved");
+        assert!(matches!(scope, Scope::Operator), "operator key wins over the session");
+    }
+
+    #[tokio::test]
+    async fn session_scoped_request_reaches_the_dashboard_handler() {
+        // A session cookie alone must pass the route gate (the lazy pool makes
+        // the SQL fail with 500, which proves the scope was granted — a 401
+        // would mean the session was ignored).
+        let (state, token, _) = signed_in_state().await;
+        let router = crate::build_router(state);
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/dashboard/api/summary?days=7")
+            .header(axum::http::header::COOKIE, format!("inferon_session={token}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        assert_ne!(
+            response.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "session is not ignored at the route seam"
+        );
+        assert_ne!(response.status(), axum::http::StatusCode::FORBIDDEN);
     }
 }
