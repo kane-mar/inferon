@@ -40,10 +40,9 @@ export SESSION_SECRET="sk-smoke-session-$(openssl rand -hex 16)"
 # mock answers guarded replays 200 for any bearer, so the signup key gets a
 # real 200 end-to-end.
 export UPSTREAM_MASTER_KEY="sk-smoke-master"
-# The mock GitHub's one identity (smoke-dev) is also the platform operator
-# (ITEM-037): its session must open the operator console, while a plain
-# tenant-member session must be 403.
-export OPERATOR_GITHUB_LOGINS="smoke-dev"
+# The mock GitHub's one identity (smoke-dev) is the self-serve TENANT OWNER
+# (ITEM-036/038). Platform-operator sessions are covered by a seeded operator
+# user (ITEM-037 block) so the two roles stay distinct in the smoke.
 
 psql() {
     # -q suppresses the command tag so INSERT ... RETURNING yields only the row.
@@ -67,6 +66,9 @@ cleanup() {
     fi
     if [ -n "${SMOKE_MEMBER_ID:-}" ]; then
         psql "DELETE FROM users WHERE id = '$SMOKE_MEMBER_ID';" >/dev/null 2>&1 || true
+    fi
+    if [ -n "${SMOKE_OP_ID:-}" ]; then
+        psql "DELETE FROM users WHERE id = '$SMOKE_OP_ID';" >/dev/null 2>&1 || true
     fi
     rm -f "${DANCE_JAR:-}"
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
@@ -292,16 +294,24 @@ printf '%s' "$BODY2" | grep -q 'sk-inferon-' && fail "returning sign-in showed k
 echo "ok: returning sign-in lands on the dashboard with no second key"
 
 echo "-- ITEM-037 operator console (session-scoped; isolation) --"
-# smoke-dev's session (from the dance above) is a platform operator
-# (OPERATOR_GITHUB_LOGINS=smoke-dev): the console + operator APIs open.
 CONSOLE="$BASE/v1/dashboard/operator"
-console=$(curl -sS -b "$DANCE_JAR" "$CONSOLE?days=7")
+# A platform-operator session (seeded user flagged is_operator, session cookie
+# minted with the smoke SESSION_SECRET) opens the console + operator APIs.
+SMOKE_OP_ID=$(psql "INSERT INTO users (github_id, github_login, is_operator)
+      VALUES (6660002, 'smoke-op', true) RETURNING id;")
+OP_EXP=$(printf '%x' "$(( $(date +%s) + 3600 ))")
+OP_PAYLOAD="$SMOKE_OP_ID.$OP_EXP"
+OP_MAC=$(printf '%s' "$OP_PAYLOAD" | openssl dgst -sha256 -hmac "$SESSION_SECRET" -hex | awk '{print $NF}')
+OP_SESSION="$OP_PAYLOAD.$OP_MAC"
+console=$(curl -sS -H "Cookie: inferon_session=$OP_SESSION" "$CONSOLE?days=7")
 printf '%s' "$console" | grep -q 'operator console' \
     || fail "operator session did not get the console page: $console"
 printf '%s' "$console" | grep -q 'Tenants' \
     || fail "console page lacks the per-tenant list"
-code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" "$BASE/v1/dashboard/api/operator/summary?days=7")
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: inferon_session=$OP_SESSION" "$BASE/v1/dashboard/api/operator/summary?days=7")
 [ "$code" = "200" ] || fail "operator session on the operator JSON API: expected 200, got $code"
+me=$(curl -sS -H "Cookie: inferon_session=$OP_SESSION" "$BASE/auth/me")
+printf '%s' "$me" | grep -q '"github_login":"smoke-op"' || fail "operator session cookie did not verify: $me"
 echo "ok: operator session opens the console + operator APIs"
 
 # The shared operator key still works for machines (console page too).
