@@ -26,3 +26,23 @@
   signup; an invite-code/email path can be added if a real need appears
 - Owner = the member who provisioned the tenant at ITEM-036 (first owner);
   ownership transfer is out of scope unless a PO need appears
+
+## Verification record (2026-09-07)
+
+- **AC1 (claim-based invites)**: owner invites a GitHub login (migration 010
+  tenant_invites); when that user signs in the callback claims the invite and
+  joins the tenant as `member` — no signup screen, no provisioning, no second
+  key (unit test + live smoke with a second mock identity). Owner can remove a
+  member (owner cannot be removed — store + endpoint guard).
+- **AC2 (member scope + removal)**: invited member's session is tenant-scoped
+  (dashboard 200 live); removing them ends tenant scope on their next request
+  (live: next dashboard call 401, session still verifies via /auth/me).
+- **AC3 (boundaries)**: membership + keys + revoke endpoints are all scoped to
+  the signed-in user's own tenant; cross-tenant revoke → 404 (unit). Invited
+  members never inherit the inviter's key list beyond their own tenant scope.
+- **AC4 (smoke)**: full lifecycle passed live — owner invites smoke-other →
+  smoke-other signs in (mock identity #2, login marker on the authorize hop)
+  and joins the owner's tenant → owner removes → next dashboard call is
+  tenant-less. 65 smoke checks passed; no residue (0 users, 2 real tenants).
+  Migration 010 applied live; no new migration needed beyond invites. 184 tests
+  green.
