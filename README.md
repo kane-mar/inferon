@@ -187,8 +187,11 @@ currently serves inferon.agilefederation.com). It resolves via a plain A record 
 the parent zone's DNS (DNSimple for agilefederation.com) — no registrar delegation
 involved. Caddy obtains a Let's Encrypt cert automatically once the A record points
 at the host and ports 80/443 are open.
-Operator dashboard: `https://inferon.agilefederation.com/v1/dashboard/api/operator/*`
-with the saved `OPERATOR_API_KEY`.
+Operator work happens in the browser console first (sign in with an operator
+GitHub login from `OPERATOR_GITHUB_LOGINS` → `https://inferon.agilefederation.com/v1/dashboard/operator`:
+platform totals, per-tenant spend/requests/guard fallbacks, guard outcomes,
+alerts). Machines/scripts keep the operator JSON APIs +
+`OPERATOR_API_KEY` (`/v1/dashboard/api/operator/*`).
 
 Backups: a Vultr snapshot captures the pgdata/redisdata volumes (crash-consistent;
 Postgres replays WAL on restore). Take one before risky changes:

@@ -23,3 +23,23 @@
 - Consumes the ITEM-018 residual: its out-of-band minting path (AC1/AC2 "how a
   tenant key is issued") is superseded by self-serve; ITEM-018 itself stays
   open only for its PO-gated human handoff + AC5 capture loop (see ITEM-018)
+
+## Verification record (2026-09-07)
+
+- **AC1 (docs)**: README developer onboarding is self-serve only (sign in →
+  key once → SDK example); the seed-tenant section is framed operator/machine
+  only and its script header now says so explicitly (scripting, CI fixtures,
+  operators without GitHub).
+- **AC2 (ITEM-018 close-out)**: an explicit close-out note in ITEM-018 records
+  that the out-of-band human path is closed and self-serve is the only human
+  onboarding; the staged second-real-developer key remains valid as an
+  ordinary api_keys row (no data migration). What remains on ITEM-018 is the
+  PO's call (hand the staged key to a named developer or let them self-serve).
+- **AC3 (runbooks)**: README operator section leads with the browser console
+  (/v1/dashboard/operator, OPERATOR_GITHUB_LOGINS) for humans and documents the
+  operator JSON APIs + OPERATOR_API_KEY for machines.
+- **AC4 (hot path untouched)**: no /v1/chat code changed across ITEM-034..040 —
+  logins/sessions/members/keys never touch the machine-key proxy path (the
+  ITEM-035 design principle). Full smoke (65 checks) + 184 tests green.
+- Accounts horizon complete: ITEM-034..040 delivered + archived. No code
+  changes this slice beyond docs/runbooks — no redeploy needed.

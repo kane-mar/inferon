@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Mint a tenant (ITEM-011, ITEM-034): stores sha256(dev key) as the tenant's
-# first api_keys row + the tenant's upstream master key, prints the
-# developer-facing key. Only the hash is stored; one tenant may hold several
-# revocable keys.
+# OPERATOR/MACHINE-ONLY runbook (ITEM-040): humans sign up themselves at
+# /auth/login (self-serve — tenant + owner + first key auto-provisioned).
+# This script mints a tenant + key out-of-band (scripting, CI fixtures, and
+# operators onboarding tenants without GitHub). ITEM-011/ITEM-034 semantics:
+# sha256(dev key) as the first api_keys row + the tenant's upstream master
+# key; only the hash is stored; one tenant may hold several revocable keys.
 #
 # Usage: seed-tenant.sh "<upstream master key>" [tenant-label]
 # Needs a running Postgres (docker compose up -d postgres) and psql on PATH,

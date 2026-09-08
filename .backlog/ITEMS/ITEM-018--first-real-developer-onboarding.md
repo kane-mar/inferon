@@ -62,3 +62,16 @@ valid as an ordinary API key (ITEM-034 rows) — no migration needed for it.
 Ordering decision for the PO: hand the staged key out now (fastest real-traffic
 data point, feeds ITEM-036's signup UX) or let that developer self-serve once
 ITEM-036 ships — see REFINEMENT_LOG 2026-09-06.
+
+## Close-out (ITEM-040, 2026-09-07)
+
+The out-of-band human-onboarding path this item exercised is CLOSED: self-serve
+sign-in (`/auth/login` → auto-provisioned tenant + owner + first key) is the
+only documented onboarding for humans (ITEM-036 delivered; seed-tenant.sh is
+now operator/machine-only). The staged second-real-developer key stays valid as
+an ordinary api_keys row (ITEM-034 semantics) — no data migration.
+
+What remains is a PO action, not build work: either hand the staged key to a
+named developer for the fastest real-traffic data point (AC5 capture loop
+above), or leave it — that developer can simply self-serve. Archive this item
+once the PO makes that call.
