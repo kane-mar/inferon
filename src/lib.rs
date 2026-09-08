@@ -747,6 +747,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/keys/:key_id/revoke",
             post(dashboard::tenant_key_revoke),
         )
+        .route(
+            "/v1/dashboard/api/members",
+            get(dashboard::tenant_members).post(dashboard::tenant_member_invite),
+        )
+        .route(
+            "/v1/dashboard/api/members/:user_id/remove",
+            post(dashboard::tenant_member_remove),
+        )
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
         .route("/auth/logout", post(auth::logout))

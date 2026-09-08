@@ -903,6 +903,115 @@ pub async fn tenant_key_revoke(
     }
 }
 
+/// Owner-gate for tenant management actions (ITEM-038/039): members can view
+/// their tenant but never take destructive/owner actions.
+fn owner_only(role: &str) -> Result<(), Response> {
+    if role == "owner" {
+        Ok(())
+    } else {
+        Err(forbidden())
+    }
+}
+
+/// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
+/// invites (ITEM-039). Owners and members may view.
+pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let users = state
+        .accounts
+        .as_ref()
+        .expect("a resolved session implies accounts")
+        .users
+        .clone();
+    let members = match users.list_members(tenant_id).await {
+        Ok(rows) => rows,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let invites = match users.list_invites(tenant_id).await {
+        Ok(rows) => rows,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let rows: Vec<Value> = members
+        .into_iter()
+        .map(|(id, login, mrole)| {
+            json!({ "id": id.to_string(), "github_login": login, "role": mrole })
+        })
+        .collect();
+    json_ok(json!({ "role": role, "members": rows, "invites": invites }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct MemberInviteBody {
+    github_login: String,
+}
+
+/// POST /v1/dashboard/api/members — the owner invites a GitHub login to the
+/// tenant as member (ITEM-039 AC1). Claimed when that user signs in.
+pub async fn tenant_member_invite(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<MemberInviteBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let login = body.github_login.trim().to_string();
+    if login.is_empty() {
+        return crate::json_error(StatusCode::BAD_REQUEST, "bad_request", "login required");
+    }
+    match state
+        .accounts
+        .as_ref()
+        .expect("session implies accounts")
+        .users
+        .invite_member(tenant_id, &login)
+        .await
+    {
+        Ok(()) => json_ok(json!({ "github_login": login, "invited": true })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/members/{user_id}/remove — the owner removes a
+/// member (their scope ends on the next request). The tenant owner cannot be
+/// removed.
+pub async fn tenant_member_remove(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    match state
+        .accounts
+        .as_ref()
+        .expect("session implies accounts")
+        .users
+        .remove_member(tenant_id, user_id)
+        .await
+    {
+        Ok(true) => json_ok(json!({ "user_id": user_id.to_string(), "removed": true })),
+        Ok(false) => crate::json_error(
+            StatusCode::BAD_REQUEST,
+            "member_not_removable",
+            "no such member, or the tenant owner cannot be removed",
+        ),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// POST /v1/dashboard/api/operator/keys/{key_id}/revoke — revoke a key
 /// (ITEM-034 AC2: the next request with it is 401).
 pub async fn operator_key_revoke(
@@ -1079,6 +1188,7 @@ const HTML: &str = r#"<!doctype html>
 <h2>Top system prompts by spend</h2><div id="byPrompt"></div>
 <h2>Waste flags &amp; estimated $ impact</h2><div id="waste"></div>
 <h2>API keys</h2><div id="keysReveal"></div><div id="keys"></div>
+<h2>Members</h2><div id="members"></div>
 <p class="err" id="err"></p>
 <script>
 let days = 7;
@@ -1189,7 +1299,7 @@ async function renderSession() {
     if (r.ok) signedIn = await r.json();
   } catch (e) { /* signed out or unreachable — show the sign-in link */ }
   session = signedIn;
-  if (signedIn) loadKeys(); // the keys panel (ITEM-038) needs the session
+  if (signedIn) { loadKeys(); loadMembers(); } // the keys + members panels need the session
   if (signedIn) {
     el.innerHTML = 'Signed in as <b>' + esc(signedIn.github_login) + '</b> · ' +
       '<a id="signOutLink" href="/auth/logout">log out</a>';
@@ -1255,6 +1365,45 @@ async function revokeKey(id) {
   } catch (e) { ok = false; }
   if (!ok) { $('err').textContent = 'revoke failed (owners only)'; return; }
   loadKeys();
+}
+// Members (ITEM-039): the owner invites teammates by GitHub login and can
+// remove them; members can view the roster only (the API enforces it).
+async function loadMembers() {
+  const el = $('members');
+  if (!session) { el.innerHTML = ''; return; }
+  let data;
+  try {
+    const r = await fetch('/v1/dashboard/api/members');
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+  } catch (e) { el.innerHTML = emptyBox('Could not load members'); return; }
+  const roster = data.members.map(m =>
+    '<div class="keyline">' + esc(m.github_login) + ' — ' + esc(m.role) +
+    (data.role === 'owner' && m.role !== 'owner'
+      ? ' <button onclick="removeMember(\'' + m.id + '\')">remove</button>' : '') +
+    '</div>').join('');
+  const pending = data.invites.map(l => '<div class="keyline">' + esc(l) + ' — invited, waiting for sign-in</div>').join('');
+  const form = (data.role === 'owner')
+    ? '<p class="keyline">GitHub login <input id="inviteLogin" placeholder="teammate"> ' +
+      '<button onclick="inviteMember()">invite</button></p>' : '';
+  el.innerHTML = form + roster + pending;
+}
+async function inviteMember() {
+  const input = $('inviteLogin');
+  const login = input ? input.value.trim() : '';
+  if (!login) return;
+  const r = await fetch('/v1/dashboard/api/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ github_login: login })
+  });
+  if (!r.ok) { $('err').textContent = 'invite failed (owners only)'; return; }
+  loadMembers();
+}
+async function removeMember(id) {
+  const r = await fetch('/v1/dashboard/api/members/' + id + '/remove', { method: 'POST' });
+  if (!r.ok) { $('err').textContent = 'remove failed (owners only)'; return; }
+  loadMembers();
 }
 renderSession();
 </script>
@@ -1693,7 +1842,33 @@ mod tests {
             HTML.contains("data.role === 'owner'") && HTML.contains("only the owner can revoke"),
             "role mirrors the API permission split"
         );
-        assert!(HTML.contains("if (signedIn) loadKeys()"), "panel loads with the session");
+        assert!(HTML.contains("if (signedIn) { loadKeys(); loadMembers(); }"), "panels load with the session");
+    }
+
+    /// ITEM-039: the shell shows the tenant roster; the owner invites/removes.
+    #[test]
+    fn html_has_a_members_panel_for_owners_and_members() {
+        assert!(HTML.contains("<h2>Members</h2>") && HTML.contains("id=\"members\""));
+        assert!(
+            HTML.contains("fetch('/v1/dashboard/api/members')"),
+            "roster loads through the session"
+        );
+        assert!(
+            HTML.contains("github_login: login") && HTML.contains("/v1/dashboard/api/members'"),
+            "owner invite posts a GitHub login"
+        );
+        assert!(
+            HTML.contains("/v1/dashboard/api/members/' + id + '/remove"),
+            "owner remove hits the scoped endpoint"
+        );
+        assert!(
+            HTML.contains("data.role === 'owner' && m.role !== 'owner'"),
+            "remove button is owner-only in the UI too"
+        );
+        assert!(
+            HTML.contains("if (signedIn)") && HTML.contains("loadMembers()"),
+            "roster loads with the session"
+        );
     }
 
     /// AC3: currency is rendered from the decimal string, never through a
@@ -2212,5 +2387,134 @@ mod tests {
             axum::http::StatusCode::NOT_FOUND,
             "another tenant's key id is unknown here"
         );
+    }
+
+    // --- ITEM-039: tenant members API (session-scoped, owner manages) ---
+
+    /// The members endpoint (ITEM-039) is scoped to the signed-in user's own
+    /// tenant. These tests use owner/member sessions on the seeded tenant.
+
+    #[tokio::test]
+    async fn owner_invites_lists_and_removes_members() {
+        let (state, token) = owner_with_member_state().await;
+        let router = crate::build_router(state);
+
+        // Owner invites a teammate by GitHub login (claim-based).
+        let invite = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/members",
+                &token,
+                r#"{"github_login":"carol"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(invite.status(), axum::http::StatusCode::OK, "owner invites");
+
+        // The members view shows owner + member + the pending invite.
+        let view = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/members", &token))
+            .await
+            .unwrap();
+        assert_eq!(view.status(), axum::http::StatusCode::OK);
+        let json: Value = body_json(view).await;
+        assert_eq!(json["invites"], serde_json::json!(["carol"]));
+        let logins: Vec<&str> = json["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["github_login"].as_str().unwrap())
+            .collect();
+        assert_eq!(logins, vec!["t11", "alice"], "owner + member listed");
+        let alice_id = json["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["github_login"] == "alice")
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Owner removes alice; her membership (and invite, if any) is gone.
+        let remove = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/members/{alice_id}/remove"),
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(remove.status(), axum::http::StatusCode::OK);
+        let view = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/members", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(view).await;
+        let logins: Vec<&str> = json["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["github_login"].as_str().unwrap())
+            .collect();
+        assert_eq!(logins, vec!["t11"], "alice removed");
+    }
+
+    /// Owner t11 + member alice on the seeded tenant 2222….
+    async fn owner_with_member_state() -> (std::sync::Arc<crate::AppState>, String) {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let owner = users.upsert_github_user(11, "t11", false).await.expect("ok");
+        let alice = users.upsert_github_user(21, "alice", false).await.expect("ok");
+        let tid = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        users.add_membership(tid, owner.id, "owner").await.expect("ok");
+        users.add_membership(tid, alice.id, "member").await.expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            owner.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        (state, token)
+    }
+
+    #[tokio::test]
+    async fn member_sessions_view_members_but_cannot_invite_or_remove() {
+        let (state, token) = tenant_role_session("member").await;
+        let router = crate::build_router(state);
+        let view = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/members", &token))
+            .await
+            .unwrap();
+        assert_eq!(view.status(), axum::http::StatusCode::OK, "members may view");
+        let invite = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/members",
+                &token,
+                r#"{"github_login":"bob"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            invite.status(),
+            axum::http::StatusCode::FORBIDDEN,
+            "members cannot invite (owner only)"
+        );
+        let remove = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/members/00000000-0000-0000-0000-000000000000/remove",
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(remove.status(), axum::http::StatusCode::FORBIDDEN);
     }
 }

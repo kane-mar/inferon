@@ -80,12 +80,49 @@ pub trait UserStore: Send + Sync {
         user_id: Uuid,
         role: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Invite a GitHub login to join a tenant as `member` (ITEM-039,
+    /// migration 010). The invite is claimed when that user signs in.
+    async fn invite_member(
+        &self,
+        tenant_id: Uuid,
+        github_login: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Claim any pending invite for `github_login`, consuming it. Returns the
+    /// tenant the user should join, if invited.
+    async fn claim_invite(
+        &self,
+        github_login: &str,
+    ) -> Result<Option<Uuid>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// The tenant's members (user id, github login, role), oldest first.
+    async fn list_members(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<(Uuid, String, String)>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Remove a member (and any pending invite under their login) from a
+    /// tenant. True when something was actually removed. Never removes the
+    /// tenant's owner.
+    async fn remove_member(
+        &self,
+        tenant_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Pending invites for a tenant (github logins, oldest first).
+    async fn list_invites(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 #[derive(Clone, Default)]
 pub struct InMemoryUserStore {
     users: std::sync::Arc<std::sync::Mutex<Vec<User>>>,
     memberships: std::sync::Arc<std::sync::Mutex<Vec<(Uuid, Uuid, String)>>>, // (tenant, user, role)
+    invites: std::sync::Arc<std::sync::Mutex<Vec<(Uuid, String)>>>, // (tenant, github_login)
 }
 
 impl InMemoryUserStore {
@@ -95,6 +132,10 @@ impl InMemoryUserStore {
 
     fn lock_memberships(&self) -> std::sync::MutexGuard<'_, Vec<(Uuid, Uuid, String)>> {
         self.memberships.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn lock_invites(&self) -> std::sync::MutexGuard<'_, Vec<(Uuid, String)>> {
+        self.invites.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -168,6 +209,86 @@ impl UserStore for InMemoryUserStore {
         }
         memberships.push((tenant_id, user_id, role.to_string()));
         Ok(())
+    }
+
+    async fn invite_member(
+        &self,
+        tenant_id: Uuid,
+        github_login: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut invites = self.lock_invites();
+        if !invites.iter().any(|(tid, login)| *tid == tenant_id && login == github_login) {
+            invites.push((tenant_id, github_login.to_string()));
+        }
+        Ok(())
+    }
+
+    async fn claim_invite(
+        &self,
+        github_login: &str,
+    ) -> Result<Option<Uuid>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut invites = self.lock_invites();
+        let index = invites.iter().position(|(_, login)| login == github_login);
+        Ok(index.map(|i| invites.remove(i).0))
+    }
+
+    async fn list_members(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<(Uuid, String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        let memberships = self.lock_memberships();
+        let users = self.lock_users();
+        let mut rows: Vec<(Uuid, String, String)> = memberships
+            .iter()
+            .filter(|(tid, _, _)| *tid == tenant_id)
+            .map(|(tid, uid, role)| {
+                let login = users
+                    .iter()
+                    .find(|u| u.id == *uid)
+                    .map(|u| u.github_login.clone())
+                    .unwrap_or_default();
+                (*uid, login, role.clone())
+            })
+            .collect();
+        Ok(rows)
+    }
+
+    async fn remove_member(
+        &self,
+        tenant_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut memberships = self.lock_memberships();
+        let Some(index) = memberships
+            .iter()
+            .position(|(tid, uid, role)| *tid == tenant_id && *uid == member_id && role != "owner")
+        else {
+            return Ok(false);
+        };
+        memberships.remove(index);
+        // Drop any pending invite under the removed member's login.
+        let login = self
+            .lock_users()
+            .iter()
+            .find(|u| u.id == member_id)
+            .map(|u| u.github_login.clone());
+        if let Some(login) = login {
+            let mut invites = self.lock_invites();
+            invites.retain(|(tid, l)| !(*tid == tenant_id && *l == login));
+        }
+        Ok(true)
+    }
+
+    async fn list_invites(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let invites = self.lock_invites();
+        Ok(invites
+            .iter()
+            .filter(|(tid, _)| *tid == tenant_id)
+            .map(|(_, login)| login.clone())
+            .collect())
     }
 }
 
@@ -274,6 +395,95 @@ impl UserStore for PostgresUserStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn invite_member(
+        &self,
+        tenant_id: Uuid,
+        github_login: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        sqlx::query(
+            "INSERT INTO tenant_invites (tenant_id, github_login)
+             VALUES ($1, $2)
+             ON CONFLICT (tenant_id, github_login) DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(github_login)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn claim_invite(
+        &self,
+        github_login: &str,
+    ) -> Result<Option<Uuid>, Box<dyn std::error::Error + Send + Sync>> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "DELETE FROM tenant_invites WHERE github_login = $1 RETURNING tenant_id",
+        )
+        .bind(github_login)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.0))
+    }
+
+    async fn list_members(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<(Uuid, String, String)>, Box<dyn std::error::Error + Send + Sync>> {
+        let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT u.id, u.github_login, tm.role
+             FROM tenant_members tm JOIN users u ON u.id = tm.user_id
+             WHERE tm.tenant_id = $1 ORDER BY tm.created_at",
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    async fn remove_member(
+        &self,
+        tenant_id: Uuid,
+        member_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let removed = sqlx::query(
+            "DELETE FROM tenant_members
+             WHERE tenant_id = $1 AND user_id = $2 AND role = 'member'",
+        )
+        .bind(tenant_id)
+        .bind(member_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected()
+            > 0;
+        if removed {
+            // Drop any pending invite under the removed member's login.
+            sqlx::query(
+                "DELETE FROM tenant_invites
+                 WHERE tenant_id = $1 AND github_login =
+                       (SELECT github_login FROM users WHERE id = $2)",
+            )
+            .bind(tenant_id)
+            .bind(member_id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(removed)
+    }
+
+    async fn list_invites(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT github_login FROM tenant_invites
+             WHERE tenant_id = $1 ORDER BY created_at",
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
     }
 }
 
@@ -654,14 +864,48 @@ pub async fn callback(
                             add_cookie(&mut response, &session_cookie);
                             response
                         }
-                        // First-time user: auto-provision a tenant + owner + key,
-                        // and show the key exactly once (ITEM-036 AC1).
-                        Ok(None) => match provision_first_tenant(&state, accounts, user).await {
-                            Err(e) => e,
-                            Ok(raw_key) => {
-                                let mut response = success_screen(&raw_key);
-                                add_cookie(&mut response, &session_cookie);
-                                response
+                        // A first-time user either claims a member invite
+                        // (ITEM-039: join the inviter's tenant, no key) or
+                        // auto-provisions a tenant + owner + key (ITEM-036).
+                        Ok(None) => match accounts.users.claim_invite(&user.github_login).await {
+                            Err(e) => {
+                                tracing::error!("invite claim failed: {e}");
+                                crate::json_error(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "user_store_error",
+                                    "could not check your invite",
+                                )
+                            }
+                            Ok(Some(invited_tenant)) => {
+                                match accounts
+                                    .users
+                                    .add_membership(invited_tenant, user.id, "member")
+                                    .await
+                                {
+                                    Err(e) => {
+                                        tracing::error!("membership insert failed: {e}");
+                                        crate::json_error(
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            "provisioning_failed",
+                                            "could not join your team's tenant",
+                                        )
+                                    }
+                                    Ok(()) => {
+                                        let mut response = redirect_to("/v1/dashboard");
+                                        add_cookie(&mut response, &session_cookie);
+                                        response
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                match provision_first_tenant(&state, accounts, user).await {
+                                    Err(e) => e,
+                                    Ok(raw_key) => {
+                                        let mut response = success_screen(&raw_key);
+                                        add_cookie(&mut response, &session_cookie);
+                                        response
+                                    }
+                                }
                             }
                         },
                     }
@@ -968,6 +1212,56 @@ mod tests {
         assert_eq!(store.promote_logins(&["boss", "nobody"]).await.expect("ok"), 0);
     }
 
+    // --- ITEM-039: claim-based member invites (migration 010) ---
+
+    #[tokio::test]
+    async fn an_invite_is_claimed_once_when_the_user_signs_in() {
+        let store = store();
+        let tenant_id = Uuid::new_v4();
+        store.invite_member(tenant_id, "alice").await.expect("ok");
+        store.invite_member(tenant_id, "alice").await.expect("ok"); // idempotent
+        assert_eq!(store.list_invites(tenant_id).await.expect("ok"), vec!["alice".to_string()]);
+        assert_eq!(store.claim_invite("alice").await.expect("ok"), Some(tenant_id));
+        assert_eq!(store.claim_invite("alice").await.expect("ok"), None, "claimed exactly once");
+        // The invite list is drained after the claim.
+        assert!(store.list_invites(tenant_id).await.expect("ok").is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_members_joins_logins_and_remove_member_spares_the_owner() {
+        let store = store();
+        let tenant_id = Uuid::new_v4();
+        let owner = store.upsert_github_user(1, "boss", false).await.expect("ok");
+        let alice = store.upsert_github_user(2, "alice", false).await.expect("ok");
+        store.add_membership(tenant_id, owner.id, "owner").await.expect("ok");
+        store.add_membership(tenant_id, alice.id, "member").await.expect("ok");
+        let members = store.list_members(tenant_id).await.expect("ok");
+        let logins: Vec<&str> = members.iter().map(|(_, login, _)| login.as_str()).collect();
+        assert_eq!(logins, vec!["boss", "alice"]);
+        let owner_role = members.iter().find(|(_, l, _)| l == "boss").map(|(_, _, r)| r.clone());
+        assert_eq!(owner_role.as_deref(), Some("owner"));
+        // Removing the owner is refused; removing alice works and ends her scope.
+        let owner_id = members.iter().find(|(_, l, _)| l == "boss").unwrap().0;
+        assert!(!store.remove_member(tenant_id, owner_id).await.expect("ok"), "owner protected");
+        let alice_id = members.iter().find(|(_, l, _)| l == "alice").unwrap().0;
+        assert!(store.remove_member(tenant_id, alice_id).await.expect("ok"));
+        assert_eq!(store.tenant_for_user(alice.id).await.expect("ok"), None, "scope ended");
+        assert_eq!(store.list_members(tenant_id).await.expect("ok").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn removing_a_member_also_drops_their_pending_invite() {
+        let store = store();
+        let tenant_id = Uuid::new_v4();
+        let owner = store.upsert_github_user(1, "boss", false).await.expect("ok");
+        let alice = store.upsert_github_user(2, "alice", false).await.expect("ok");
+        store.add_membership(tenant_id, owner.id, "owner").await.expect("ok");
+        store.add_membership(tenant_id, alice.id, "member").await.expect("ok");
+        store.invite_member(tenant_id, "alice").await.expect("ok");
+        store.remove_member(tenant_id, alice.id).await.expect("ok");
+        assert_eq!(store.claim_invite("alice").await.expect("ok"), None, "invite gone too");
+    }
+
     // --- ITEM-035 AC1/AC3: OAuth authorize URL + query encoding ---
 
     fn config() -> OauthConfig {
@@ -1265,6 +1559,47 @@ mod tests {
             .await
             .expect("ok");
         assert_eq!(resolved.map(|t| t.id), Some(tenant_id), "the key is accepted immediately");
+    }
+
+    #[tokio::test]
+    async fn an_invited_sign_in_joins_the_tenants_tenant_as_member() {
+        // ITEM-039: an owner invited login "octocat"; when that user signs in
+        // they join the invite's tenant as member — no provisioning, no key.
+        let users = std::sync::Arc::new(InMemoryUserStore::default());
+        let tenants: std::sync::Arc<crate::InMemoryTenantStore> =
+            std::sync::Arc::new(crate::InMemoryTenantStore::default());
+        let invited_tenant = Uuid::new_v4();
+        tenants.insert_tenant(Some("sk-upstream")).await.expect("ok"); // unrelated
+        users
+            .invite_member(invited_tenant, "octocat")
+            .await
+            .expect("ok");
+        let state = test_state_full(
+            test_accounts(users.clone(), std::sync::Arc::new(FakeGithub::default())),
+            tenants.clone(),
+        );
+        let router = crate::build_router(state);
+
+        let callback = oauth_dance(&router, "invited-code").await;
+        assert_eq!(
+            callback.status(),
+            axum::http::StatusCode::FOUND,
+            "an invited user lands on the dashboard, not the signup screen"
+        );
+        assert_eq!(callback.headers()[header::LOCATION], "/v1/dashboard");
+        let token = set_cookies(&callback)
+            .get(crate::session::SESSION_COOKIE)
+            .expect("session cookie")
+            .to_string();
+        let user_id =
+            crate::session::verify_session(&token, SECRET, now_secs()).expect("valid token");
+        assert_eq!(
+            users.tenant_for_user(user_id).await.expect("ok"),
+            Some((invited_tenant, "member".to_string())),
+            "joined the invited tenant as member"
+        );
+        // The invite is consumed and no new tenant/key was provisioned.
+        assert!(users.list_invites(invited_tenant).await.expect("ok").is_empty());
     }
 
     #[tokio::test]

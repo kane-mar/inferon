@@ -70,7 +70,10 @@ cleanup() {
     if [ -n "${SMOKE_OP_ID:-}" ]; then
         psql "DELETE FROM users WHERE id = '$SMOKE_OP_ID';" >/dev/null 2>&1 || true
     fi
-    rm -f "${DANCE_JAR:-}"
+    if [ -n "${SMOKE_OTHER_ID:-}" ]; then
+        psql "DELETE FROM users WHERE id = '$SMOKE_OTHER_ID';" >/dev/null 2>&1 || true
+    fi
+    rm -f "${DANCE_JAR:-}" "${MEM_JAR:-}"
     "${COMPOSE[@]}" down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -242,10 +245,13 @@ check_status "/auth/me without a session -> 401" 401 "$BASE/auth/me"
 # redirects with a cookie jar so the CSRF-state and session cookies flow.
 DANCE_JAR=$(mktemp)
 oauth_dance() {
-    local location
-    location=$(curl -sS -o /dev/null -w '%{redirect_url}' -c "$DANCE_JAR" "$BASE/auth/login")
+    # Usage: oauth_dance [jar] [github-login] — the login marker makes the mock
+    # GitHub sign a different identity in (ITEM-039 member invites).
+    local jar="${1:-$DANCE_JAR}" login="${2:-}" location
+    location=$(curl -sS -o /dev/null -w '%{redirect_url}' -c "$jar" "$BASE/auth/login")
     [ -n "$location" ] || return 1
-    curl -sS -L -b "$DANCE_JAR" -c "$DANCE_JAR" "$location"
+    if [ -n "$login" ]; then location="$location&login=$login"; fi
+    curl -sS -L -b "$jar" -c "$jar" "$location"
 }
 
 # First sign-in: success screen showing the raw key exactly once.
@@ -382,6 +388,38 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: inferon_session=$MEM_
     "$BASE/v1/dashboard/api/keys/$MEMBER_KEY_ID/revoke")
 [ "$code" = "403" ] || fail "member revoke: expected 403, got $code"
 echo "ok: member can create keys but revoke is 403 (AC2)"
+
+echo "-- ITEM-039 tenant members (claim-based invites; removal ends scope) --"
+# Owner invites a teammate by GitHub login (claim-based).
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" -X POST "$BASE/v1/dashboard/api/members" \
+    -H 'Content-Type: application/json' -d '{"github_login":"smoke-other"}')
+[ "$code" = "200" ] || fail "owner invite: expected 200, got $code"
+listed=$(curl -sS -b "$DANCE_JAR" "$BASE/v1/dashboard/api/members")
+printf '%s' "$listed" | grep -q '"smoke-other"' || fail "invite not pending: $listed"
+echo "ok: owner invited smoke-other by GitHub login (claim-based)"
+
+# The teammate signs in (mock identity #2) and JOINS — no signup screen, no
+# second tenant, no new key.
+MEM_JAR=$(mktemp)
+BODY=$(oauth_dance "$MEM_JAR" "smoke-other") || fail "member sign-in dance failed"
+SMOKE_OTHER_ID=$(psql "SELECT id FROM users WHERE github_login = 'smoke-other';")
+[ -n "$SMOKE_OTHER_ID" ] || fail "no user row for the invited teammate"
+MEMBER_TID=$(psql "SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_OTHER_ID' AND role = 'member';")
+[ "$MEMBER_TID" = "$SIGNUP_TID" ] || fail "member joined the wrong tenant ($MEMBER_TID vs $SIGNUP_TID)"
+printf '%s' "$BODY" | grep -q 'sk-inferon-' && fail "member sign-in minted a key (should join, not provision)"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$MEM_JAR" "$BASE/v1/dashboard/api/summary?days=7")
+[ "$code" = "200" ] || fail "member session on the tenant dashboard: expected 200, got $code"
+me=$(curl -sS -b "$MEM_JAR" "$BASE/auth/me")
+printf '%s' "$me" | grep -q '"github_login":"smoke-other"' || fail "member session not verified: $me"
+echo "ok: smoke-other signed in and joined the tenant as member"
+
+# Owner removes the member — their next tenant-scoped call is tenant-less.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" -X POST \
+    "$BASE/v1/dashboard/api/members/$SMOKE_OTHER_ID/remove")
+[ "$code" = "200" ] || fail "owner remove member: expected 200, got $code"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$MEM_JAR" "$BASE/v1/dashboard/api/summary?days=7")
+[ "$code" = "401" ] || fail "removed member still reaches the tenant: expected 401, got $code"
+echo "ok: removing a member ends their tenant scope on the next request"
 
 echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
 KEYS_URL="$BASE/v1/dashboard/api/operator/keys"
