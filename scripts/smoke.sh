@@ -331,6 +331,48 @@ printf '%s' "$me" | grep -q '"github_login":"smoke-member"' \
     || fail "member session cookie did not verify (auth/me): $me"
 echo "ok: tenant-member session is 403 on the console (session isolation)"
 
+echo "-- ITEM-038 tenant key management (owner vs member, via sessions) --"
+# Owner (smoke-dev session from the signup dance) lists + creates + revokes.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" "$BASE/v1/dashboard/api/keys")
+[ "$code" = "200" ] || fail "owner keys list: expected 200, got $code"
+listed=$(curl -sS -b "$DANCE_JAR" "$BASE/v1/dashboard/api/keys")
+printf '%s' "$listed" | grep -q '"role":"owner"' || fail "keys list lacks owner role: $listed"
+printf '%s' "$listed" | grep -q '"sk-inferon-\|[0-9a-f]\{64\}"' && fail "keys list leaked key/hash material: $listed"
+mint=$(curl -sS -b "$DANCE_JAR" -X POST "$BASE/v1/dashboard/api/keys" \
+    -H 'Content-Type: application/json' -d '{"label":"smoke-038"}')
+DASH_KEY=$(printf '%s' "$mint" | grep -o 'sk-inferon-[0-9a-f]\{32\}' | head -1)
+DASH_KEY_ID=$(printf '%s' "$mint" | sed -n 's/.*"key_id":"\([^"]*\)".*/\1/p')
+[ -n "$DASH_KEY" ] && [ -n "$DASH_KEY_ID" ] || fail "dashboard mint returned no key: $mint"
+echo "ok: owner created a key from the dashboard (shown once)"
+
+# The dashboard-minted key works end-to-end (guarded 200), then revocation
+# makes it 401 immediately.
+resp=$(post_and_code "$DASH_KEY" "$GUARDED_BODY")
+code=$(printf '%s' "$resp" | tail -1)
+[ "$code" = "200" ] || fail "dashboard-minted key: expected guarded 200, got HTTP $code"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$DANCE_JAR" -X POST \
+    "$BASE/v1/dashboard/api/keys/$DASH_KEY_ID/revoke")
+[ "$code" = "200" ] || fail "owner revoke: expected 200, got $code"
+check_status "chat with revoked dashboard key -> 401" 401 \
+    -X POST "$BASE/v1/chat/completions" -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $DASH_KEY" \
+    -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
+echo "ok: owner revoked the key; the next request with it is 401"
+
+# Member: can view + create, but revoking is 403.
+MEM_EXP=$(printf '%x' "$(( $(date +%s) + 3600 ))")
+MEM_PAYLOAD="$SMOKE_MEMBER_ID.$MEM_EXP"
+MEM_MAC=$(printf '%s' "$MEM_PAYLOAD" | openssl dgst -sha256 -hmac "$SESSION_SECRET" -hex | awk '{print $NF}')
+MEM_TOKEN="$MEM_PAYLOAD.$MEM_MAC"
+mint=$(curl -sS -H "Cookie: inferon_session=$MEM_TOKEN" -X POST "$BASE/v1/dashboard/api/keys" \
+    -H 'Content-Type: application/json' -d '{"label":"member-key"}')
+MEMBER_KEY_ID=$(printf '%s' "$mint" | sed -n 's/.*"key_id":"\([^"]*\)".*/\1/p')
+[ -n "$MEMBER_KEY_ID" ] || fail "member mint failed: $mint"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: inferon_session=$MEM_TOKEN" -X POST \
+    "$BASE/v1/dashboard/api/keys/$MEMBER_KEY_ID/revoke")
+[ "$code" = "403" ] || fail "member revoke: expected 403, got $code"
+echo "ok: member can create keys but revoke is 403 (AC2)"
+
 echo "-- ITEM-034 operator key API (mint/list/revoke; revoked key -> 401) --"
 KEYS_URL="$BASE/v1/dashboard/api/operator/keys"
 check_status "keys list without key -> 401" 401 "$KEYS_URL?tenant_id=$GUARDED_ID"

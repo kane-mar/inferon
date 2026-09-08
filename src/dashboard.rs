@@ -182,6 +182,49 @@ async fn operator_or(
     }
 }
 
+/// The signed-in user's tenant membership — the human identity behind the
+/// tenant-scoped management APIs (ITEM-038). Sessions only: a bare tenant key
+/// is not a human identity (machines use the operator key API) and operator
+/// sessions belong to the platform console, not a tenant role.
+async fn session_membership(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<(uuid::Uuid, String), Response> {
+    let Some(accounts) = &state.accounts else {
+        return Err(unauthorized());
+    };
+    let Some(cookie) = headers.get("cookie").and_then(|v| v.to_str().ok()) else {
+        return Err(unauthorized());
+    };
+    let Some(token) = crate::session::cookie_value(cookie, crate::session::SESSION_COOKIE) else {
+        return Err(unauthorized());
+    };
+    let Some(user_id) =
+        crate::session::verify_session(token, &accounts.session_secret, now_secs())
+    else {
+        return Err(unauthorized());
+    };
+    let user = match accounts.users.find_by_id(user_id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => return Err(unauthorized()),
+        Err(e) => {
+            tracing::error!("user lookup failed: {e}");
+            return Err(internal("user lookup failed"));
+        }
+    };
+    if user.is_operator {
+        return Err(forbidden());
+    }
+    match accounts.users.tenant_for_user(user.id).await {
+        Ok(Some(membership)) => Ok(membership),
+        Ok(None) => Err(unauthorized()),
+        Err(e) => {
+            tracing::error!("membership lookup failed: {e}");
+            Err(internal("membership lookup failed"))
+        }
+    }
+}
+
 /// Shared aggregate query plumbing. `tenant` is `Some(id)` for tenant-scoped
 /// views and `None` for the operator's platform-wide views (ITEM-013).
 /// The SQL uses `($1::uuid IS NULL OR tenant_id = $1)` so one query shape
@@ -754,20 +797,108 @@ pub async fn operator_keys_create(
         }
         Err(e) => return internal(&e.to_string()),
     };
+    let label = body.label.unwrap_or_else(|| "default".to_string());
+    match mint_key_payload(&state, tenant.id, &label).await {
+        Ok(payload) => json_ok(payload),
+        Err(e) => internal(&e),
+    }
+}
+
+/// The single mint implementation (ITEM-034 AC3 path, shared with the tenant
+/// dashboard — ITEM-038 AC3): a fresh raw key shown once, hash-only stored.
+async fn mint_key_payload(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    label: &str,
+) -> Result<serde_json::Value, String> {
     let raw = crate::mint_client_key();
     let hash = crate::tenant_hash(&raw);
-    let label = body.label.unwrap_or_else(|| "default".to_string());
-    match state
+    let key_id = state
         .tenant_store
-        .insert_api_key(tenant.id, &label, &hash)
+        .insert_api_key(tenant_id, label, &hash)
         .await
-    {
-        Ok(key_id) => json_ok(json!({
-            "key_id": key_id.to_string(),
-            "tenant_id": tenant.id.to_string(),
-            "label": label,
-            "key": raw, // shown exactly once
-        })),
+        .map_err(|e| e.to_string())?;
+    Ok(json!({
+        "key_id": key_id.to_string(),
+        "tenant_id": tenant_id.to_string(),
+        "label": label,
+        "key": raw, // shown exactly once
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct KeyLabelBody {
+    label: Option<String>,
+}
+
+/// GET /v1/dashboard/api/keys — the signed-in tenant's keys plus the caller's
+/// role (ITEM-038 AC1). Never key material or hashes — lifecycle metadata only.
+pub async fn tenant_keys(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    match state.tenant_store.list_api_keys(tenant_id).await {
+        Ok(keys) => {
+            let rows: Vec<Value> = keys
+                .into_iter()
+                .map(|k| {
+                    json!({
+                        "id": k.id.to_string(),
+                        "label": k.label,
+                        "created_at": k.created_at,
+                        "revoked": k.revoked(),
+                        "revoked_at": k.revoked_at,
+                        "last_used_at": k.last_used_at,
+                    })
+                })
+                .collect();
+            json_ok(json!({ "role": role, "keys": rows }))
+        }
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/keys — create a key for the signed-in tenant
+/// (ITEM-038 AC1; owner and members may create, AC2). Raw key shown once.
+pub async fn tenant_key_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<KeyLabelBody>,
+) -> Response {
+    let (tenant_id, _role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let label = body.label.unwrap_or_else(|| "default".to_string());
+    match mint_key_payload(&state, tenant_id, &label).await {
+        Ok(payload) => json_ok(payload),
+        Err(e) => internal(&e),
+    }
+}
+
+/// POST /v1/dashboard/api/keys/{key_id}/revoke — owners only (ITEM-038 AC2:
+/// members cannot revoke). Scoped to the caller's tenant — another tenant's
+/// key id is not found here.
+pub async fn tenant_key_revoke(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(key_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if role != "owner" {
+        return forbidden();
+    }
+    match state.tenant_store.revoke_tenant_key(tenant_id, key_id).await {
+        Ok(true) => json_ok(json!({ "key_id": key_id.to_string(), "revoked": true })),
+        Ok(false) => crate::json_error(
+            StatusCode::NOT_FOUND,
+            "key_not_found",
+            "no such key for this tenant",
+        ),
         Err(e) => internal(&e.to_string()),
     }
 }
@@ -947,6 +1078,7 @@ const HTML: &str = r#"<!doctype html>
 <h2>Spend by model</h2><div id="byModel"></div>
 <h2>Top system prompts by spend</h2><div id="byPrompt"></div>
 <h2>Waste flags &amp; estimated $ impact</h2><div id="waste"></div>
+<h2>API keys</h2><div id="keysReveal"></div><div id="keys"></div>
 <p class="err" id="err"></p>
 <script>
 let days = 7;
@@ -1057,6 +1189,7 @@ async function renderSession() {
     if (r.ok) signedIn = await r.json();
   } catch (e) { /* signed out or unreachable — show the sign-in link */ }
   session = signedIn;
+  if (signedIn) loadKeys(); // the keys panel (ITEM-038) needs the session
   if (signedIn) {
     el.innerHTML = 'Signed in as <b>' + esc(signedIn.github_login) + '</b> · ' +
       '<a id="signOutLink" href="/auth/logout">log out</a>';
@@ -1070,6 +1203,59 @@ async function signOut() {
   try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) { /* best effort */ }
   location.reload();
 }
+
+// Key management (ITEM-038 AC1/AC2): signed-in owners/members manage the
+// tenant's keys through the session — a created key is revealed exactly once.
+// The endpoints enforce roles (revoke is owner-only); the UI mirrors it.
+async function loadKeys() {
+  const el = $('keys');
+  if (!session) { el.innerHTML = ''; return; }
+  let data;
+  try {
+    const r = await fetch('/v1/dashboard/api/keys');
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+  } catch (e) {
+    el.innerHTML = emptyBox('Could not load keys — are you signed in?');
+    return;
+  }
+  const rows = data.keys.map(k => {
+    const revoke = (data.role === 'owner' && !k.revoked)
+      ? ' <button onclick="revokeKey(\'' + k.id + '\')">revoke</button>' : '';
+    return '<div class="keyline">' + esc(k.label) + ' — ' + (k.revoked ? 'revoked' : 'active') +
+      ' · created ' + esc(k.created_at) + revoke + '</div>';
+  }).join('') || '<p class="muted">no keys yet</p>';
+  const form = (data.role === 'owner')
+    ? '<p class="keyline">label <input id="newKeyLabel" placeholder="ci"> ' +
+      '<button onclick="createKey()">new key</button></p>'
+    : '<p class="muted">member — you can create keys; only the owner can revoke.</p>';
+  el.innerHTML = form + rows;
+}
+async function createKey() {
+  const input = $('newKeyLabel');
+  const label = (input && input.value.trim()) || 'default';
+  let data;
+  try {
+    const r = await fetch('/v1/dashboard/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: label })
+    });
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+  } catch (e) { $('err').textContent = 'create failed: ' + e.message; return; }
+  $('keysReveal').innerHTML = 'Your new key: <code>' + esc(data.key) + '</code> — stored hashed, <b>not shown again</b>. Copy it now.';
+  loadKeys();
+}
+async function revokeKey(id) {
+  let ok;
+  try {
+    const r = await fetch('/v1/dashboard/api/keys/' + id + '/revoke', { method: 'POST' });
+    ok = r.ok;
+  } catch (e) { ok = false; }
+  if (!ok) { $('err').textContent = 'revoke failed (owners only)'; return; }
+  loadKeys();
+}
 renderSession();
 </script>
 </body>
@@ -1078,21 +1264,16 @@ renderSession();
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TenantStore;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
 
     /// Router state with an InMemory tenant store; `db` is a lazy pool that is
     /// never actually queried by the auth/index tests below.
-    fn dashboard_state() -> std::sync::Arc<crate::AppState> {
-        dashboard_state_full(None)
-    }
+    const SEEDED_TENANT: &str = "22222222-2222-2222-2222-222222222222";
 
-    /// Same seeded state, with the given accounts (ITEM-036 session-scope
-    /// tests inject an OAuth-configured `accounts` here).
-    fn dashboard_state_full(
-        accounts: Option<std::sync::Arc<crate::auth::Accounts>>,
-    ) -> std::sync::Arc<crate::AppState> {
+    fn seeded_tenant_store() -> std::sync::Arc<crate::InMemoryTenantStore> {
         let mut tenants = std::collections::HashMap::new();
         let hash = {
             use sha2::{Digest, Sha256};
@@ -1101,15 +1282,22 @@ mod tests {
         tenants.insert(
             hash,
             crate::Tenant {
-                id: uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                id: uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(),
                 upstream_openai_key: Some("sk-master".to_string()),
             },
         );
+        std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants))
+    }
+
+    fn state_with(
+        accounts: Option<std::sync::Arc<crate::auth::Accounts>>,
+        tenant_store: std::sync::Arc<dyn crate::TenantStore>,
+    ) -> std::sync::Arc<crate::AppState> {
         let (tx, _rx) = tokio::sync::mpsc::channel(16);
         std::sync::Arc::new(crate::AppState {
             http_client: reqwest::Client::new(),
             upstream_url: "http://127.0.0.1:1/".to_string(),
-            tenant_store: std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants)),
+            tenant_store,
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
@@ -1119,6 +1307,18 @@ mod tests {
                 .connect_lazy("postgres://inferon:inferon@127.0.0.1:1/inferon")
                 .unwrap(),
         })
+    }
+
+    fn dashboard_state() -> std::sync::Arc<crate::AppState> {
+        dashboard_state_full(None)
+    }
+
+    /// Same seeded state, with the given accounts (ITEM-036 session-scope
+    /// tests inject an OAuth-configured `accounts` here).
+    fn dashboard_state_full(
+        accounts: Option<std::sync::Arc<crate::auth::Accounts>>,
+    ) -> std::sync::Arc<crate::AppState> {
+        state_with(accounts, seeded_tenant_store())
     }
 
     fn get(uri: &str, key: Option<&str>) -> axum::http::Request<Body> {
@@ -1470,6 +1670,32 @@ mod tests {
         );
     }
 
+    /// ITEM-038 AC1/AC2: the signed-in shell manages the tenant's keys — list,
+    /// create (raw key shown once) and owner-only revoke.
+    #[test]
+    fn html_has_a_keys_management_panel_for_signed_in_users() {
+        assert!(HTML.contains("<h2>API keys</h2>"), "keys section");
+        assert!(HTML.contains("id=\"keys\""), "keys list container");
+        assert!(
+            HTML.contains("fetch('/v1/dashboard/api/keys')"),
+            "keys load through the session, no bearer"
+        );
+        assert!(HTML.contains("method: 'POST'") && HTML.contains("/v1/dashboard/api/keys"));
+        assert!(
+            HTML.contains("/v1/dashboard/api/keys/' + id + '/revoke"),
+            "revoke hits the scoped endpoint"
+        );
+        assert!(
+            HTML.contains("not shown again"),
+            "a created key is revealed exactly once"
+        );
+        assert!(
+            HTML.contains("data.role === 'owner'") && HTML.contains("only the owner can revoke"),
+            "role mirrors the API permission split"
+        );
+        assert!(HTML.contains("if (signedIn) loadKeys()"), "panel loads with the session");
+    }
+
     /// AC3: currency is rendered from the decimal string, never through a
     /// float that could print scientific notation like 1.6e-5.
     #[test]
@@ -1799,5 +2025,192 @@ mod tests {
             "operator key reaches the console handler"
         );
         assert_ne!(operator.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    // --- ITEM-038: tenant key management (session-scoped, owner/member) ---
+
+    /// A session for a user with `role` on the seeded tenant 2222… over the
+    /// seeded tenant store; returns (state, token).
+    async fn tenant_role_session(role: &str) -> (std::sync::Arc<crate::AppState>, String) {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(11, "t11", false).await.expect("ok");
+        users
+            .add_membership(uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(), user.id, role)
+            .await
+            .expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        (state, token)
+    }
+
+    fn request_with_cookie(uri: &str, token: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header(axum::http::header::COOKIE, format!("inferon_session={token}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    fn post_with_cookie(uri: &str, token: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header(axum::http::header::COOKIE, format!("inferon_session={token}"))
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn body_json(response: axum::response::Response) -> Value {
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn owner_session_lists_creates_and_revokes_tenant_keys() {
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state);
+
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/keys", &token))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), axum::http::StatusCode::OK, "owner lists keys");
+        let json: Value = body_json(listed).await;
+        assert_eq!(json["role"], "owner");
+        assert_eq!(json["keys"].as_array().unwrap().len(), 1, "the seeded dev key");
+
+        let created = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/keys",
+                &token,
+                r#"{"label":"ci"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), axum::http::StatusCode::OK);
+        let created_json: Value = body_json(created).await;
+        let raw = created_json["key"].as_str().expect("raw key shown once").to_string();
+        let key_id = created_json["key_id"].as_str().expect("key id").to_string();
+        assert!(raw.starts_with("sk-inferon-"));
+
+        let revoke = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/keys/{key_id}/revoke"),
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(revoke.status(), axum::http::StatusCode::OK, "owner revokes");
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/keys", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        let ci = json["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|k| k["label"] == "ci")
+            .expect("ci key listed");
+        assert_eq!(ci["revoked"], true, "revocation shows immediately");
+    }
+
+    #[tokio::test]
+    async fn member_can_create_keys_but_revoking_is_403() {
+        let (state, token) = tenant_role_session("member").await;
+        let router = crate::build_router(state);
+        let created = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/keys",
+                &token,
+                r#"{"label":"member-key"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), axum::http::StatusCode::OK, "member may create");
+        let json: Value = body_json(created).await;
+        let key_id = json["key_id"].as_str().expect("key id").to_string();
+        let revoke = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/keys/{key_id}/revoke"),
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            revoke.status(),
+            axum::http::StatusCode::FORBIDDEN,
+            "members cannot revoke (AC2)"
+        );
+    }
+
+    #[tokio::test]
+    async fn keys_api_requires_a_human_session() {
+        let state = dashboard_state();
+        let router = crate::build_router(state);
+        let none = router.clone().oneshot(get("/v1/dashboard/api/keys", None)).await.unwrap();
+        assert_eq!(none.status(), axum::http::StatusCode::UNAUTHORIZED);
+        let bearer = router
+            .clone()
+            .oneshot(get("/v1/dashboard/api/keys", Some("sk-dashboard-dev")))
+            .await
+            .unwrap();
+        assert_eq!(bearer.status(), axum::http::StatusCode::UNAUTHORIZED, "bare key is not a human");
+    }
+
+    #[tokio::test]
+    async fn tenant_revoke_cannot_kill_another_tenants_key() {
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(11, "t11", false).await.expect("ok");
+        users
+            .add_membership(uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(), user.id, "owner")
+            .await
+            .expect("ok");
+        // The store also holds a second tenant with its own key.
+        let store = seeded_tenant_store();
+        let other = store.insert_tenant(Some("other")).await.expect("ok");
+        let other_key = store.insert_api_key(other, "other-key", "hash-x").await.expect("ok");
+        let state = state_with(
+            Some(crate::auth::test_helpers::dummy_accounts(users)),
+            store,
+        );
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        let router = crate::build_router(state);
+        let revoke = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/keys/{other_key}/revoke"),
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            revoke.status(),
+            axum::http::StatusCode::NOT_FOUND,
+            "another tenant's key id is unknown here"
+        );
     }
 }

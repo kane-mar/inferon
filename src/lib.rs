@@ -109,6 +109,15 @@ pub trait TenantStore: Send + Sync {
         &self,
         upstream_key: Option<&str>,
     ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Revoke a key only when it belongs to `tenant_id` (ITEM-038 AC2: a
+    /// tenant scoped path can never revoke a key it does not own). True when a
+    /// key was actually revoked.
+    async fn revoke_tenant_key(
+        &self,
+        tenant_id: Uuid,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 #[derive(Clone)]
@@ -268,6 +277,24 @@ impl TenantStore for InMemoryTenantStore {
         );
         Ok(id)
     }
+
+    async fn revoke_tenant_key(
+        &self,
+        tenant_id: Uuid,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut keys = self.keys();
+        let hit = keys
+            .iter_mut()
+            .find(|k| k.id == key_id && k.tenant_id == tenant_id && !k.revoked);
+        match hit {
+            Some(k) => {
+                k.revoked = true;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
 }
 
 pub struct PostgresTenantStore {
@@ -380,6 +407,22 @@ impl TenantStore for PostgresTenantStore {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)
+    }
+
+    async fn revoke_tenant_key(
+        &self,
+        tenant_id: Uuid,
+        key_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let result = sqlx::query(
+            "UPDATE api_keys SET revoked_at = NOW()
+             WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(key_id)
+        .bind(tenant_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 
@@ -695,6 +738,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/operator/keys/:key_id/revoke",
             post(dashboard::operator_key_revoke),
+        )
+        .route(
+            "/v1/dashboard/api/keys",
+            get(dashboard::tenant_keys).post(dashboard::tenant_key_create),
+        )
+        .route(
+            "/v1/dashboard/api/keys/:key_id/revoke",
+            post(dashboard::tenant_key_revoke),
         )
         .route("/auth/login", get(auth::login))
         .route("/auth/callback", get(auth::callback))
@@ -1494,6 +1545,14 @@ mod tests {
         ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
             Err("tenant store unavailable".into())
         }
+
+        async fn revoke_tenant_key(
+            &self,
+            _tenant_id: Uuid,
+            _key_id: Uuid,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
     }
 
     async fn mock_upstream() -> String {
@@ -2182,6 +2241,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn revoke_tenant_key_only_touches_the_owners_keys() {
+        // ITEM-038 AC2: a tenant-scoped revoke can never kill another tenant's
+        // key (tenant boundaries hold even with a known key id).
+        let store = InMemoryTenantStore::default();
+        let tenant_a = store.insert_tenant(Some("a")).await.expect("ok");
+        let tenant_b = store.insert_tenant(Some("b")).await.expect("ok");
+        let key_a = store
+            .insert_api_key(tenant_a, "a-key", "hash-a")
+            .await
+            .expect("ok");
+        let key_b = store
+            .insert_api_key(tenant_b, "b-key", "hash-b")
+            .await
+            .expect("ok");
+        // Tenant A cannot revoke B's key…
+        assert!(!store.revoke_tenant_key(tenant_a, key_b).await.expect("ok"));
+        // …and B's key still authenticates.
+        assert!(store.tenant_by_api_key_hash("hash-b").await.expect("ok").is_some());
+        // Tenant A revokes its own key; revoking again is a no-op.
+        assert!(store.revoke_tenant_key(tenant_a, key_a).await.expect("ok"));
+        assert!(!store.revoke_tenant_key(tenant_a, key_a).await.expect("ok"));
+        assert!(store.tenant_by_api_key_hash("hash-a").await.expect("ok").is_none());
+    }
+
+    #[tokio::test]
     async fn a_second_active_key_authenticates_to_the_same_tenant() {
         let (store, _) = store_with_second_key().await;
         let tenant = store
@@ -2195,8 +2279,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoking_a_key_stops_it_authenticating_immediately() {
-        let (store, second_key_id) = store_with_second_key().await;
+    async fn revoking_a_key_stops_it_authenticating_immediately() {        let (store, second_key_id) = store_with_second_key().await;
         assert!(store
             .revoke_api_key(second_key_id)
             .await
