@@ -99,3 +99,23 @@ Executed:
    `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`,
    `UPSTREAM_MASTER_KEY`, `OPERATOR_GITHUB_LOGINS`. Update `DEPLOY_HOST` on any
    future rebuild.
+
+## Follow-up (2026-10-04): CI/CD secrets configured, pipeline proven
+
+Both PO actions are done:
+
+1. **DNS** — `inferon` A record now points at 144.202.12.237; production
+   Let's Encrypt cert issued; public HTTPS 200.
+2. **GitHub repo secrets set** (via API): `DEPLOY_HOST`, `DEPLOY_SSH_KEY`,
+   `INFERON_HOST`, `OPERATOR_API_KEY`, `SESSION_SECRET`,
+   `UPSTREAM_MASTER_KEY`, `OPERATOR_GITHUB_LOGINS`.
+   (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` remain unset until a GitHub OAuth
+   app is registered — `/auth/login` is 503 until then.)
+
+**Pipeline proven end-to-end** (workflow_dispatch run 37196359878): test job
+`cargo test` green → deploy job green through every step (bundle → ssh →
+`docker compose up -d postgres redis` → `scripts/migrate.sh` → prod rebuild →
+health check). Post-deploy verification over the public URL: healthz 200, real
+tenant key dashboard 200, operator console (key) 200, `/auth/login` 503 as
+expected, 1 tenant preserved (idempotent migrations). The push-triggered path
+runs the same jobs on every commit to `master`.

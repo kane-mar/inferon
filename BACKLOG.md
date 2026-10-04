@@ -19,13 +19,11 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-04 (host rebuilt; public TLS live)_ — the rebuilt
-durable host is **live over HTTPS** (Let's Encrypt production cert; DNS A record
-now 144.202.12.237; public healthz 200, dashboard + a real DeepSeek completion
-verified; unauth 401). Caddyfile pins the production ACME directory explicitly
-(Caddy had fallen back to the staging CA during the DNS transition, which would
-have served an untrusted cert). Remaining: add the GitHub repo secrets
-(`DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `INFERON_HOST`, `OPERATOR_API_KEY`, optional
-human-surface vars) so the CI/CD deploy job runs; item file ITEM-041 has the
-details. ITEM-028's host latency measurement is unblocked. OmniRouting 029–032
-remain staged.
+_Last updated: 2026-10-04 (CI/CD live end-to-end)_ — the rebuilt host is live
+over HTTPS, the repo secrets are set, and the pipeline is **proven**: push to
+`master` → `cargo test` → deploy (migrate + rebuild + restart + health check).
+Post-deploy the public endpoint serves healthz 200, a real tenant key 200, and
+the operator console 200; `/auth/login` stays 503 until a GitHub OAuth app is
+registered (`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`). ITEM-028's ORT path is
+feature-gated and its host latency measurement is unblocked. Accounts horizon
+(034–040) + ITEM-041 are archived; OmniRouting 029–032 remain staged.
