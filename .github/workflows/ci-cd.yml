@@ -28,8 +28,8 @@ jobs:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       INFERON_HOST: ${{ secrets.INFERON_HOST }}
       OPERATOR_API_KEY: ${{ secrets.OPERATOR_API_KEY }}
-      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      OAUTH_CLIENT_ID: ${{ secrets.OAUTH_CLIENT_ID }}
+      OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       UPSTREAM_MASTER_KEY: ${{ secrets.UPSTREAM_MASTER_KEY }}
       OPERATOR_GITHUB_LOGINS: ${{ secrets.OPERATOR_GITHUB_LOGINS }}
@@ -75,7 +75,7 @@ jobs:
             && docker compose up -d postgres redis \
             && ./scripts/migrate.sh \
             && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
-               GITHUB_CLIENT_ID='$GITHUB_CLIENT_ID' GITHUB_CLIENT_SECRET='$GITHUB_CLIENT_SECRET' \
+               GITHUB_CLIENT_ID='$OAUTH_CLIENT_ID' GITHUB_CLIENT_SECRET='$OAUTH_CLIENT_SECRET' \
                SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
                OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
                docker compose --profile prod up -d --build"

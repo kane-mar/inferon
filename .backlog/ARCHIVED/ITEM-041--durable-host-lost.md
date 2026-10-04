@@ -119,3 +119,12 @@ health check). Post-deploy verification over the public URL: healthz 200, real
 tenant key dashboard 200, operator console (key) 200, `/auth/login` 503 as
 expected, 1 tenant preserved (idempotent migrations). The push-triggered path
 runs the same jobs on every commit to `master`.
+
+### Correction (2026-10-04): OAuth secret names
+
+GitHub reserves the `GITHUB_` prefix for secret **names**, so
+`GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` cannot be repo secrets (the CI job's
+`secrets.GITHUB_*` references were therefore dead). The workflow now reads
+**`OAUTH_CLIENT_ID`** / **`OAUTH_CLIENT_SECRET`** and passes them to the
+container as `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` (the env names the app
+reads — no code change).

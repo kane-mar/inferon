@@ -179,7 +179,7 @@ Repository secrets to set (Settings → Secrets and variables → Actions):
 | `DEPLOY_SSH_KEY` | private key for `root@$DEPLOY_HOST` (`~/.ssh/inferon_deploy`) |
 | `INFERON_HOST` | public hostname (Caddy site address) |
 | `OPERATOR_API_KEY` | operator credential (machine + console access) |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset = 503 on `/auth/login`) |
+| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset = 503 on `/auth/login`). Note: GitHub reserves the `GITHUB_` prefix for secret **names**, so the repo secrets are `OAUTH_*`; they are passed to the container as `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` (what the app reads). |
 | `UPSTREAM_MASTER_KEY` | upstream key given to self-serve tenants (optional) |
 | `OPERATOR_GITHUB_LOGINS` | comma-separated operator GitHub logins (optional) |
 | `ALERT_WEBHOOK_URL` | cost-anomaly webhook (optional) |
