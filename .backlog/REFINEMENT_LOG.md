@@ -107,3 +107,20 @@ newer-CPU proxy tier measures the existing artifact <3 ms. Guard chain
 
 - ITEM-008 (DeepSeek real pricing) done + archived after live verification.
 - **Captured ITEM-017** (cache-hit-aware costing) — flagged follow-up to ITEM-008: DeepSeek auto-caches long prefixes and bills cached input at ~$0.007 vs $0.22 miss, so the single miss-rate row overstates repeated-prompt spend up to ~30×. Ranked #3 (after the 009 trace-data-loss bug, before 010) because it affects every cached DeepSeek trace's reported cost. `cached_prompt_tokens` is already stored per trace (ITEM-005), so this is a `calculate_cost` signature + worker call-site change only.
+
+## 2026-10-04 — ITEM-028 unparked for build (Option 1) + durable host lost
+
+- **ITEM-028 decision (PO):** Option 1 — re-baseline AC2 provisionally (≤10 ms on
+  the production tier) and accept a linux-gated build loop; sequencing
+  **traffic → measure on host → finalize AC/model**. Feature-gated ORT landed
+  (`embedder` cargo feature; `load-dynamic` keeps the macOS loop untouched and
+  even type-checks the ORT code; `NoEmbedder` fallback preserves AC4). Host
+  measurement pending infrastructure.
+- **Production incident captured as ITEM-041 (top of backlog):** the Vultr
+  account holds **0 instances** — the durable host was deleted (account healthy
+  and paid; not a billing suspension; no teardown was run by the agent). The
+  public endpoint is down; DNS still points at the dead IP. Snapshots survive,
+  newest inferon one 2026-09-05 (`4dca04b7`, pre-014e: 1 tenant, 2 traces) →
+  data since 2026-09-05 is lost. PO decision needed: restore-from-snapshot (R1)
+  vs rebuild fresh (R2) vs stay down (R3) — ~$6/mo either way.
+- Blocks: ITEM-028 host measurement and all live verification.

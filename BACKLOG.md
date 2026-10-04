@@ -12,20 +12,23 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-041 | Durable host lost — restore vs rebuild | incident | **OPEN — production down**; PO decision needed (restore `4dca04b7` / rebuild fresh / stay down; ~$6/mo) |
 | ITEM-018 | First real developer onboarding | improvement | **path closed (ITEM-040)** — self-serve is the only human onboarding; staged key stays valid. Remaining is a PO call: hand the key to a named developer (real-traffic data point) or archive (close-out note in item file) |
-| ITEM-028 | OmniRouting: FastEmbedder | feature | **staged** — 2026-09-06 engineering review: ort can't build on the dev toolchain; no real artifact meets the <3ms AC on available hardware (bge-micro-v2 measured 7.4ms). PO picks an unpark trigger (see item file) |
+| ITEM-028 | OmniRouting: FastEmbedder | feature | **unparked for build (Option 1, 2026-10-04)** — feature-gated ORT landed (`embedder` cargo feature; macOS loop untouched); AC2 re-baselined provisionally (≤10ms on the production tier). Host measurement blocked on ITEM-041 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-09-07 (accounts horizon complete)_ — **ITEM-034..040 all
-delivered + archived**: keys-as-rows → GitHub OAuth/sessions → self-serve
-signup → operator console → tenant key management → tenant members → out-of-band
-onboarding closed (migrations 006–010 live; smoke 65 checks; 184 tests green).
-Self-serve sign-in is the only human onboarding; the operator console covers
-staff; machines keep keys + operator APIs. ITEM-018 is closed as a build item —
-the only remainder is the PO's call on the staged key. OmniRouting ITEM-028..032
-remain staged below on their recorded gates (toolchain/real-traffic/GPU-tier
-unpark decisions + Slice 3 parking — see the item files); the PO-facing summary
-is in REFINEMENT_LOG.
+_Last updated: 2026-10-04 (durable host lost; ITEM-028 unparked)_ — **production
+incident ITEM-041 (top of backlog): the Vultr account holds 0 instances — the
+durable host was deleted** (account healthy/paid, not billing). Public endpoint
+down; DNS points at the dead IP; snapshots survive (newest inferon one
+2026-09-05) → data since then is lost. PO must choose restore-from-snapshot /
+rebuild fresh / stay down (~$6/mo). Separately, per the PO's **Option 1**
+decision, the ITEM-028 ORT path is now **feature-gated** (`embedder` cargo
+feature; default + macOS builds never compile ONNX Runtime; `NoEmbedder`
+fallback preserved) and the AC is provisionally re-baselined to ≤10 ms on the
+production tier — the host measurement is blocked until ITEM-041 is resolved.
+The accounts horizon (034–040) remains delivered + archived; OmniRouting
+029–032 stay staged behind 028/traffic/Slice-3 gates.

@@ -46,3 +46,38 @@ Staged with unpark triggers (PO choice among these, see REFINEMENT_LOG
    meets <3 ms → 028 rides the 031/032 gate;
 3. A newer-CPU proxy tier arrives where the existing artifact measures <3 ms
    (gate re-opens on a measurement).
+
+## Decision + implementation (2026-10-04) — Option 1 accepted; feature gate landed
+
+**PO decision:** take **Option 1** — re-baseline AC2 provisionally (target
+≤10 ms on the production tier, pending an actual host measurement) and accept
+the **linux-gated build loop** for ORT code. Sequencing: **traffic → measure on
+host → finalize the AC/model path.**
+
+**Mitigation landed (this repo):** the ORT path is now an opt-in cargo feature,
+so the default build and the macOS TDD loop never compile/link ONNX Runtime:
+
+- `[features] embedder = ["dep:ort", "dep:tokenizers"]`; `ort 2.0.0-rc.13` with
+  `load-dynamic` (link-free: type-checks on any platform; the runtime library is
+  only needed where it runs) + `tokenizers 0.21` with `fancy-regex` (pure Rust).
+- `src/embed.rs`: `Embedder` seam + `NoEmbedder` graceful fallback (AC4), fixed
+  128-token window fit (keeps leading `[CLS]`/trailing `[SEP]`, zero-pads),
+  attention-masked mean pooling, L2 normalization, `from_env()` loader, and the
+  `OrtEmbedder` (Level3 graph opt, 4 intra threads, 384-d) behind the feature.
+- Host measurement harness: `embed_bench` (ignored test) —
+  `cargo test --features embedder --release -- --ignored --nocapture embed_bench`.
+- **Verified:** default `cargo test` green (184 + 5 new embed tests);
+  `cargo check --features embedder` and `cargo test --no-run --features embedder`
+  compile locally (so the ORT code is type-checked in the normal loop).
+- **Not wired into routing**: nothing calls the embedder yet (029/030 consume it),
+  so request behavior is byte-identical; the fallback contract is in place.
+- Artifact note: ORT 1.28 ships no `x86_64-apple-darwin` prebuilt (only
+  aarch64) — runtime is Linux-only, as the linux-gated loop assumes.
+
+**Measurement blocked (2026-10-04):** the durable host was lost (ITEM-041) —
+`embed_bench` cannot run until a host exists. When one does: fetch
+`TaylorAI/bge-micro-v2` `onnx/model_quantized.onnx` + `tokenizer.json`, build
+with `--features embedder` (ort-sys downloads the matching ORT 1.28
+`x86_64-unknown-linux-gnu`), run the bench on the target tier, record mean/p50/
+p95, then finalize AC2 and the model shipping path (image layer: ~20 MB model +
+ORT runtime, trivial against the ~25 GB snapshot story).

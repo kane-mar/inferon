@@ -7,6 +7,7 @@ pub mod mock_upstream;
 pub mod cost;
 pub mod auth;
 pub mod dashboard;
+pub mod embed;
 pub mod linter;
 pub mod router;
 pub mod session;

@@ -3,6 +3,12 @@ name = "inferon"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# ITEM-028: the ONNX Runtime embedder is an opt-in build. The default build
+# (and the macOS TDD loop) never compiles/links ORT; the Linux host builds the
+# feature and ships the runtime library in the image (See src/embed.rs).
+embedder = ["dep:ort", "dep:tokenizers"]
+
 [dependencies]
 axum = { version = "0.7", features = ["macros", "tokio"] }
 tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "net", "io-util"] }
@@ -21,6 +27,11 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 jsonschema = "0.54.0"
+# Optional (feature `embedder`): ONNX Runtime + tokenizer for the prompt
+# embedder. `load-dynamic` keeps the crate link-free, so this type-checks on
+# any platform and only needs libonnxruntime at runtime (see src/embed.rs).
+ort = { version = "2.0.0-rc.13", optional = true, default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-27"] }
+tokenizers = { version = "0.21", optional = true, default-features = false, features = ["fancy-regex"] }
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

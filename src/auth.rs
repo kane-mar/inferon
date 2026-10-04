@@ -238,10 +238,10 @@ impl UserStore for InMemoryUserStore {
     ) -> Result<Vec<(Uuid, String, String)>, Box<dyn std::error::Error + Send + Sync>> {
         let memberships = self.lock_memberships();
         let users = self.lock_users();
-        let mut rows: Vec<(Uuid, String, String)> = memberships
+        let rows: Vec<(Uuid, String, String)> = memberships
             .iter()
             .filter(|(tid, _, _)| *tid == tenant_id)
-            .map(|(tid, uid, role)| {
+            .map(|(_, uid, role)| {
                 let login = users
                     .iter()
                     .find(|u| u.id == *uid)
