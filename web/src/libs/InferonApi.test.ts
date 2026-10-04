@@ -23,7 +23,7 @@ describe('InferonApi — session forwarding', () => {
       github_login: 'kane-mar',
       is_operator: true,
     });
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://proxy:8080/auth/me');
     expect(new Headers(init.headers).get('cookie')).toBe('inferon_session=abc');
   });
@@ -31,7 +31,7 @@ describe('InferonApi — session forwarding', () => {
   it('sends no cookie header when there is no session', async () => {
     const fetchImpl = vi.fn(async () => json({}, 401));
     await expect(makeApi(fetchImpl).me()).rejects.toBeInstanceOf(InferonApiError);
-    const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(new Headers(init?.headers).has('cookie')).toBe(false);
   });
 });
@@ -75,7 +75,7 @@ describe('InferonApi — dashboard views', () => {
 
     expect(summary.total_cost_usd).toBe('0.000007');
     expect(typeof summary.total_cost_usd).toBe('string');
-    const [url] = fetchImpl.mock.calls[0] as [string];
+    const [url] = fetchImpl.mock.calls[0] as unknown as [string];
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/summary?days=30');
   });
 
@@ -113,7 +113,7 @@ describe('InferonApi — tenant management', () => {
     const created = await makeApi(fetchImpl).createKey('ci', 'inferon_session=abc');
 
     expect(created.key).toBe('sk-inferon-abc');
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/keys');
     expect(init.method).toBe('POST');
     expect(init.body).toBe(JSON.stringify({ label: 'ci' }));
@@ -140,7 +140,7 @@ describe('InferonApi — operator views', () => {
     const fetchImpl = vi.fn(async () => json({ tenants: [], window_days: 7 }));
     await makeApi(fetchImpl).operatorTenants(7, { operatorKey: 'sk-op' });
 
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/operator/tenants?days=7');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer sk-op');
   });

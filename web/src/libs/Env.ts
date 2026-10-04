@@ -2,6 +2,9 @@ import { createEnv } from '@t3-oss/env-nextjs';
 import * as z from 'zod';
 
 export const Env = createEnv({
+  // CI (and route type generation) loads next.config.ts without a populated
+  // environment; allow the build to proceed while still validating in real runs.
+  skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   server: {
     CLERK_SECRET_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),

@@ -25,6 +25,11 @@ jobs:
     defaults:
       run:
         working-directory: web
+    env:
+      # next.config.ts loads the env schema; typegen/typecheck run without a
+      # populated environment (real validation happens at runtime).
+      SKIP_ENV_VALIDATION: '1'
+      NEXT_PUBLIC_SENTRY_DISABLED: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +39,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: npm ci
         run: npm ci
+      - name: typegen (next-env.d.ts + route types)
+        run: npx next typegen
       - name: typecheck
         run: npm run check:types
       - name: unit tests (vitest)
