@@ -75,3 +75,11 @@ What remains is a PO action, not build work: either hand the staged key to a
 named developer for the fastest real-traffic data point (AC5 capture loop
 above), or leave it — that developer can simply self-serve. Archive this item
 once the PO makes that call.
+
+### Update (2026-10-04, ITEM-041 R2 rebuild)
+
+The staged second-real-developer key was **lost with the deleted host** (its
+tenant row is gone); the local file is retired as `*.lost-2026-10-04`. The path
+stays closed — a developer simply self-serves (once the GitHub OAuth app env is
+set on the host). The freshly rebuilt host holds one re-minted tenant
+(`first-real-developer.key`) on the shared upstream key.

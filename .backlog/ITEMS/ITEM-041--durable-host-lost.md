@@ -60,3 +60,42 @@ GitHub OAuth app / env), so the practical loss is small.
 2. Migrations 001–010 present on the volume; real tenant key(s) authenticated.
 3. `~/.cache/inferon-durable/state` + DNS updated; a snapshot taken after the
    restore/rebuild.
+
+## Resolution (2026-10-04) — R2 rebuild executed + CI/CD chain added
+
+**PO decision: R2 (rebuild fresh)**, plus a requirement that the CI/CD chain
+redeploy on every push.
+
+Executed:
+
+- Old state retired (`state.lost-2026-10-04`); new instance provisioned:
+  `ac10ef89-8130-478a-b462-98a85dadcb5d` @ **144.202.12.237** (vc2-1c-1gb, ewr)
+  with the existing `inferon-durable: web ingress` firewall group attached.
+- Fresh deploy: `db/init/001..010` applied (8 domain tables present), stack
+  healthy, `https://…/healthz` by IP 200.
+- **Full smoke passed (65 checks)** on the new host; prod restored afterwards.
+- A tenant was re-minted on the shared upstream key (DeepSeek `sk-5642…`) and
+  **verified end-to-end**: dashboard 200 and a real chat completion returned
+  (`"pong"`). New key saved to `~/.cache/inferon-durable/first-real-developer.key`
+  (the pre-rebuild key + the ITEM-018 staged keys are retired as
+  `*.lost-2026-10-04`).
+- Snapshot taken: `cca71a1a-ce0c-48e8-9046-f36a8e7536c2`
+  (`inferon-durable-2026-10-04 (R2 rebuild; migrations 001-010, 1 tenant + key)`).
+- **CI/CD added** (`.github/workflows/ci-cd.yml`): `cargo test` on every push to
+  `master`, then a deploy job (bundle → `docker compose up -d postgres redis` →
+  `scripts/migrate.sh` idempotent migration → `--profile prod up -d --build` →
+  health check). `scripts/migrate.sh` makes deploys migration-aware (the
+  entrypoint only auto-applies on a fresh volume). Deploy steps skip with a
+  notice until the repo secrets exist.
+
+**PO actions remaining for this item:**
+
+1. **DNS**: point the `inferon` A record (DNSimple, `agilefederation.com`) at
+   **144.202.12.237** — until then the public TLS URL can't get a cert (the
+   IP-level health check is green).
+2. **GitHub repo secrets** so the deploy job runs: `DEPLOY_HOST`
+   (= 144.202.12.237), `DEPLOY_SSH_KEY` (`~/.ssh/inferon_deploy`), `INFERON_HOST`,
+   `OPERATOR_API_KEY`, and (optional, to switch the human surfaces on)
+   `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`,
+   `UPSTREAM_MASTER_KEY`, `OPERATOR_GITHUB_LOGINS`. Update `DEPLOY_HOST` on any
+   future rebuild.

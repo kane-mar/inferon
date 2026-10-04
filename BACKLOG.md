@@ -12,7 +12,6 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-041 | Durable host lost — restore vs rebuild | incident | **OPEN — production down**; PO decision needed (restore `4dca04b7` / rebuild fresh / stay down; ~$6/mo) |
 | ITEM-018 | First real developer onboarding | improvement | **path closed (ITEM-040)** — self-serve is the only human onboarding; staged key stays valid. Remaining is a PO call: hand the key to a named developer (real-traffic data point) or archive (close-out note in item file) |
 | ITEM-028 | OmniRouting: FastEmbedder | feature | **unparked for build (Option 1, 2026-10-04)** — feature-gated ORT landed (`embedder` cargo feature; macOS loop untouched); AC2 re-baselined provisionally (≤10ms on the production tier). Host measurement blocked on ITEM-041 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
@@ -20,15 +19,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-04 (durable host lost; ITEM-028 unparked)_ — **production
-incident ITEM-041 (top of backlog): the Vultr account holds 0 instances — the
-durable host was deleted** (account healthy/paid, not billing). Public endpoint
-down; DNS points at the dead IP; snapshots survive (newest inferon one
-2026-09-05) → data since then is lost. PO must choose restore-from-snapshot /
-rebuild fresh / stay down (~$6/mo). Separately, per the PO's **Option 1**
-decision, the ITEM-028 ORT path is now **feature-gated** (`embedder` cargo
-feature; default + macOS builds never compile ONNX Runtime; `NoEmbedder`
-fallback preserved) and the AC is provisionally re-baselined to ≤10 ms on the
-production tier — the host measurement is blocked until ITEM-041 is resolved.
-The accounts horizon (034–040) remains delivered + archived; OmniRouting
-029–032 stay staged behind 028/traffic/Slice-3 gates.
+_Last updated: 2026-10-04 (ITEM-041 resolved: R2 rebuild + CI/CD)_ — the
+deleted durable host was **rebuilt fresh** (new instance 144.202.12.237, migrated
+001–010, smoke 65/65, real DeepSeek call verified, snapshot taken) and a
+**CI/CD chain now redeploys on every push to `master`** (cargo test → migrate →
+prod rebuild → healthz) — see ITEM-041 for the two remaining PO actions (DNS A
+record → new IP; GitHub secrets). ITEM-018's staged key died with the old host
+(self-serve is the path; one tenant re-minted). ITEM-028's ORT path is
+feature-gated and its host latency measurement can now run on the rebuilt host.
+OmniRouting 029–032 remain staged behind 028/traffic/Slice-3 gates.
