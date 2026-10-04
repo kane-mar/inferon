@@ -1,5 +1,12 @@
 # TLS ingress for the durable deployment (compose profile "prod").
 # The site address comes from the INFERON_HOST env (set by deploy-durable.sh).
+# Pin the production ACME directory explicitly: Caddy otherwise falls back to
+# the Let's Encrypt *staging* CA after repeated challenge failures, which would
+# serve an untrusted certificate.
+{
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
 {$SITE_ADDRESS} {
-    reverse_proxy proxy:8080
+	reverse_proxy proxy:8080
 }

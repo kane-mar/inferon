@@ -19,12 +19,13 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-04 (ITEM-041 resolved: R2 rebuild + CI/CD)_ — the
-deleted durable host was **rebuilt fresh** (new instance 144.202.12.237, migrated
-001–010, smoke 65/65, real DeepSeek call verified, snapshot taken) and a
-**CI/CD chain now redeploys on every push to `master`** (cargo test → migrate →
-prod rebuild → healthz) — see ITEM-041 for the two remaining PO actions (DNS A
-record → new IP; GitHub secrets). ITEM-018's staged key died with the old host
-(self-serve is the path; one tenant re-minted). ITEM-028's ORT path is
-feature-gated and its host latency measurement can now run on the rebuilt host.
-OmniRouting 029–032 remain staged behind 028/traffic/Slice-3 gates.
+_Last updated: 2026-10-04 (host rebuilt; public TLS live)_ — the rebuilt
+durable host is **live over HTTPS** (Let's Encrypt production cert; DNS A record
+now 144.202.12.237; public healthz 200, dashboard + a real DeepSeek completion
+verified; unauth 401). Caddyfile pins the production ACME directory explicitly
+(Caddy had fallen back to the staging CA during the DNS transition, which would
+have served an untrusted cert). Remaining: add the GitHub repo secrets
+(`DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `INFERON_HOST`, `OPERATOR_API_KEY`, optional
+human-surface vars) so the CI/CD deploy job runs; item file ITEM-041 has the
+details. ITEM-028's host latency measurement is unblocked. OmniRouting 029–032
+remain staged.
