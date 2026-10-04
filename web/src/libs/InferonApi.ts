@@ -1,0 +1,279 @@
+/**
+ * Typed client for the Inferon data plane — the Rust proxy's JSON APIs.
+ *
+ * The web app never verifies sessions itself: server-side calls forward the
+ * browser's `Cookie` header; client-side calls are same-origin (`baseUrl` '').
+ * Failures keep the proxy's `{ error: { type, message } }` envelope in a typed
+ * `InferonApiError`.
+ *
+ * Monetary values stay **strings** end to end (the proxy renders decimals as
+ * strings so no float ever touches a cost — ITEM-019 AC3); format them with
+ * `formatUsd`, never `parseFloat`.
+ */
+
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export class InferonApiError extends Error {
+  readonly status: number;
+  readonly type: string;
+
+  constructor(status: number, type: string, message: string) {
+    super(message);
+    this.name = 'InferonApiError';
+    this.status = status;
+    this.type = type;
+  }
+}
+
+export type Auth = { cookie?: string; operatorKey?: string };
+
+export type Me = {
+  id: string;
+  github_id: number;
+  github_login: string;
+  /** Present once the proxy exposes it (ITEM-042d); absent means false. */
+  is_operator?: boolean;
+};
+
+export type Summary = {
+  scope: 'tenant' | 'operator';
+  tenant_id: string | null;
+  window_days: number;
+  requests: number;
+  errors: number;
+  total_cost_usd: string;
+  first_trace_at: string | null;
+  last_trace_at: string | null;
+};
+
+export type ModelRow = {
+  model: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: string;
+};
+
+export type ByModel = { models: ModelRow[] };
+
+export type PromptRow = {
+  system_prompt_hash: string;
+  requests: number;
+  prompt_tokens: number;
+  cost_usd: string;
+};
+
+export type ByPrompt = { prompts: PromptRow[] };
+
+export type WasteFlag = {
+  requests: number;
+  spend_usd: string;
+  savings_est_usd: string;
+};
+
+export type Waste = Record<string, WasteFlag>;
+
+export type KeyRow = {
+  id: string;
+  label: string;
+  created_at: string;
+  revoked: boolean;
+  revoked_at: string | null;
+  last_used_at: string | null;
+};
+
+export type Role = 'owner' | 'member';
+export type KeysResponse = { role: Role; keys: KeyRow[] };
+
+export type MemberRow = { id: string; github_login: string; role: Role };
+export type MembersResponse = { role: Role; members: MemberRow[]; invites: string[] };
+
+export type CreatedKey = {
+  key_id: string;
+  tenant_id: string;
+  label: string;
+  /** Shown exactly once — only the hash is stored server-side. */
+  key: string;
+};
+
+export type OperatorTenantRow = {
+  tenant_id: string;
+  requests: number;
+  errors: number;
+  cost_usd: string;
+};
+
+export type OperatorTenants = { tenants: OperatorTenantRow[]; window_days: number };
+
+export type OperatorGuardRow = {
+  outcome: string;
+  requests: number;
+};
+
+export type OperatorGuard = { outcomes: OperatorGuardRow[]; window_days: number };
+
+export type OperatorAlertRow = {
+  tenant_id: string;
+  class: string;
+  status: string;
+  detail: unknown;
+  threshold: unknown;
+  first_fired_at: string;
+  last_fired_at: string;
+  cleared_at: string | null;
+};
+
+export type OperatorAlerts = { alerts: OperatorAlertRow[]; window_days: number };
+
+type Options = { baseUrl?: string; fetchImpl?: FetchLike };
+
+export class InferonApi {
+  private readonly baseUrl: string;
+  private readonly fetchImpl: FetchLike;
+
+  constructor(options: Options = {}) {
+    this.baseUrl = options.baseUrl ?? '';
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+  }
+
+  /**
+   * Server-side factory: the compose network address of the Rust proxy.
+   * Client-side use `sameOrigin()` instead.
+   */
+  static fromEnv(env: Record<string, string | undefined> = process.env): InferonApi {
+    return new InferonApi({ baseUrl: env.INFERON_API_URL ?? 'http://proxy:8080' });
+  }
+
+  /** Client-side factory: relative URLs against the public origin. */
+  static sameOrigin(): InferonApi {
+    return new InferonApi({ baseUrl: '' });
+  }
+
+  me(auth?: string): Promise<Me> {
+    return this.request<Me>('GET', '/auth/me', undefined, { cookie: auth });
+  }
+
+  summary(days: number, cookie?: string): Promise<Summary> {
+    return this.request<Summary>('GET', `/v1/dashboard/api/summary${window(days)}`, undefined, { cookie });
+  }
+
+  byModel(days: number, cookie?: string): Promise<ByModel> {
+    return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${window(days)}`, undefined, { cookie });
+  }
+
+  byPrompt(days: number, limit = 10, cookie?: string): Promise<ByPrompt> {
+    return this.request<ByPrompt>(
+      'GET',
+      `/v1/dashboard/api/by-prompt${window(days, { limit })}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  waste(days: number, cookie?: string): Promise<Waste> {
+    return this.request<Waste>('GET', `/v1/dashboard/api/waste${window(days)}`, undefined, { cookie });
+  }
+
+  keys(cookie?: string): Promise<KeysResponse> {
+    return this.request<KeysResponse>('GET', '/v1/dashboard/api/keys', undefined, { cookie });
+  }
+
+  createKey(label: string, cookie?: string): Promise<CreatedKey> {
+    return this.request<CreatedKey>('POST', '/v1/dashboard/api/keys', { label }, { cookie });
+  }
+
+  revokeKey(keyId: string, cookie?: string): Promise<{ key_id: string; revoked: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/keys/${keyId}/revoke`, {}, { cookie });
+  }
+
+  members(cookie?: string): Promise<MembersResponse> {
+    return this.request<MembersResponse>('GET', '/v1/dashboard/api/members', undefined, { cookie });
+  }
+
+  inviteMember(githubLogin: string, cookie?: string): Promise<{ github_login: string; invited: boolean }> {
+    return this.request('POST', '/v1/dashboard/api/members', { github_login: githubLogin }, { cookie });
+  }
+
+  removeMember(userId: string, cookie?: string): Promise<{ user_id: string; removed: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/members/${userId}/remove`, {}, { cookie });
+  }
+
+  operatorSummary(days: number, auth: Auth): Promise<Summary> {
+    return this.request('GET', `/v1/dashboard/api/operator/summary${window(days)}`, undefined, auth);
+  }
+
+  operatorTenants(days: number, auth: Auth): Promise<OperatorTenants> {
+    return this.request('GET', `/v1/dashboard/api/operator/tenants${window(days)}`, undefined, auth);
+  }
+
+  operatorGuard(days: number, auth: Auth): Promise<OperatorGuard> {
+    return this.request('GET', `/v1/dashboard/api/operator/guard${window(days)}`, undefined, auth);
+  }
+
+  operatorAlerts(days: number, auth: Auth): Promise<OperatorAlerts> {
+    return this.request('GET', `/v1/dashboard/api/operator/alerts${window(days)}`, undefined, auth);
+  }
+
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: unknown,
+    auth: Auth = {},
+  ): Promise<T> {
+    const headers = new Headers({ accept: 'application/json' });
+    if (body !== undefined) {
+      headers.set('content-type', 'application/json');
+    }
+    if (auth.cookie) {
+      headers.set('cookie', auth.cookie);
+    }
+    if (auth.operatorKey) {
+      headers.set('authorization', `Bearer ${auth.operatorKey}`);
+    }
+
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+    });
+    const payload: unknown = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const envelope = (payload as { error?: { type?: string; message?: string } } | null)?.error;
+      throw new InferonApiError(
+        response.status,
+        envelope?.type ?? 'http_error',
+        envelope?.message ?? `HTTP ${response.status}`,
+      );
+    }
+    return payload as T;
+  }
+}
+
+const window = (days: number, extra: Record<string, number> = {}): string => {
+  const params = new URLSearchParams({ days: String(days) });
+  for (const [key, value] of Object.entries(extra)) {
+    params.set(key, String(value));
+  }
+  return `?${params.toString()}`;
+};
+
+/**
+ * Render a decimal cost string (or cents-style string) in the UI without ever
+ * going through a float. Mirrors the dashboard shell's `usd()` helper.
+ */
+export const formatUsd = (value: string): string => {
+  const negative = value.startsWith('-');
+  const unsigned = negative ? value.slice(1) : value;
+  const [rawWhole = '', rawFraction] = unsigned.split('.');
+  const whole = rawWhole === '' ? '0' : rawWhole;
+  const fraction = (rawFraction ?? '').replace(/0+$/, '');
+
+  if (whole === '0' && fraction === '') {
+    return `${negative ? '-' : ''}$0.00`;
+  }
+  // Thousands separators on the integer part only — never inside the fraction.
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${negative ? '-' : ''}$${grouped}${fraction ? `.${fraction}` : ''}`;
+};

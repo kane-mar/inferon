@@ -1,6 +1,13 @@
 target/
 .env
 .git/
+# web app (Next.js): never ship dependencies or build output in the image context
+web/node_modules/
+web/.next/
+web/coverage/
+web/playwright-report/
+web/test-results/
+web/storybook-static/
 raw/
 wiki/
 .backlog/
