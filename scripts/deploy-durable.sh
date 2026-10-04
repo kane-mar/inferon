@@ -25,6 +25,9 @@ SSH_KEY="$HOME/.ssh/inferon_deploy"
 STATE_DIR="${INFERON_DURABLE_STATE:-$HOME/.cache/inferon-durable}"
 STATE="$STATE_DIR/state"
 OP_FILE="$STATE_DIR/operator_key"
+# Vultr firewall group to attach (web ingress). Defaults to the account's
+# "inferon-durable: web ingress" group when set by the operator.
+FIREWALL_GROUP="${VULTR_FIREWALL_GROUP:-}"
 
 : "${VULTR_API_KEY:?set VULTR_API_KEY}"
 [ -f "$SSH_KEY" ] || { echo "missing ssh key: $SSH_KEY" >&2; exit 1; }
@@ -58,6 +61,15 @@ up() {
         if [ "$status" = "active" ] && [ -n "$ip" ] && [ "$ip" != "0.0.0.0" ]; then
             printf '%s %s\n' "$id" "$ip" > "$STATE"
             echo "ACTIVE $id $ip"
+            if [ -n "$FIREWALL_GROUP" ]; then
+                curl -fsS -X POST "$API/instances/$id/firewall-group" \
+                    -H "Authorization: Bearer $VULTR_API_KEY" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"firewall_group_id\":\"$FIREWALL_GROUP\"}" >/dev/null
+                echo "attached firewall group $FIREWALL_GROUP"
+            else
+                echo "WARNING: no VULTR_FIREWALL_GROUP set — all ports are open" >&2
+            fi
             deploy
             return 0
         fi
@@ -109,18 +121,63 @@ deploy() {
         OPERATOR_API_KEY=$(cat "$OP_FILE")
     fi
 
-    local bundle
-    bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
-    scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
-    rm -f "$bundle"
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' docker compose --profile prod up -d --build"
+    bundle_upload "$ip"
+    remote_deploy "$ip"
+    remote_health "$ip"
     if [ ! -f "$OP_FILE" ]; then
         echo "OPERATOR_API_KEY (saved to $OP_FILE): $OPERATOR_API_KEY"
     fi
     echo "deployed. stack: docker compose ps (host $ip)"
     echo "public endpoint: https://$INFERON_HOST (point an A record at $ip to go live)"
+}
+
+# Bundle the runtime inputs (same file list as the CI/CD workflow) and ship it.
+bundle_upload() {
+    local ip=$1 bundle
+    bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
+    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
+    scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
+    rm -f "$bundle"
+}
+
+# Non-secret + optional env passed to compose. Values only travel over the ssh
+# command line (same channel as the operator key).
+compose_env() {
+    local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY'"
+    local var val
+    for var in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_SECRET UPSTREAM_MASTER_KEY \
+               OPERATOR_GITHUB_LOGINS ALERT_WEBHOOK_URL UPSTREAM_URL; do
+        val="${!var:-}"
+        [ -n "$val" ] && out="$out $var='$val'"
+    done
+    printf '%s' "$out"
+}
+
+# Deploy on the host: extract, bring Postgres up, apply db/init (idempotent —
+# the entrypoint only auto-applies on a fresh volume), then rebuild + start the
+# full prod stack.
+remote_deploy() {
+    local ip=$1 env_args
+    env_args=$(compose_env)
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
+        "mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon \
+         && cd /opt/inferon && chmod +x scripts/*.sh \
+         && docker compose up -d postgres redis \
+         && ./scripts/migrate.sh \
+         && $env_args docker compose --profile prod up -d --build"
+}
+
+remote_health() {
+    local ip=$1
+    for _ in $(seq 1 60); do
+        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" "curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1"; then
+            echo "healthz OK"
+            return 0
+        fi
+        sleep 5
+    done
+    echo "health check failed" >&2
+    return 1
 }
 
 redeploy() {
@@ -129,13 +186,10 @@ redeploy() {
     read -r id ip < "$STATE"
     resolve_hostname
     wait_ssh "$ip"
-    local bundle
-    bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
-    scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
-    rm -f "$bundle"
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "cd /opt/inferon && tar xzf /tmp/durable.tgz && chmod -R a+rX /opt/inferon && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$(cat "$OP_FILE" 2>/dev/null || echo "${OPERATOR_API_KEY:-}")' docker compose --profile prod up -d --build"
+    OPERATOR_API_KEY=$(cat "$OP_FILE" 2>/dev/null || echo "${OPERATOR_API_KEY:-}")
+    bundle_upload "$ip"
+    remote_deploy "$ip"
+    remote_health "$ip"
     echo "redeployed"
 }
 

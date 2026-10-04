@@ -1,0 +1,87 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# One deploy at a time; never cancel a run mid-deploy.
+concurrency:
+  group: durable-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --locked
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      INFERON_HOST: ${{ secrets.INFERON_HOST }}
+      OPERATOR_API_KEY: ${{ secrets.OPERATOR_API_KEY }}
+      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      UPSTREAM_MASTER_KEY: ${{ secrets.UPSTREAM_MASTER_KEY }}
+      OPERATOR_GITHUB_LOGINS: ${{ secrets.OPERATOR_GITHUB_LOGINS }}
+      ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Skipped (not failed) until the deploy secrets exist, so the chain is
+      # green before the host/prereqs are wired up.
+      - name: Check deploy prerequisites
+        id: cfg
+        run: |
+          if [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_SSH_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::deploy skipped — set DEPLOY_HOST + DEPLOY_SSH_KEY (and INFERON_HOST/OPERATOR_API_KEY) repository secrets"
+          fi
+
+      - name: Package runtime bundle
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          tar czf /tmp/durable.tgz Cargo.toml Cargo.lock Dockerfile \
+            docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
+
+      - name: Install SSH key
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          mkdir -p ~/.ssh && printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Upload bundle
+        if: steps.cfg.outputs.configured == 'true'
+        run: scp -i ~/.ssh/id_deploy /tmp/durable.tgz "root@$DEPLOY_HOST:/tmp/durable.tgz"
+
+      - name: Deploy (migrate + rebuild + restart)
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" "\
+            mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
+            && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh \
+            && docker compose up -d postgres redis \
+            && ./scripts/migrate.sh \
+            && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
+               GITHUB_CLIENT_ID='$GITHUB_CLIENT_ID' GITHUB_CLIENT_SECRET='$GITHUB_CLIENT_SECRET' \
+               SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
+               OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
+               docker compose --profile prod up -d --build"
+
+      - name: Health check
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" \
+            'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && echo healthz-ok && exit 0; sleep 5; done; echo healthz-failed; exit 1'

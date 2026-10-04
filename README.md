@@ -162,6 +162,33 @@ no tenant can see another tenant's data):
 - `GET /v1/dashboard/api/by-prompt?days=7&limit=10`
 - `GET /v1/dashboard/api/waste?days=7`
 
+## CI/CD (redeploy on every push)
+
+`.github/workflows/ci-cd.yml` runs on every push to `master`: `cargo test`,
+then a **deploy job** that ships the runtime bundle to the durable host and
+redeploys it — `docker compose up -d postgres redis` → `scripts/migrate.sh`
+(idempotent re-apply of `db/init/*.sql`, so existing volumes pick up new
+migrations; the Postgres entrypoint only auto-applies on a fresh volume) →
+`docker compose --profile prod up -d --build` → health check.
+
+Repository secrets to set (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+|---|---|
+| `DEPLOY_HOST` | durable host IP (update after a rebuild/restore) |
+| `DEPLOY_SSH_KEY` | private key for `root@$DEPLOY_HOST` (`~/.ssh/inferon_deploy`) |
+| `INFERON_HOST` | public hostname (Caddy site address) |
+| `OPERATOR_API_KEY` | operator credential (machine + console access) |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset = 503 on `/auth/login`) |
+| `UPSTREAM_MASTER_KEY` | upstream key given to self-serve tenants (optional) |
+| `OPERATOR_GITHUB_LOGINS` | comma-separated operator GitHub logins (optional) |
+| `ALERT_WEBHOOK_URL` | cost-anomaly webhook (optional) |
+
+The deploy job **skips with a notice** (rather than failing) until
+`DEPLOY_HOST` + `DEPLOY_SSH_KEY` exist. Local deploys use the same path:
+`./scripts/deploy-durable.sh up|redeploy` (provisioning attaches the
+`VULTR_FIREWALL_GROUP` web-ingress firewall when set).
+
 ## Running your own instance
 
 `docker compose up -d --build` on any Docker host (see Quickstart above). The proxy
