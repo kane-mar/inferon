@@ -62,7 +62,7 @@ up() {
             printf '%s %s\n' "$id" "$ip" > "$STATE"
             echo "ACTIVE $id $ip"
             if [ -n "$FIREWALL_GROUP" ]; then
-                curl -fsS -X POST "$API/instances/$id/firewall-group" \
+                curl -fsS -X PATCH "$API/instances/$id" \
                     -H "Authorization: Bearer $VULTR_API_KEY" \
                     -H "Content-Type: application/json" \
                     -d "{\"firewall_group_id\":\"$FIREWALL_GROUP\"}" >/dev/null
@@ -77,6 +77,13 @@ up() {
     done
     echo "timed out waiting for activation" >&2
     exit 1
+}
+
+bootstrap_docker() {
+    local ip=$1
+    echo "bootstrapping docker on $ip..."
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
+        "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 && systemctl enable --now docker >/dev/null 2>&1 && docker --version | head -1"
 }
 
 wait_ssh() {
@@ -108,9 +115,7 @@ deploy() {
     resolve_hostname
     echo "waiting for ssh on $ip..."
     wait_ssh "$ip"
-    echo "bootstrapping docker on $ip..."
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 && systemctl enable --now docker >/dev/null 2>&1 && docker --version | head -1"
+    bootstrap_docker "$ip"
 
     # Operator key: env wins; otherwise generate once and save (mode 600).
     if [ -z "${OPERATOR_API_KEY:-}" ] && [ ! -f "$OP_FILE" ]; then
@@ -186,6 +191,7 @@ redeploy() {
     read -r id ip < "$STATE"
     resolve_hostname
     wait_ssh "$ip"
+    bootstrap_docker "$ip"
     OPERATOR_API_KEY=$(cat "$OP_FILE" 2>/dev/null || echo "${OPERATOR_API_KEY:-}")
     bundle_upload "$ip"
     remote_deploy "$ip"
