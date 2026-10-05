@@ -13,7 +13,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-018 | First real developer onboarding | improvement | **path closed (ITEM-040)** — self-serve is the only human onboarding; staged key stays valid. Remaining is a PO call: hand the key to a named developer (real-traffic data point) or archive (close-out note in item file) |
-| ITEM-028 | OmniRouting: FastEmbedder | feature | **unparked for build (Option 1, 2026-10-04)** — feature-gated ORT landed (`embedder` cargo feature; macOS loop untouched); AC2 re-baselined provisionally (≤10ms on the production tier). Host measurement blocked on ITEM-041 |
+| ITEM-028 | OmniRouting: FastEmbedder | feature | **measured, AC2 not met (2026-10-05)** — feature-gated ORT landed; host bench: **~141–150 ms p50** vs the ≤10 ms re-baseline (~14× off on the 1 vCPU tier). Two bugs fixed (`token_type_ids` input; bench error surfacing). Awaiting PO: re-baseline + off-hot-path, faster tier, or re-stage |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
@@ -27,4 +27,5 @@ proxy/telemetry/guard/router stay the data plane; auth stays ours (A1). Slices
 human surface; the Rust proxy keeps `/v1/*`, `/auth/*`, `/healthz`. Platform
 state: host live over HTTPS with CI/CD (deploy on every push), GitHub OAuth live,
 accounts horizon (034–040), ITEM-041 and ITEM-042 archived. ITEM-028's ORT path
-is feature-gated, host measurement pending. OmniRouting 029–032 remain staged.
+is feature-gated; host measurement done (~143 ms p50, AC2 not met — pending a PO
+call). OmniRouting 029–032 remain staged.

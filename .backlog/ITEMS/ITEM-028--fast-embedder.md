@@ -81,3 +81,41 @@ with `--features embedder` (ort-sys downloads the matching ORT 1.28
 `x86_64-unknown-linux-gnu`), run the bench on the target tier, record mean/p50/
 p95, then finalize AC2 and the model shipping path (image layer: ~20 MB model +
 ORT runtime, trivial against the ~25 GB snapshot story).
+
+## Measurement (2026-10-05) — done; AC2 NOT met
+
+Ran `embed_bench` on the durable host (vc2-1c-1gb, 1 vCPU, 955 MB, ITEM-041
+rebuilt). Model `TaylorAI/bge-micro-v2` int8 (17 MB) + ONNX Runtime 1.28.0
+linux-x64, `ORT_DYLIB_PATH` set, `--features embedder --release`, 50 runs × 3:
+
+| run | mean | p50 | p95 |
+|-----|------|-----|-----|
+| 1 | 174.52 ms | 143.20 ms | 296.33 ms |
+| 2 | 162.01 ms | 140.96 ms | 270.33 ms |
+| 3 | 171.59 ms | 150.14 ms | 298.23 ms |
+
+**~141–150 ms p50** — the re-baselined AC2 target (≤10 ms) is missed by ~14×,
+and the original <3 ms spec is ~50× off. The 1 vCPU tier is the bottleneck
+(the same model measured 7.4 ms on the dev Mac).
+
+Two code issues surfaced by the first real run (commit `ad05ed9`):
+- **Missing `token_type_ids` input** — bge-micro-v2 takes segment ids; the
+  embedder only fed `input_ids` + `attention_mask`, so the session run failed
+  (`Missing Input: token_type_ids`). Single-segment text = all-zero ids. This
+  bug was invisible while the bench was blocked.
+- **Bench hid load failures** — `from_env()` logs the cause via tracing but the
+  ignored bench never initialised a subscriber; it now does (`warn` filter).
+
+**AC2 outcome: not met on the current tier.** The Option-1 assumption (≤10 ms
+on "current hardware") is falsified by measurement. Unpark options now:
+1. Re-baseline AC2 again around the measured tier (e.g. ≤150 ms) **and** move
+   embedding off the hot path (cache per task/system-prompt, not per request —
+   the 029 centroid design already embeds the task, not every message);
+2. A newer/faster CPU tier (re-run the bench — the gate re-opens on a
+   measurement < target);
+3. Re-stage 028 until Slice 3 distillation produces a <3 ms model.
+
+**AC3 (shipping path) unresolved**, pending the AC2 decision — but the
+mechanics are confirmed trivial: the ~17 MB model + the 8.8 MB ORT runtime
+`libonnxruntime.so` bake into the image layer well within the ~25 GB snapshot
+story (image layer is the right call; no first-boot download needed).
