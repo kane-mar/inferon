@@ -26,6 +26,23 @@ linting, and a self-hosted cost-leak dashboard.
   $ impact.
 - **Dashboard** — `GET /v1/dashboard` (self-contained HTML + JSON APIs), tenant-scoped.
 
+## Architecture
+
+Two deployment units behind one Caddy TLS ingress (compose profile `prod`):
+
+- **`proxy` (Rust)** — the data plane: `/v1/*` (OpenAI-compatible API + dashboard
+  JSON), `/auth/*` (GitHub OAuth + signed sessions), `/healthz`. Untouched by the
+  web app.
+- **`web` (Next.js)** — the human surfaces: rebranded landing, the session-gated
+  dashboard (`/dashboard`, `/dashboard/keys`, `/dashboard/members`), and the
+  operator console (`/dashboard/operator`). Server-side it calls the Rust API over
+  the compose network (`INFERON_API_URL`) forwarding the browser's session cookie;
+  the browser calls the same public origin. The app never verifies sessions itself —
+  auth stays entirely in the Rust proxy.
+
+Caddy routes `/v1/*`, `/auth/*`, `/healthz` → `proxy`; everything else → `web`
+(Next.js standalone image on a loopback-only port).
+
 ## For developers
 
 **Base URL:** `https://inferon.agilefederation.com/v1` (OpenAI-compatible).
@@ -82,7 +99,9 @@ curl http://localhost:8080/healthz   # → ok
 ```
 
 The stack: `proxy` (axum), `postgres` (schema auto-applied from `db/init/` on first
-boot), `redis` (reserved for later slices).
+boot), `redis` (reserved for later slices). The web app + Caddy run under the `prod`
+profile (`docker compose --profile prod up -d --build`), matching the durable host;
+without it you get the data plane only.
 
 ## Minting a tenant key (operator / machine-only runbook)
 
@@ -164,12 +183,15 @@ no tenant can see another tenant's data):
 
 ## CI/CD (redeploy on every push)
 
-`.github/workflows/ci-cd.yml` runs on every push to `master`: `cargo test`,
-then a **deploy job** that ships the runtime bundle to the durable host and
-redeploys it — `docker compose up -d postgres redis` → `scripts/migrate.sh`
+`.github/workflows/ci-cd.yml` runs on every push to `master`: `cargo test --locked`
+(Rust), a **web job** (`npm ci`, `next typegen`, `tsc`, Vitest) for the Next.js app,
+then a **deploy job** that ships the runtime bundle (Rust + `web/`) to the durable
+host and redeploys it — `docker compose up -d postgres redis` → `scripts/migrate.sh`
 (idempotent re-apply of `db/init/*.sql`, so existing volumes pick up new
 migrations; the Postgres entrypoint only auto-applies on a fresh volume) →
-`docker compose --profile prod up -d --build` → health check.
+`docker compose --profile prod up -d --build` → `--force-recreate caddy` → a health
+check that probes **both** containers (`:8080/healthz` + `:3000/api/health`) and a
+public landing check.
 
 Repository secrets to set (Settings → Secrets and variables → Actions):
 
@@ -237,12 +259,21 @@ parent zone's DNS (DNSimple for agilefederation.com) and
 
 ## Development
 
-- Rust + bash only (project decision); SQL for migrations.
-- Tests: `cargo test` (all unit/integration seams run locally with a mock upstream —
-  no Docker needed for the red→green loop).
+- Rust + bash only for the data plane (project decision); SQL for migrations.
+  **Scoped exception: TypeScript is allowed in `web/` only** (the Next.js UI).
+- Tests: `cargo test --locked` (all unit/integration seams run locally with a mock
+  upstream — no Docker needed for the red→green loop).
+- Web app (`web/`), Node ≥ 24: `npm ci` then `npm run dev` (dev server) or
+  `npm run build && npm start`. Server data calls go through `INFERON_API_URL`
+  (defaults to `http://proxy:8080` in compose; set it to a local proxy, e.g.
+  `INFERON_API_URL=http://localhost:8080`). Checks: `npm run check:types` (tsc),
+  `npm test` (Vitest), `npm run check:i18n`, `npm run check:deps` (knip),
+  `npm run lint`, `npm run build`. The repo sits on an SMB share where npm stalls —
+  develop in a local copy
+  (`rsync -a web/ ~/.cache/inferon-web-sandbox/ --exclude node_modules --exclude .next`).
 - Deployment verification (schema, live end-to-end): `scripts/docker-host.sh verify`
   provisions a disposable Vultr host; `scripts/smoke.sh` exercises healthz, the auth
-  boundary, and the dashboard inside the real stack.
+  boundary, the dashboard, and the web surface inside the real stack.
 
 ## Project layout
 
@@ -252,7 +283,9 @@ src/linter.rs    waste rules (over-provisioned / cache-miss / model misuse)
 src/dashboard.rs dashboard HTML + tenant-scoped JSON APIs
 src/lib.rs       proxy hot path, auth, telemetry worker, trace sink
 src/main.rs      wiring (env, Postgres pool, worker)
-db/init/         idempotent migrations (001 schema … 006 api_keys rows)
+db/init/         idempotent migrations (001 schema … 010 tenant invites)
+web/             Next.js human surfaces (landing, dashboard, operator console) —
+                 vendored SaaS-Boilerplate, stripped + Inferon-branded (ITEM-042)
 .backlog/        product backlog (single-ranked) + archived items + refinement log
 wiki/ raw/       design knowledge base (Karpathy-style wiki + immutable sources)
 ```
