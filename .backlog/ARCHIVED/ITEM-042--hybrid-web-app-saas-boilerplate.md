@@ -5,15 +5,10 @@
 **So that** the product presents like a real SaaS instead of server-rendered
 Rust HTML tables — without putting the data plane at risk
 
-**Status:** refined + in progress (042e). 042a–e landed: template vendored under
-`web/` (MIT `LICENSE`/attribution kept), typed Inferon API seam
-(`web/src/libs/InferonApi.ts` + Vitest), vendor strip (Clerk/Sentry/Drizzle/
-Checkly/Crowdin gone), and the real pages: rebranded landing (sign-in →
-`/auth/login`), session-gated dashboard (overview, keys, members) and the
-operator console, with role-aware nav. Rust `/auth/me` now reports `is_operator`
-(TDD). **042e deployed live** (standalone `web` image, compose `prod` profile,
-Caddy routing, stack + public health in CI; CI run 37254081389 green).
-Remaining: 042f CI/README.
+**Status:** complete (042a–f) — archived 2026-10-05. All six slices landed green:
+`web/` vendored + stripped (a–c), real landing + session-gated dashboard +
+operator console (d), live deploy behind Caddy (e), CI + README (f).
+Rust `/auth/me` reports `is_operator` (TDD).
 
 **Decision (A1, default): keep our GitHub OAuth + sessions** (`/auth/*` on the
 Rust proxy). Clerk is stripped in 042c — the accounts horizon ITEM-034..040 is
@@ -64,3 +59,28 @@ API-client seam.
 - Supersedes nothing in the recorded product decisions; the "Rust + bash only"
   decision gains a scoped exception: **TypeScript allowed for the web UI**
   (`web/` only). Data plane stays Rust.
+
+## Verification record (2026-10-05)
+
+- **042a scaffold**: SaaS-Boilerplate vendored under `web/` with MIT `LICENSE`
+  + attribution kept; baseline `npm ci` / `npm test` / `npm run build` recorded.
+- **042b API-client seam (TDD)**: `src/libs/InferonApi.ts` (typed `/auth/me`,
+  dashboard, keys/members, operator views; cookie forwarding) + Vitest unit
+  tests against a mocked `fetch`; `session.ts` + `dashboardNav.ts` added in 042d.
+- **042c vendor strip**: Clerk/Stripe/Drizzle+Sentry/Crowdin/Checkly + dependent
+  pages removed; sign-in/up redirect to `/auth/login`; `Env.ts` trimmed.
+- **042d pages (TDD)**: landing rebranded, session-gated dashboard (overview,
+  keys, members) + operator console with role-aware nav; Rust `is_operator` on
+  `/auth/me` (red→green). `cargo test --locked` = 190; web vitest 27; tsc/i18n/
+  knip/eslint/next build green.
+- **042e deploy**: standalone `web` image, compose `prod` service, Caddy routing
+  (`/v1/*`/`/auth/*`/`/healthz` → proxy, else → web), stack + public health in CI,
+  smoke web-surface arm. Live-verified (CI run 37254081389): `/` 200 + brand,
+  `/dashboard` 307→`/auth/login`, `/auth/me` 401, `/auth/login` 302→GitHub,
+  `/auth/callback` bad state 400, `/healthz` 200, `/v1/models` 404 (still Rust).
+- **042f CI + README**: web job (`npm ci`, `next typegen`, tsc, `vitest --project
+  unit`) alongside `cargo test --locked`; deploy health probes both containers;
+  README documents the hybrid architecture + local dev + CI; `web/README.md`
+  replaced with a stripped note. CI runs 37254916583 + 37256956942 green.
+- Data plane untouched: no `/v1/chat` semantics changed; auth stays entirely in
+  the Rust proxy (the web app forwards the session cookie, never verifies it).
