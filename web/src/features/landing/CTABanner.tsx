@@ -7,7 +7,11 @@ export const CTABanner = (props: {
     rounded-lg bg-accent px-6 py-12 text-center text-accent-foreground
   "
   >
-    <div className="text-3xl font-bold">
+    <div className="
+      text-3xl font-semibold tracking-tight
+      md:text-4xl
+    "
+    >
       {props.title}
     </div>
 

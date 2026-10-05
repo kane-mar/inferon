@@ -15,7 +15,7 @@ export const CenteredFooter = (props: {
       {props.logo}
 
       <ul className="
-        mt-4 flex gap-x-8 text-lg
+        mt-4 flex gap-x-8 text-sm
         max-sm:flex-col
         [&_a:hover]:opacity-70
       "

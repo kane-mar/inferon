@@ -15,7 +15,7 @@ export const CTA = () => {
         description={t('description')}
         buttons={(
           <AuthLink
-            className={buttonVariants({ variant: 'secondary', size: 'lg', className: 'whitespace-pre-line' })}
+            className={buttonVariants({ size: 'lg', className: 'whitespace-pre-line' })}
           >
             {t('button_text')}
 

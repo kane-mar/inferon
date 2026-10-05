@@ -7,7 +7,7 @@ export const Section = (props: {
   description?: string;
   className?: string;
 }) => (
-  <div className={cn('@container px-3 py-16', props.className)}>
+  <div className={cn('@container px-3 py-20', props.className)}>
     {(props.title || props.subtitle || props.description) && (
       <div className="mx-auto mb-12 max-w-3xl text-center">
         {props.subtitle && (
@@ -21,7 +21,13 @@ export const Section = (props: {
         )}
 
         {props.title && (
-          <div className="mt-1 text-3xl font-bold">{props.title}</div>
+          <div className="
+            mt-2 text-3xl font-semibold tracking-tight
+            md:text-4xl
+          "
+          >
+            {props.title}
+          </div>
         )}
 
         {props.description && (

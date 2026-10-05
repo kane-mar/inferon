@@ -31,14 +31,14 @@ export const Features = () => {
 
   return (
     <div id="features">
-      <Background>
+      <Background className="border-y">
         <Section
           subtitle={t('section_subtitle')}
           title={t('section_title')}
           description={t('section_description')}
         >
           <div className="
-            grid grid-cols-1 gap-x-3 gap-y-8
+            grid grid-cols-1 gap-x-6 gap-y-8
             md:grid-cols-3
           "
           >

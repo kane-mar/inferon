@@ -30,7 +30,7 @@ export const CenteredMenu = (props: {
       `, navClass)}
       >
         <ul className="
-          flex gap-x-6 gap-y-1 text-lg font-medium
+          flex gap-x-6 gap-y-1 text-sm font-medium
           max-lg:flex-col
           max-lg:[&_a]:inline-block max-lg:[&_a]:w-full
           [&_a:hover]:opacity-70
@@ -50,7 +50,7 @@ export const CenteredMenu = (props: {
         )}
       >
         <ul className="
-          flex flex-row items-center gap-x-1.5 text-lg font-medium
+          flex flex-row items-center gap-x-1.5 text-sm font-medium
           [&_a:hover]:opacity-70
         "
         >

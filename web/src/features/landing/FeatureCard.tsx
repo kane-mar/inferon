@@ -3,7 +3,11 @@ export const FeatureCard = (props: {
   title: string;
   children: React.ReactNode;
 }) => (
-  <div className="rounded-lg border border-border bg-card p-5">
+  <div className="
+    group rounded-lg border border-border bg-card p-5 transition-colors
+    hover:border-accent
+  "
+  >
     <div className="
       size-12 rounded-md bg-linear-to-br from-accent to-chart-2 p-2
       [&_svg]:stroke-white [&_svg]:stroke-2
