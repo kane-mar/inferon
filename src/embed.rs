@@ -155,6 +155,9 @@ mod ort_impl {
             let (ids, mask) = fit_to_model_window(encoding.get_ids());
             let ids = Tensor::from_array(([1usize, MAX_TOKENS], ids.to_vec())).ok()?;
             let mask_t = Tensor::from_array(([1usize, MAX_TOKENS], mask.to_vec())).ok()?;
+            // BGE models take a segment-ids input; single-segment text is all zeros.
+            let token_type_ids =
+                Tensor::from_array(([1usize, MAX_TOKENS], [0i64; MAX_TOKENS].to_vec())).ok()?;
             let mut session = self
                 .session
                 .lock()
@@ -163,6 +166,7 @@ mod ort_impl {
                 .run(ort::inputs![
                     "input_ids" => ids,
                     "attention_mask" => mask_t,
+                    "token_type_ids" => token_type_ids,
                 ])
                 .ok()?;
             let (_, hidden) = outputs["last_hidden_state"]
@@ -182,6 +186,7 @@ mod ort_impl {
         #[test]
         #[ignore = "needs the model artifact + ONNX Runtime; run on the host"]
         fn embed_bench() {
+            let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
             let embedder = crate::embed::from_env();
             let probe = "Summarize this quarterly report into three bullets for an executive audience.";
             let _ = embedder.embed(probe);
