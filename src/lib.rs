@@ -67,6 +67,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
+        .route("/v1/dashboard/api/timeseries", get(dashboard::timeseries))
         .route("/v1/dashboard/api/guard", get(dashboard::guard))
         .route("/v1/dashboard/api/operator/tenants", get(dashboard::operator_tenants))
         .route("/v1/dashboard/api/operator/summary", get(dashboard::operator_summary))

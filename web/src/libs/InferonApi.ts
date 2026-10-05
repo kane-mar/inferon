@@ -38,9 +38,15 @@ export type Summary = {
   scope: 'tenant' | 'operator';
   tenant_id: string | null;
   window_days: number;
+  offset_days: number;
   requests: number;
   errors: number;
   total_cost_usd: string;
+  avg_cost_usd: string;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  avg_ttft_ms: number | null;
+  avg_duration_ms: number | null;
   first_trace_at: string | null;
   last_trace_at: string | null;
 };
@@ -71,6 +77,24 @@ export type WasteFlag = {
 };
 
 export type Waste = Record<string, WasteFlag>;
+
+export type TimeseriesPoint = {
+  /** `YYYY-MM-DD` (server-side daily bucket). */
+  date: string;
+  requests: number;
+  errors: number;
+  cost_usd: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  avg_ttft_ms: number | null;
+  avg_duration_ms: number | null;
+};
+
+export type Timeseries = {
+  window_days: number;
+  offset_days: number;
+  points: TimeseriesPoint[];
+};
 
 export type KeyRow = {
   id: string;
@@ -160,8 +184,26 @@ export class InferonApi {
     return this.request<Me>('GET', '/auth/me', undefined, { cookie: auth });
   }
 
-  summary(days: number, cookie?: string): Promise<Summary> {
-    return this.request<Summary>('GET', `/v1/dashboard/api/summary${windowQuery(days)}`, undefined, { cookie });
+  summary(days: number, offset = 0, cookie?: string): Promise<Summary> {
+    return this.request<Summary>(
+      'GET',
+      `/v1/dashboard/api/summary${windowQuery(days, offset ? { offset } : {})}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  /**
+   * Daily buckets over the window, gap-filled server-side. `offset` shifts the
+   * window back by that many days — pass `offset: days` for the prior period.
+   */
+  timeseries(days: number, offset = 0, cookie?: string): Promise<Timeseries> {
+    return this.request<Timeseries>(
+      'GET',
+      `/v1/dashboard/api/timeseries${windowQuery(days, offset ? { offset } : {})}`,
+      undefined,
+      { cookie },
+    );
   }
 
   byModel(days: number, cookie?: string): Promise<ByModel> {

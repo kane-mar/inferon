@@ -79,7 +79,7 @@ describe('InferonApi — dashboard views', () => {
         last_trace_at: '2026-10-04',
       }),
     );
-    const summary = await makeApi(fetchImpl).summary(30, 'inferon_session=abc');
+    const summary = await makeApi(fetchImpl).summary(30, 0, 'inferon_session=abc');
 
     expect(summary.total_cost_usd).toBe('0.000007');
     expect(typeof summary.total_cost_usd).toBe('string');
@@ -87,6 +87,24 @@ describe('InferonApi — dashboard views', () => {
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
 
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/summary?days=30');
+  });
+
+  it('adds an offset for the comparison window and parses the daily series', async () => {
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValueOnce(
+      json({
+        window_days: 7,
+        offset_days: 7,
+        points: [
+          { date: '2026-09-29', requests: 2, errors: 0, cost_usd: '0.001', prompt_tokens: 10, completion_tokens: 4, avg_ttft_ms: 120.5, avg_duration_ms: 900 },
+        ],
+      }),
+    );
+    const series = await makeApi(fetchImpl).timeseries(7, 7);
+
+    expect(series.points[0]?.date).toBe('2026-09-29');
+    expect(series.points[0]?.cost_usd).toBe('0.001');
+    expect(series.points[0]?.avg_ttft_ms).toBe(120.5);
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://proxy:8080/v1/dashboard/api/timeseries?days=7&offset=7');
   });
 
   it('parses the by-model, by-prompt and waste views', async () => {

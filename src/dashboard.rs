@@ -18,11 +18,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Query params shared by the JSON APIs: `days` (window, default 7, clamp
-/// 1..=365) and `limit` (row cap for by-prompt, default 10).
+/// 1..=365), `limit` (row cap for by-prompt, default 10) and `offset` (days
+/// back the window ends; 0 = the current window, used for period comparison).
 #[derive(Debug, serde::Deserialize)]
 pub struct Window {
     days: Option<i64>,
     limit: Option<i64>,
+    offset: Option<i64>,
 }
 
 impl Window {
@@ -31,6 +33,11 @@ impl Window {
     }
     fn limit(&self) -> i64 {
         self.limit.unwrap_or(10).clamp(1, 100)
+    }
+    /// Days back from now where the window ends (0 = current, `days` = the
+    /// immediately-preceding period). Lets a caller diff two periods.
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).clamp(0, 3650)
     }
 }
 
@@ -236,19 +243,26 @@ async fn query_summary(
     scope_label: &str,
 ) -> Response {
     let days = window.days();
-    let row: Option<(i64, Decimal, i64, Option<String>, Option<String>)> =
+    let offset = window.offset();
+    let row: Option<(i64, Decimal, i64, i64, i64, Option<f64>, Option<f64>, Option<String>, Option<String>)> =
         match sqlx::query_as(
             "SELECT COUNT(*),
                     COALESCE(SUM(upstream_cost_usd), 0),
                     COUNT(*) FILTER (WHERE status_code >= 400),
+                    COALESCE(SUM(prompt_tokens), 0),
+                    COALESCE(SUM(completion_tokens), 0),
+                    AVG(time_to_first_token_ms)::float8,
+                    AVG(total_duration_ms)::float8,
                     MIN(created_at)::text,
                     MAX(created_at)::text
              FROM traces
              WHERE ($1::uuid IS NULL OR tenant_id = $1)
-               AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+               AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+               AND created_at < NOW() - ($3 * INTERVAL '1 day')",
         )
         .bind(tenant)
         .bind(days)
+        .bind(offset)
         .fetch_optional(&state.db)
         .await
         {
@@ -256,15 +270,36 @@ async fn query_summary(
             Err(e) => return db_err(e),
         };
 
-    let (requests, total_cost, errors, first_at, last_at) =
-        row.unwrap_or((0, Decimal::ZERO, 0, None, None));
+    let (
+        requests,
+        total_cost,
+        errors,
+        prompt_tokens,
+        completion_tokens,
+        avg_ttft_ms,
+        avg_duration_ms,
+        first_at,
+        last_at,
+    ) = row.unwrap_or((0, Decimal::ZERO, 0, 0, 0, None, None, None, None));
+    // Unit economics computed server-side so no float ever touches a cost.
+    let avg_cost = if requests > 0 {
+        (total_cost / Decimal::from(requests)).round_dp(8)
+    } else {
+        Decimal::ZERO
+    };
     json_ok(json!({
         "scope": scope_label,
         "tenant_id": tenant.map(|t| t.to_string()),
         "window_days": days,
+        "offset_days": offset,
         "requests": requests,
         "errors": errors,
         "total_cost_usd": total_cost.to_string(),
+        "avg_cost_usd": avg_cost.to_string(),
+        "total_prompt_tokens": prompt_tokens,
+        "total_completion_tokens": completion_tokens,
+        "avg_ttft_ms": avg_ttft_ms,
+        "avg_duration_ms": avg_duration_ms,
         "first_trace_at": first_at,
         "last_trace_at": last_at,
     }))
@@ -385,6 +420,78 @@ async fn query_waste(
     json_ok(out)
 }
 
+/// Daily buckets over the window, gap-filled with zero rows so the chart is
+/// continuous. `offset` shifts the window back (period comparison).
+async fn query_timeseries(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+) -> Response {
+    let days = window.days();
+    let offset = window.offset();
+    let rows: Vec<(String, i64, i64, Decimal, i64, i64, Option<f64>, Option<f64>)> =
+        match sqlx::query_as(
+            "SELECT to_char(b.day, 'YYYY-MM-DD'),
+                    COUNT(t.id),
+                    COUNT(t.id) FILTER (WHERE t.status_code >= 400),
+                    COALESCE(SUM(t.upstream_cost_usd), 0),
+                    COALESCE(SUM(t.prompt_tokens), 0),
+                    COALESCE(SUM(t.completion_tokens), 0),
+                    AVG(t.time_to_first_token_ms)::float8,
+                    AVG(t.total_duration_ms)::float8
+             FROM generate_series(
+                 (NOW() - (($2 + $3 - 1) * INTERVAL '1 day'))::date,
+                 (NOW() - ($3 * INTERVAL '1 day'))::date,
+                 '1 day'
+             ) AS b(day)
+             LEFT JOIN traces t
+               ON t.created_at::date = b.day::date
+              AND ($1::uuid IS NULL OR t.tenant_id = $1)
+             GROUP BY b.day ORDER BY b.day",
+        )
+        .bind(tenant)
+        .bind(days)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return db_err(e),
+        };
+
+    let points: Vec<Value> = rows
+        .into_iter()
+        .map(
+            |(
+                date,
+                requests,
+                errors,
+                cost,
+                prompt_tokens,
+                completion_tokens,
+                avg_ttft_ms,
+                avg_duration_ms,
+            )| {
+                json!({
+                    "date": date,
+                    "requests": requests,
+                    "errors": errors,
+                    "cost_usd": cost.to_string(),
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "avg_ttft_ms": avg_ttft_ms,
+                    "avg_duration_ms": avg_duration_ms,
+                })
+            },
+        )
+        .collect();
+    json_ok(json!({
+        "window_days": days,
+        "offset_days": offset,
+        "points": points,
+    }))
+}
+
 /// GET /v1/dashboard — self-contained HTML shell; data loads via the JSON APIs.
 pub async fn index() -> Html<&'static str> {
     Html(HTML)
@@ -434,6 +541,18 @@ pub async fn waste(
 ) -> Response {
     match tenant_or(&state, &headers).await {
         Ok(id) => query_waste(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/timeseries?days=30&offset=0 (tenant scope)
+pub async fn timeseries(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_timeseries(&state, Some(id), &window).await,
         Err(resp) => resp,
     }
 }
@@ -1743,12 +1862,18 @@ mod tests {
 
     #[test]
     fn window_defaults_and_clamps() {
-        assert_eq!(Window { days: None, limit: None }.days(), 7);
-        assert_eq!(Window { days: Some(3), limit: None }.days(), 3);
-        assert_eq!(Window { days: Some(9999), limit: None }.days(), 365);
-        assert_eq!(Window { days: Some(0), limit: None }.days(), 1);
-        assert_eq!(Window { days: None, limit: Some(500) }.limit(), 100);
-        assert_eq!(Window { days: None, limit: Some(3) }.limit(), 3);
+        let w = |days, limit, offset| Window { days, limit, offset };
+        assert_eq!(w(None, None, None).days(), 7);
+        assert_eq!(w(Some(3), None, None).days(), 3);
+        assert_eq!(w(Some(9999), None, None).days(), 365);
+        assert_eq!(w(Some(0), None, None).days(), 1);
+        assert_eq!(w(None, Some(500), None).limit(), 100);
+        assert_eq!(w(None, Some(3), None).limit(), 3);
+        // `offset` shifts the window back for period comparison.
+        assert_eq!(w(None, None, None).offset(), 0);
+        assert_eq!(w(None, None, Some(30)).offset(), 30);
+        assert_eq!(w(None, None, Some(-5)).offset(), 0);
+        assert_eq!(w(None, None, Some(99_999)).offset(), 3650);
     }
 
     // --- ITEM-019 dashboard polish ---

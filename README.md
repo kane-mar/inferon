@@ -176,7 +176,10 @@ expired cookie is treated as signed out, never an error.
 JSON APIs (all require `Authorization: Bearer <tenant key>` and are tenant-scoped —
 no tenant can see another tenant's data):
 
-- `GET /v1/dashboard/api/summary?days=7`
+- `GET /v1/dashboard/api/summary?days=7` (totals, tokens, avg cost/request, avg TTFT)
+- `GET /v1/dashboard/api/timeseries?days=30&offset=0` — daily buckets for the
+  charts; `offset` shifts the window back (`offset=days` fetches the prior
+  period for the compare view)
 - `GET /v1/dashboard/api/by-model?days=7`
 - `GET /v1/dashboard/api/by-prompt?days=7&limit=10`
 - `GET /v1/dashboard/api/waste?days=7`
