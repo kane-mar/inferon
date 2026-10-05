@@ -140,7 +140,8 @@ deploy() {
 bundle_upload() {
     local ip=$1 bundle
     bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
+    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web \
+        --exclude='web/node_modules' --exclude='web/.next'
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
     rm -f "$bundle"
 }
@@ -148,7 +149,7 @@ bundle_upload() {
 # Non-secret + optional env passed to compose. Values only travel over the ssh
 # command line (same channel as the operator key).
 compose_env() {
-    local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY'"
+    local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' NEXT_PUBLIC_APP_URL='https://$INFERON_HOST'"
     local var val
     for var in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_SECRET UPSTREAM_MASTER_KEY \
                OPERATOR_GITHUB_LOGINS ALERT_WEBHOOK_URL UPSTREAM_URL; do
@@ -175,8 +176,8 @@ remote_deploy() {
 remote_health() {
     local ip=$1
     for _ in $(seq 1 60); do
-        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" "curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1"; then
-            echo "healthz OK"
+        if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" "curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1"; then
+            echo "stack healthz (proxy + web) OK"
             return 0
         fi
         sleep 5

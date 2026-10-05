@@ -78,7 +78,8 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: |
           tar czf /tmp/durable.tgz Cargo.toml Cargo.lock Dockerfile \
-            docker-compose.yml Caddyfile .dockerignore .env.example src scripts db
+            docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web \
+            --exclude='web/node_modules' --exclude='web/.next'
 
       - name: Install SSH key
         if: steps.cfg.outputs.configured == 'true'
@@ -100,6 +101,7 @@ jobs:
             && docker compose up -d postgres redis \
             && ./scripts/migrate.sh \
             && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
+               NEXT_PUBLIC_APP_URL='https://$INFERON_HOST' \
                GITHUB_CLIENT_ID='$OAUTH_CLIENT_ID' GITHUB_CLIENT_SECRET='$OAUTH_CLIENT_SECRET' \
                SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
                OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
@@ -109,4 +111,15 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: |
           ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" \
-            'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && echo healthz-ok && exit 0; sleep 5; done; echo healthz-failed; exit 1'
+            'for i in $(seq 1 90); do if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then echo stack-healthy; exit 0; fi; sleep 5; done; echo stack-health-failed; exit 1'
+
+      - name: Public landing check
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "https://$INFERON_HOST/" | grep -q 'Inferon'; then
+              echo "public landing ok"; exit 0
+            fi
+            sleep 5
+          done
+          echo "public landing check failed" >&2; exit 1

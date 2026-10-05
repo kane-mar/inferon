@@ -74,7 +74,7 @@ cleanup() {
         psql "DELETE FROM users WHERE id = '$SMOKE_OTHER_ID';" >/dev/null 2>&1 || true
     fi
     rm -f "${DANCE_JAR:-}" "${MEM_JAR:-}"
-    "${COMPOSE[@]}" down >/dev/null 2>&1 || true
+    "${COMPOSE[@]}" --profile mock --profile prod down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -462,5 +462,27 @@ check_status "chat with revoked key -> 401 (AC2)" 401 \
     -H "Authorization: Bearer $MINTED_KEY" \
     -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
 echo "ok: revoked key stopped authenticating immediately"
+
+echo "-- ITEM-042e web surface (Next.js human surfaces) --"
+WEB_PORT="${WEB_PORT:-3000}"
+WEB="http://127.0.0.1:$WEB_PORT"
+"${COMPOSE[@]}" --profile prod up -d --build web
+for i in $(seq 1 120); do
+    if curl -fsS "$WEB/api/health" >/dev/null 2>&1; then
+        echo "ok: web healthy after ${i}s"
+        break
+    fi
+    sleep 1
+    [ "$i" = 120 ] && fail "web did not become healthy within 120s"
+done
+
+landing=$(curl -fsS "$WEB/")
+printf '%s' "$landing" | grep -q 'Know the' || fail "landing page did not render the Inferon hero"
+printf '%s' "$landing" | grep -q 'Inferon' || fail "landing page did not render the Inferon brand"
+echo "ok: landing page serves the Inferon hero"
+
+loc=$(curl -sS -o /dev/null -w '%{redirect_url}' "$WEB/dashboard")
+printf '%s' "$loc" | grep -q '/auth/login' || fail "dashboard without a session should redirect to /auth/login, got: $loc"
+echo "ok: dashboard without a session redirects to /auth/login"
 
 echo "ALL SMOKE CHECKS PASSED"

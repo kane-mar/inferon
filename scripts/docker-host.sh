@@ -89,7 +89,8 @@ deploy() {
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
         "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 >/dev/null 2>&1 && systemctl enable --now docker >/dev/null 2>&1 && docker --version"
     bundle=$(mktemp /tmp/inferon-deploy.XXXXXX)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml .dockerignore .env.example src scripts db
+    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web \
+        --exclude='web/node_modules' --exclude='web/.next'
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/deploy.tgz"
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
         "mkdir -p /opt/inferon && tar xzf /tmp/deploy.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh && ./scripts/test-schema.sh && ./scripts/smoke.sh"

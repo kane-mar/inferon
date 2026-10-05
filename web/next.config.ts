@@ -5,6 +5,8 @@ import './src/libs/Env';
 
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
+  // Emit a self-contained server bundle for the container image (042e).
+  output: 'standalone',
   devIndicators: {
     position: 'bottom-right',
   },

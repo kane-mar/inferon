@@ -8,5 +8,14 @@
 }
 
 {$SITE_ADDRESS} {
-	reverse_proxy proxy:8080
+	# The Rust data plane owns the API + auth surfaces.
+	@api path /v1/* /auth/* /healthz
+	handle @api {
+		reverse_proxy proxy:8080
+	}
+
+	# Everything else is the Next.js human surfaces (ITEM-042e).
+	handle {
+		reverse_proxy web:3000
+	}
 }
