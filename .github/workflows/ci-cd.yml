@@ -101,12 +101,13 @@ jobs:
             && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh \
             && docker compose up -d postgres redis \
             && ./scripts/migrate.sh \
-            && INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
+            && export INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
                NEXT_PUBLIC_APP_URL='https://$INFERON_HOST' \
                GITHUB_CLIENT_ID='$OAUTH_CLIENT_ID' GITHUB_CLIENT_SECRET='$OAUTH_CLIENT_SECRET' \
                SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
                OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
-               docker compose --profile prod up -d --build"
+               && docker compose --profile prod up -d --build \
+               && docker compose --profile prod up -d --force-recreate caddy"
 
       - name: Health check
         if: steps.cfg.outputs.configured == 'true'

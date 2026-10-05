@@ -171,7 +171,9 @@ remote_deploy() {
          && cd /opt/inferon && chmod +x scripts/*.sh \
          && docker compose up -d postgres redis \
          && ./scripts/migrate.sh \
-         && $env_args docker compose --profile prod up -d --build"
+         && export $env_args \
+         && docker compose --profile prod up -d --build \
+         && docker compose --profile prod up -d --force-recreate caddy"
 }
 
 remote_health() {
