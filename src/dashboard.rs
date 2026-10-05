@@ -788,10 +788,18 @@ fn console_html(
         .join("\n");
     format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Inferon — operator console</title>\
-<style>body{{font:14px/1.5 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1a202c}}\
-h1{{font-size:1.3rem}}table{{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem}}\
-th,td{{border:1px solid #e2e8f0;padding:.25rem .6rem;text-align:left;font-size:.9rem}}\
-.muted{{color:#718096}}</style></head>\
+<style>\
+:root{{--ink:#1e1e1e;--paper:#fefefe;--muted:#6f6f6f;--line:#e5e5e5}}\
+*{{box-sizing:border-box}}\
+body{{font:14px/1.6 ui-sans-serif,system-ui,-apple-system,\"Segoe UI\",Roboto,sans-serif;max-width:960px;margin:3rem auto;padding:0 1.5rem;color:var(--ink);background:var(--paper)}}\
+h1{{font-size:1.25rem;letter-spacing:-.02em}}\
+h2{{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:500;margin-top:2rem}}\
+table{{border-collapse:collapse;width:100%;margin:.5rem 0 1.5rem}}\
+th,td{{border-bottom:1px solid var(--line);padding:.45rem .6rem;text-align:left;font-size:.85rem}}\
+th{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;font-size:.7rem;color:var(--muted);font-weight:500}}\
+.muted{{color:var(--muted)}}\
+b{{font-variant-numeric:tabular-nums}}\
+</style></head>\
 <body><h1>Inferon — operator console</h1>\
 <p class=\"muted\">last {days} days · read-only</p>\
 <p><b>{}</b> tenants · {total_requests} requests · {total_errors} errors · {total_fallbacks} guard fallbacks · <b>{totals_cost}</b> spend</p>\
@@ -1280,20 +1288,24 @@ const HTML: &str = r#"<!doctype html>
 <head>
 <meta charset="utf-8"><title>Inferon cost dashboard</title>
 <style>
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a202c; }
-  h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 1.5rem; }
-  .keyline input { width: 26rem; font-family: monospace; }
-  button { margin-right: .25rem; padding: .15rem .6rem; cursor: pointer; }
+  :root { --ink:#1e1e1e; --paper:#fefefe; --muted:#6f6f6f; --line:#e5e5e5; --accent:#f386a1; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 3rem auto; padding: 0 1.5rem; color: var(--ink); background: var(--paper); }
+  h1 { font-size: 1.25rem; letter-spacing: -.02em; }
+  h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 500; margin-top: 2rem; }
+  .keyline input { width: 26rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); }
+  button { margin-right: .25rem; padding: .35rem .8rem; cursor: pointer; border: 1px solid var(--ink); border-radius: 4px; background: var(--ink); color: var(--paper); font-weight: 500; }
+  button:hover { opacity: .85; }
   .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0; }
-  .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: .5rem 1rem; min-width: 9rem; }
-  .card .num { font-size: 1.4rem; font-weight: 600; }
-  .bar { background: #3182ce; color: #fff; padding: 2px 8px; margin: 2px 0; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .card { border: 1px solid var(--line); border-radius: 6px; padding: .6rem 1rem; min-width: 9rem; }
+  .card .num { font-size: 1.4rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar { background: var(--accent); color: var(--ink); padding: 2px 8px; margin: 2px 0; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .wasteflag { margin: .35rem 0; }
-  .err { color: #c53030; }
-  .empty { border: 1px dashed #cbd5e0; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; color: #4a5568; background: #f7fafc; }
-  .empty code { background: #edf2f7; padding: .1rem .35rem; border-radius: 3px; }
-  .why { color: #4a5568; font-size: .9rem; margin-top: .1rem; }
-  .muted { color: #718096; }
+  .err { color: #d6455f; }
+  .empty { border: 1px dashed var(--line); border-radius: 6px; padding: 1.5rem; margin: 1rem 0; color: var(--muted); background: var(--paper); }
+  .empty code { background: #f4f4f4; padding: .1rem .35rem; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .why { color: var(--muted); font-size: .9rem; margin-top: .1rem; }
+  .muted { color: var(--muted); }
 </style>
 </head>
 <body>

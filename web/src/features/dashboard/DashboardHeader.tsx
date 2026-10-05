@@ -31,7 +31,7 @@ export const DashboardHeader = (props: {
         "
         >
           <ul className="
-            flex flex-row items-center gap-x-3 text-lg font-medium
+            flex flex-row items-center gap-x-3 text-sm font-medium
             [&_a]:opacity-75
             [&_a:hover]:opacity-100
           "

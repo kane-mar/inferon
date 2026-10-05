@@ -49,20 +49,17 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
 
   return (
     <>
-      <div className="shadow-md">
-        <div className="
-          mx-auto flex max-w-7xl items-center justify-between px-3 py-4
-        "
-        >
+      <header className="sticky top-0 z-20 border-b bg-background">
+        <div className="mx-auto flex max-w-7xl items-center justify-between p-3">
           <DashboardHeader menu={menu} />
         </div>
-      </div>
+      </header>
 
-      <div className="min-h-[calc(100vh-72px)] bg-muted">
+      <main className="min-h-[calc(100vh-57px)] bg-muted">
         <div className="mx-auto max-w-7xl px-3 pt-6 pb-16">
           {props.children}
         </div>
-      </div>
+      </main>
     </>
   );
 }
