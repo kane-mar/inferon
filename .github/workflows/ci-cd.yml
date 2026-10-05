@@ -77,9 +77,10 @@ jobs:
       - name: Package runtime bundle
         if: steps.cfg.outputs.configured == 'true'
         run: |
-          tar czf /tmp/durable.tgz Cargo.toml Cargo.lock Dockerfile \
-            docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web \
-            --exclude='web/node_modules' --exclude='web/.next'
+          tar czf /tmp/durable.tgz \
+            --exclude='web/node_modules' --exclude='web/.next' \
+            Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile \
+            .dockerignore .env.example src scripts db web
 
       - name: Install SSH key
         if: steps.cfg.outputs.configured == 'true'

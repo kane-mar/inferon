@@ -140,8 +140,9 @@ deploy() {
 bundle_upload() {
     local ip=$1 bundle
     bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
-    tar czf "$bundle" Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web \
-        --exclude='web/node_modules' --exclude='web/.next'
+    tar czf "$bundle" \
+        --exclude='web/node_modules' --exclude='web/.next' \
+        Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
     rm -f "$bundle"
 }
