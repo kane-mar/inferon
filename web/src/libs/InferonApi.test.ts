@@ -1,5 +1,6 @@
+import type { FetchLike } from './InferonApi';
 import { describe, expect, it, vi } from 'vitest';
-import { formatUsd, InferonApi, InferonApiError, type FetchLike } from './InferonApi';
+import { formatUsd, InferonApi, InferonApiError } from './InferonApi';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -23,15 +24,20 @@ describe('InferonApi — session forwarding', () => {
       github_login: 'kane-mar',
       is_operator: true,
     });
+
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+
     expect(url).toBe('http://proxy:8080/auth/me');
     expect(new Headers(init.headers).get('cookie')).toBe('inferon_session=abc');
   });
 
   it('sends no cookie header when there is no session', async () => {
     const fetchImpl = vi.fn(async () => json({}, 401));
+
     await expect(makeApi(fetchImpl).me()).rejects.toBeInstanceOf(InferonApiError);
+
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+
     expect(new Headers(init?.headers).has('cookie')).toBe(false);
   });
 });
@@ -41,6 +47,7 @@ describe('InferonApi — error mapping', () => {
     const fetchImpl = vi.fn(async () =>
       json({ error: { message: 'not signed in', type: 'unauthorized' } }, 401),
     );
+
     await expect(makeApi(fetchImpl).me()).rejects.toMatchObject({
       status: 401,
       type: 'unauthorized',
@@ -50,6 +57,7 @@ describe('InferonApi — error mapping', () => {
 
   it('falls back to a generic type when the body is not JSON', async () => {
     const fetchImpl = vi.fn(async () => new Response('<html>502</html>', { status: 502 }));
+
     await expect(makeApi(fetchImpl).summary(7)).rejects.toMatchObject({
       status: 502,
       type: 'http_error',
@@ -75,7 +83,9 @@ describe('InferonApi — dashboard views', () => {
 
     expect(summary.total_cost_usd).toBe('0.000007');
     expect(typeof summary.total_cost_usd).toBe('string');
+
     const [url] = fetchImpl.mock.calls[0] as unknown as [string];
+
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/summary?days=30');
   });
 
@@ -87,6 +97,7 @@ describe('InferonApi — dashboard views', () => {
       .mockResolvedValueOnce(json({ cache_miss: { requests: 1, spend_usd: '0.01', savings_est_usd: '0.00' } }));
 
     const api = makeApi(fetchImpl);
+
     expect((await api.byModel(7)).models[0]?.cost_usd).toBe('0.001');
     expect((await api.byPrompt(7, 5)).prompts[0]?.system_prompt_hash).toBe('h1');
     expect((await api.waste(7)).cache_miss?.savings_est_usd).toBe('0.00');
@@ -113,7 +124,9 @@ describe('InferonApi — tenant management', () => {
     const created = await makeApi(fetchImpl).createKey('ci', 'inferon_session=abc');
 
     expect(created.key).toBe('sk-inferon-abc');
+
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/keys');
     expect(init.method).toBe('POST');
     expect(init.body).toBe(JSON.stringify({ label: 'ci' }));
@@ -141,6 +154,7 @@ describe('InferonApi — operator views', () => {
     await makeApi(fetchImpl).operatorTenants(7, { operatorKey: 'sk-op' });
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/operator/tenants?days=7');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer sk-op');
   });

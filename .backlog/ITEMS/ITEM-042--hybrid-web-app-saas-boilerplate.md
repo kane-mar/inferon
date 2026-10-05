@@ -5,12 +5,12 @@
 **So that** the product presents like a real SaaS instead of server-rendered
 Rust HTML tables — without putting the data plane at risk
 
-**Status:** refined + in progress (042a). PO decision 2026-10-04: **Option A
-(hybrid)** — the Rust proxy/telemetry/guard/router stay the data plane; the
-Next.js app from `ixartz/SaaS-Boilerplate` (MIT, Next 16 + React 19 + TS +
-Tailwind + shadcn/ui, Drizzle, Clerk, Sentry, i18n, Vitest/Playwright) becomes
-the UI. Chosen over a full rewrite (Option B) to protect the live, verified
-platform, and over cherry-picking (Option C) which wouldn't deliver the app.
+**Status:** refined + in progress (042c). 042a–c landed: template vendored under
+`web/` (MIT `LICENSE`/attribution kept) with a typed Inferon API seam
+(`web/src/libs/InferonApi.ts` + Vitest) and the vendor strip (Clerk, Sentry,
+Drizzle + migrations, Checkly, Crowdin, template workflows, dependent pages).
+Web CI job (next typegen → tsc → vitest unit) green. Remaining: 042d pages, 042e
+deploy, 042f CI/README.
 
 **Decision (A1, default): keep our GitHub OAuth + sessions** (`/auth/*` on the
 Rust proxy). Clerk is stripped in 042c — the accounts horizon ITEM-034..040 is

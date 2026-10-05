@@ -1,14 +1,11 @@
-import { UserButton } from '@clerk/nextjs';
-import { useLocale } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { ActiveLink } from '@/components/ActiveLink';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 
 import { Separator } from '@/components/ui/separator';
 import { Logo } from '@/templates/Logo';
-import { getI18nPath } from '@/utils/Helpers';
 import { MobileNavigation } from './MobileNavigation';
-import { OrganizationMenu } from './OrganizationMenu';
 import { SlashIcon } from './SlashIcon';
 
 export const DashboardHeader = (props: {
@@ -17,7 +14,7 @@ export const DashboardHeader = (props: {
     label: string;
   }[];
 }) => {
-  const locale = useLocale();
+  const t = useTranslations('DashboardHeader');
 
   return (
     <>
@@ -27,8 +24,6 @@ export const DashboardHeader = (props: {
         </Link>
 
         <SlashIcon />
-
-        <OrganizationMenu />
 
         <nav className="
           ml-3
@@ -65,16 +60,17 @@ export const DashboardHeader = (props: {
           </li>
 
           <li>
-            <UserButton
-              userProfileMode="navigation"
-              userProfileUrl={getI18nPath('/dashboard/user-profile', locale)}
-              afterSwitchSessionUrl="/dashboard"
-              appearance={{
-                elements: {
-                  rootBox: 'px-2 py-1.5',
-                },
-              }}
-            />
+            <form action="/auth/logout" method="post">
+              <button
+                type="submit"
+                className="
+                  px-2 py-1.5 text-sm font-medium opacity-75
+                  hover:opacity-100
+                "
+              >
+                {t('sign_out')}
+              </button>
+            </form>
           </li>
         </ul>
       </div>

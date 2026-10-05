@@ -17,8 +17,6 @@
     "chai",
     // Use Zod v4 instead of v3
     "zod/v3",
-    // Sentry is imported with `import *`
-    "@sentry/nextjs",
     // Use Input from Shadcn UI instead of Input from Postcss
     "postcss"
   ],

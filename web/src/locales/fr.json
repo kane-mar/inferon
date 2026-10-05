@@ -97,11 +97,12 @@
     "meta_description": "Créez un compte sans effort grâce à notre processus d'inscription intuitif."
   },
   "DashboardLayout": {
-    "meta_title": "Tableau de bord du SaaS Template",
-    "meta_description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec Next.js, TypeScript, Shadcn UI et Tailwind CSS.",
-    "home": "Accueil",
-    "members": "Membres",
-    "settings": "Réglages"
+    "meta_title": "Tableau de bord Inferon",
+    "meta_description": "Votre tableau de bord Inferon des coûts et du routage.",
+    "home": "Accueil"
+  },
+  "DashboardHeader": {
+    "sign_out": "Déconnexion"
   },
   "DashboardIndexPage": {
     "title_bar": "Tableau de bord",
@@ -110,13 +111,5 @@
     "message_state_description": "Personnalisez cette page en modifiant le fichier dans <code>dashboard/page.tsx</code>.",
     "message_state_alternative": "Besoin de fonctionnalités avancées ? Next.js 16 & React 19, Multi-tenancy & Équipes, Rôles & Permissions, Shadcn UI,\nTypesafety de bout en bout avec oRPC, Paiement Stripe, Mode clair / sombre. Essayez <url></url>.",
     "max_message": "Ou, besoin d'une stack d'auth auto-hébergée (Better Auth) ? Essayez <url></url>."
-  },
-  "UserProfilePage": {
-    "title_bar": "Profil utilisateur",
-    "title_bar_description": "Afficher et gérer votre profil utilisateur"
-  },
-  "OrganizationProfilePage": {
-    "title_bar": "Gestion de l’organisation",
-    "title_bar_description": "Gérer votre organisation"
   }
 }

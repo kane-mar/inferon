@@ -127,6 +127,14 @@ export type OperatorAlerts = { alerts: OperatorAlertRow[]; window_days: number }
 
 type Options = { baseUrl?: string; fetchImpl?: FetchLike };
 
+const windowQuery = (days: number, extra: Record<string, number> = {}): string => {
+  const params = new URLSearchParams({ days: String(days) });
+  for (const [key, value] of Object.entries(extra)) {
+    params.set(key, String(value));
+  }
+  return `?${params.toString()}`;
+};
+
 export class InferonApi {
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
@@ -154,24 +162,24 @@ export class InferonApi {
   }
 
   summary(days: number, cookie?: string): Promise<Summary> {
-    return this.request<Summary>('GET', `/v1/dashboard/api/summary${window(days)}`, undefined, { cookie });
+    return this.request<Summary>('GET', `/v1/dashboard/api/summary${windowQuery(days)}`, undefined, { cookie });
   }
 
   byModel(days: number, cookie?: string): Promise<ByModel> {
-    return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${window(days)}`, undefined, { cookie });
+    return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${windowQuery(days)}`, undefined, { cookie });
   }
 
   byPrompt(days: number, limit = 10, cookie?: string): Promise<ByPrompt> {
     return this.request<ByPrompt>(
       'GET',
-      `/v1/dashboard/api/by-prompt${window(days, { limit })}`,
+      `/v1/dashboard/api/by-prompt${windowQuery(days, { limit })}`,
       undefined,
       { cookie },
     );
   }
 
   waste(days: number, cookie?: string): Promise<Waste> {
-    return this.request<Waste>('GET', `/v1/dashboard/api/waste${window(days)}`, undefined, { cookie });
+    return this.request<Waste>('GET', `/v1/dashboard/api/waste${windowQuery(days)}`, undefined, { cookie });
   }
 
   keys(cookie?: string): Promise<KeysResponse> {
@@ -199,19 +207,19 @@ export class InferonApi {
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {
-    return this.request('GET', `/v1/dashboard/api/operator/summary${window(days)}`, undefined, auth);
+    return this.request('GET', `/v1/dashboard/api/operator/summary${windowQuery(days)}`, undefined, auth);
   }
 
   operatorTenants(days: number, auth: Auth): Promise<OperatorTenants> {
-    return this.request('GET', `/v1/dashboard/api/operator/tenants${window(days)}`, undefined, auth);
+    return this.request('GET', `/v1/dashboard/api/operator/tenants${windowQuery(days)}`, undefined, auth);
   }
 
   operatorGuard(days: number, auth: Auth): Promise<OperatorGuard> {
-    return this.request('GET', `/v1/dashboard/api/operator/guard${window(days)}`, undefined, auth);
+    return this.request('GET', `/v1/dashboard/api/operator/guard${windowQuery(days)}`, undefined, auth);
   }
 
   operatorAlerts(days: number, auth: Auth): Promise<OperatorAlerts> {
-    return this.request('GET', `/v1/dashboard/api/operator/alerts${window(days)}`, undefined, auth);
+    return this.request('GET', `/v1/dashboard/api/operator/alerts${windowQuery(days)}`, undefined, auth);
   }
 
   private async request<T>(
@@ -250,14 +258,6 @@ export class InferonApi {
     return payload as T;
   }
 }
-
-const window = (days: number, extra: Record<string, number> = {}): string => {
-  const params = new URLSearchParams({ days: String(days) });
-  for (const [key, value] of Object.entries(extra)) {
-    params.set(key, String(value));
-  }
-  return `?${params.toString()}`;
-};
 
 /**
  * Render a decimal cost string (or cents-style string) in the UI without ever

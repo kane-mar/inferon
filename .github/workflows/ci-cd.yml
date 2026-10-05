@@ -29,7 +29,6 @@ jobs:
       # next.config.ts loads the env schema; typegen/typecheck run without a
       # populated environment (real validation happens at runtime).
       SKIP_ENV_VALIDATION: '1'
-      NEXT_PUBLIC_SENTRY_DISABLED: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
