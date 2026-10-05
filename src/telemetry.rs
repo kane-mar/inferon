@@ -173,7 +173,10 @@ pub async fn telemetry_worker(
                         }
                         None => 0,
                     };
-                    // Enrich off the hot path (ITEM-006): lint + cost.
+                    // Enrich off the hot path (ITEM-006): lint + cost. An
+                    // unlisted model is costed at the default row — surface it
+                    // once instead of silently over/under-charging.
+                    cost::warn_if_unpriced(&msg.request_model);
                     msg.waste_detected = linter::lint(&msg, repeat_count);
                     msg.upstream_cost_usd = cost::calculate_cost(
                         &msg.request_model,

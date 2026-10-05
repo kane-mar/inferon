@@ -12,6 +12,10 @@
 //!
 //! NOTE: single off-peak rate pairs — DeepSeek bills peak at 2x, so these are
 //! labeled estimates, not invoices.
+//!
+//! A model with no matching row is costed at the default $3.00/$15.00 per 1M
+//! and flagged once per model via [`warn_if_unpriced`] — a silent fall-through
+//! here once overcharged `deepseek-flash` ~13.7x.
 
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -25,24 +29,56 @@ pub struct Price {
     pub completion: Decimal,
 }
 
-/// Model-aware price lookup (USD per 1M tokens). Prefix-tolerant so dated
-/// snapshots price correctly. `deepseek-chat` and `deepseek-flash` are aliases
-/// of v4-flash.
-pub fn price_for(model: &str) -> Price {
+/// Explicit price row for a model, or `None` when it is absent from the table.
+fn lookup(model: &str) -> Option<Price> {
     if model.starts_with("deepseek-v4-pro") {
-        hit("0.66", "0.022", "1.98")
+        Some(hit("0.66", "0.022", "1.98"))
     } else if model.starts_with("deepseek-chat")
         || model.starts_with("deepseek-flash")
         || model.starts_with("deepseek-v4-flash")
     {
-        hit("0.22", "0.007", "0.66")
+        Some(hit("0.22", "0.007", "0.66"))
     } else if model.starts_with("gpt-4o-mini") {
-        miss_only("0.15", "0.60")
+        Some(miss_only("0.15", "0.60"))
     } else if model.starts_with("gpt-4o") {
-        miss_only("2.50", "10.00")
+        Some(miss_only("2.50", "10.00"))
     } else {
-        miss_only("3.00", "15.00")
+        None
     }
+}
+
+/// Model-aware price lookup (USD per 1M tokens). Prefix-tolerant so dated
+/// snapshots price correctly. `deepseek-chat` and `deepseek-flash` are aliases
+/// of v4-flash. Unknown models fall back to the default row; use [`is_priced`]
+/// to tell the two apart.
+pub fn price_for(model: &str) -> Price {
+    lookup(model).unwrap_or_else(|| miss_only("3.00", "15.00"))
+}
+
+/// True when the model has an explicit price row (i.e. not the fallback default).
+pub fn is_priced(model: &str) -> bool {
+    lookup(model).is_some()
+}
+
+/// Warn, once per model, that it has no price row and is being costed at the
+/// default ($3.00/M input, $15.00/M output). Returns whether this call actually
+/// warned — the dedupe keeps a chatty unknown model to a single line.
+pub fn warn_if_unpriced(model: &str) -> bool {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let first = SEEN
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(model.to_string());
+    if first {
+        tracing::warn!(
+            model,
+            "no price row — costed at the default $3.00/$15.00 per 1M; add it to cost::price_for if that is wrong"
+        );
+    }
+    first
 }
 
 /// Upstream cost of a request in USD. `cached_tokens` (provider-reported
@@ -193,5 +229,72 @@ mod tests {
         // mini = 1000*2.35/1M + 500*9.40/1M = 0.00235 + 0.00470 = 0.007050
         assert_eq!(savings_if_mini(1000, 500), dec("0.007050"));
         assert_eq!(savings_if_mini(0, 0), dec("0"));
+    }
+
+    #[test]
+    fn only_listed_models_have_an_explicit_row() {
+        for priced in [
+            "deepseek-flash",
+            "deepseek-chat",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "gpt-4o",
+            "gpt-4o-mini",
+        ] {
+            assert!(is_priced(priced), "{priced} should be priced");
+        }
+        // Unlisted models fall back to the default row and must be detectable.
+        for unpriced in ["deepseek-reasoner", "some-future-model"] {
+            assert!(!is_priced(unpriced), "{unpriced} should be flagged as unpriced");
+            assert_eq!(price_for(unpriced), mk("3.00", "15.00"));
+        }
+    }
+
+    /// Minimal `MakeWriter` so the warning test can read what was logged.
+    #[derive(Clone, Default)]
+    struct CapturedLog(std::sync::Arc<std::sync::Mutex<String>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().push_str(&String::from_utf8_lossy(buf));
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+        type Writer = CapturedLog;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn an_unpriced_model_warns_once_naming_the_default_row() {
+        let log = CapturedLog::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(log.clone())
+            .with_max_level(tracing::Level::WARN)
+            .finish();
+        let (first, second) = tracing::subscriber::with_default(subscriber, || {
+            (
+                warn_if_unpriced("future-model-2099"),
+                warn_if_unpriced("future-model-2099"),
+            )
+        });
+        assert!(first, "warns on the first sighting");
+        assert!(!second, "deduped on the second sighting");
+        let output = log.0.lock().unwrap().clone();
+        assert_eq!(
+            output.matches("future-model-2099").count(),
+            1,
+            "exactly one line: {output}"
+        );
+        assert!(
+            output.contains("default"),
+            "names the default fallback: {output}"
+        );
     }
 }
