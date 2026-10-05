@@ -1,10 +1,24 @@
 import type { Metadata, Viewport } from 'next';
 import { hasLocale, NextIntlClientProvider } from 'next-intl';
 import { setRequestLocale } from 'next-intl/server';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import { notFound } from 'next/navigation';
-import { DemoBadge } from '@/components/DemoBadge';
 import { routing } from '@/libs/I18nRouting';
 import '@/styles/global.css';
+
+// Self-hosted at build time (no runtime CDN) — the design system's two faces:
+// Inter for UI, JetBrains Mono for labels/code (see styles/global.css).
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-jetbrains-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   icons: [
@@ -53,12 +67,17 @@ export default async function RootLayout(props: {
   setRequestLocale(locale);
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html
+      lang={locale}
+      className={`
+        ${inter.variable}
+        ${jetbrainsMono.variable}
+      `}
+      suppressHydrationWarning
+    >
       <body>
         <NextIntlClientProvider>
           {props.children}
-
-          <DemoBadge />
         </NextIntlClientProvider>
       </body>
     </html>

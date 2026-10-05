@@ -234,10 +234,33 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
             <table className="mt-4 w-full text-left text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
-                  <th className="py-2 font-medium">{t('model')}</th>
-                  <th className="py-2 text-right font-medium">{t('requests')}</th>
-                  <th className="py-2 text-right font-medium">{t('tokens')}</th>
-                  <th className="py-2 text-right font-medium">{t('cost')}</th>
+                  <th className="
+                    py-2 font-mono text-xs font-medium tracking-wide uppercase
+                  "
+                  >
+                    {t('model')}
+                  </th>
+                  <th className="
+                    py-2 text-right font-mono text-xs font-medium tracking-wide
+                    uppercase
+                  "
+                  >
+                    {t('requests')}
+                  </th>
+                  <th className="
+                    py-2 text-right font-mono text-xs font-medium tracking-wide
+                    uppercase
+                  "
+                  >
+                    {t('tokens')}
+                  </th>
+                  <th className="
+                    py-2 text-right font-mono text-xs font-medium tracking-wide
+                    uppercase
+                  "
+                  >
+                    {t('cost')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -307,10 +330,34 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b text-muted-foreground">
-                      <th className="py-2 font-medium">{t('prompt_hash')}</th>
-                      <th className="py-2 text-right font-medium">{t('requests')}</th>
-                      <th className="py-2 text-right font-medium">{t('prompt_tokens')}</th>
-                      <th className="py-2 text-right font-medium">{t('cost')}</th>
+                      <th className="
+                        py-2 font-mono text-xs font-medium tracking-wide
+                        uppercase
+                      "
+                      >
+                        {t('prompt_hash')}
+                      </th>
+                      <th className="
+                        py-2 text-right font-mono text-xs font-medium
+                        tracking-wide uppercase
+                      "
+                      >
+                        {t('requests')}
+                      </th>
+                      <th className="
+                        py-2 text-right font-mono text-xs font-medium
+                        tracking-wide uppercase
+                      "
+                      >
+                        {t('prompt_tokens')}
+                      </th>
+                      <th className="
+                        py-2 text-right font-mono text-xs font-medium
+                        tracking-wide uppercase
+                      "
+                      >
+                        {t('cost')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

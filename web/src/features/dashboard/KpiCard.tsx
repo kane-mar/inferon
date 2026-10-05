@@ -27,7 +27,8 @@ export const KpiCard = (props: {
     "
     >
       <div className="
-        text-xs font-medium tracking-wide text-muted-foreground uppercase
+        font-mono text-xs font-medium tracking-wide text-muted-foreground
+        uppercase
       "
       >
         {props.label}
