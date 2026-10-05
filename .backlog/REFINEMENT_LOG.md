@@ -124,3 +124,27 @@ newer-CPU proxy tier measures the existing artifact <3 ms. Guard chain
   data since 2026-09-05 is lost. PO decision needed: restore-from-snapshot (R1)
   vs rebuild fresh (R2) vs stay down (R3) — ~$6/mo either way.
 - Blocks: ITEM-028 host measurement and all live verification.
+
+## 2026-10-06 — control-plane horizon captured (ITEM-043..048)
+
+PO review: the data plane is well ahead of the tenant-facing configuration. A
+tenant cannot bring their own provider, choose models, set fallback rules, or
+configure routing/budget from the UI, and the onboarding flow does not back the
+"point your SDK at it" claim. Captured six items, ranked above ITEM-018:
+
+- **ITEM-043 Provider provisioning** — tenant adds encrypted provider creds
+  (deepseek/openai/anthropic/openai-compatible); the proxy resolves the tenant's
+  provider; supersedes the shared platform key. Foundational.
+- **ITEM-044 Model catalog & selection** — per-tenant enable/disable + default,
+  metadata sharing one source with the cost engine.
+- **ITEM-045 Fallback & routing rules** — ordered chain with triggers
+  (error/timeout/429/guard); generalizes the guard's frontier replay.
+- **ITEM-047 Dashboard spend breakdowns & limits** — by provider/model/key/prompt
+  + per-key caps; reuses the 2026-10-05 chart primitives.
+- **ITEM-048 SDK onboarding flow** — connect page (base URL + key + snippets)
+  that detects the first trace.
+- **ITEM-046 Routing policy & budget controls** — UI for ITEM-015/016.
+
+Ranking rationale: 043 → 044 → 045 are dependency-ordered and are the minimum for
+a tenant to run their own traffic; 047/048 make it usable; 046 is power-user
+configuration. ITEM-018 (the PO handoff) now sits after the control plane.
