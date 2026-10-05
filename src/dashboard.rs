@@ -812,7 +812,7 @@ async fn mint_key_payload(
     label: &str,
 ) -> Result<serde_json::Value, String> {
     let raw = crate::mint_client_key();
-    let hash = crate::tenant_hash(&raw);
+    let hash = crate::sha256_hex(&raw);
     let key_id = state
         .tenant_store
         .insert_api_key(tenant_id, label, &hash)

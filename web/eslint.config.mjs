@@ -1,7 +1,6 @@
 import antfu from '@antfu/eslint-config';
 import eslintPluginBetterTailwindcss from 'eslint-plugin-better-tailwindcss';
 import playwright from 'eslint-plugin-playwright';
-import storybook from 'eslint-plugin-storybook';
 
 export default antfu(
   {
@@ -54,8 +53,6 @@ export default antfu(
     ],
     ...playwright.configs['flat/recommended'],
   },
-  // --- Storybook Rules ---
-  ...storybook.configs['flat/recommended'],
   // --- Custom Rule Overrides ---
   {
     rules: {

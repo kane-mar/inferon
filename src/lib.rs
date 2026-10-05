@@ -11,6 +11,15 @@ pub mod embed;
 pub mod linter;
 pub mod router;
 pub mod session;
+pub mod tenant;
+pub mod telemetry;
+pub mod usage;
+
+pub use tenant::{ApiKeyInfo, InMemoryTenantStore, PostgresTenantStore, Tenant, TenantStore};
+pub use telemetry::{load_system_prompt_counts, telemetry_worker, PostgresTraceSink, TraceMessage, TraceSink};
+pub use usage::{usage_from_sse_bytes, Usage};
+
+use crate::usage::{system_prompt_hash, usage_from_json};
 
 use axum::{
     body::Body,
@@ -23,682 +32,15 @@ use axum::{
 use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde_json::Value;
-use sqlx::types::Json;
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const MAX_REQUEST_BYTES: usize = 10 * 1024 * 1024;
-
-/// A resolved tenant. The upstream key is Inferon-held (the tenant's master
-/// key); client-presented API keys are only ever stored/compared as SHA-256.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tenant {
-    pub id: Uuid,
-    pub upstream_openai_key: Option<String>,
-}
-
-/// Metadata for one `api_keys` row (ITEM-034). Only metadata is exposed — key
-/// hashes and key material are never returned by the store. Timestamps render
-/// as text so the store stays chrono-free.
-#[derive(Clone, Debug)]
-pub struct ApiKeyInfo {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub label: String,
-    pub created_at: String,
-    pub revoked_at: Option<String>,
-    pub last_used_at: Option<String>,
-}
-
-impl ApiKeyInfo {
-    pub fn revoked(&self) -> bool {
-        self.revoked_at.is_some()
-    }
-}
-
-/// Lookup + key-management seam over tenants and their `api_keys` rows.
-/// InMemoryTenantStore backs unit tests; PostgresTenantStore is the production
-/// store (schema: tenants + api_keys; auth resolves active keys only — a
-/// revoked key stops authenticating immediately, ITEM-034 AC2).
-#[async_trait::async_trait]
-pub trait TenantStore: Send + Sync {
-    /// Resolve a tenant from the SHA-256 hash of a client API key. `None` for
-    /// an unknown hash or a revoked key.
-    async fn tenant_by_api_key_hash(
-        &self,
-        api_key_hash: &str,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Resolve a tenant by id (used by key-mint validation).
-    async fn tenant_by_id(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Mint a key row: stores only the hash, returns the new key id. Errors
-    /// when the tenant does not exist.
-    async fn insert_api_key(
-        &self,
-        tenant_id: Uuid,
-        label: &str,
-        key_hash: &str,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// List a tenant's key metadata, oldest first.
-    async fn list_api_keys(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Revoke a key by id (idempotent). Returns true when a key was actually
-    /// revoked, false when no such active key exists.
-    async fn revoke_api_key(
-        &self,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Create a tenant row (ITEM-036 self-serve provisioning). Returns the new
-    /// tenant id. `upstream_key` is the tenant's master upstream key — `None`
-    /// for a keyless tenant.
-    async fn insert_tenant(
-        &self,
-        upstream_key: Option<&str>,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>>;
-
-    /// Revoke a key only when it belongs to `tenant_id` (ITEM-038 AC2: a
-    /// tenant scoped path can never revoke a key it does not own). True when a
-    /// key was actually revoked.
-    async fn revoke_tenant_key(
-        &self,
-        tenant_id: Uuid,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-#[derive(Clone)]
-struct InMemoryApiKey {
-    id: Uuid,
-    tenant_id: Uuid,
-    label: String,
-    key_hash: String,
-    revoked: bool,
-}
-
-#[derive(Default)]
-pub struct InMemoryTenantStore {
-    tenants: std::sync::Mutex<HashMap<Uuid, Tenant>>,
-    keys: std::sync::Mutex<Vec<InMemoryApiKey>>,
-}
-
-impl Clone for InMemoryTenantStore {
-    fn clone(&self) -> Self {
-        Self {
-            tenants: std::sync::Mutex::new(
-                self.tenants.lock().unwrap_or_else(|p| p.into_inner()).clone(),
-            ),
-            keys: std::sync::Mutex::new(
-                self.keys.lock().unwrap_or_else(|p| p.into_inner()).clone(),
-            ),
-        }
-    }
-}
-
-impl InMemoryTenantStore {
-    /// Legacy shape: one active key per (hash → tenant) entry — matches the
-    /// pre-ITEM-034 single-column model most tests seed with.
-    pub fn new(by_key_hash: HashMap<String, Tenant>) -> Self {
-        let store = Self::default();
-        for (hash, tenant) in by_key_hash {
-            let tenant_id = tenant.id;
-            store.tenants().insert(tenant_id, tenant);
-            store.keys().push(InMemoryApiKey {
-                id: Uuid::new_v4(),
-                tenant_id,
-                label: "seeded".to_string(),
-                key_hash: hash,
-                revoked: false,
-            });
-        }
-        store
-    }
-
-    fn tenants(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, Tenant>> {
-        self.tenants.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn keys(&self) -> std::sync::MutexGuard<'_, Vec<InMemoryApiKey>> {
-        self.keys.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn now_text() -> String {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
-            .unwrap_or_default()
-    }
-}
-
-#[async_trait::async_trait]
-impl TenantStore for InMemoryTenantStore {
-    async fn tenant_by_api_key_hash(
-        &self,
-        api_key_hash: &str,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let found = self
-            .keys()
-            .iter()
-            .find(|k| !k.revoked && k.key_hash == api_key_hash)
-            .map(|k| k.tenant_id);
-        match found {
-            Some(id) => Ok(self.tenants().get(&id).cloned()),
-            None => Ok(None),
-        }
-    }
-
-    async fn tenant_by_id(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.tenants().get(&tenant_id).cloned())
-    }
-
-    async fn insert_api_key(
-        &self,
-        tenant_id: Uuid,
-        label: &str,
-        key_hash: &str,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
-        if !self.tenants().contains_key(&tenant_id) {
-            return Err("tenant not found".into());
-        }
-        let id = Uuid::new_v4();
-        self.keys().push(InMemoryApiKey {
-            id,
-            tenant_id,
-            label: label.to_string(),
-            key_hash: key_hash.to_string(),
-            revoked: false,
-        });
-        Ok(id)
-    }
-
-    async fn list_api_keys(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        let now = Self::now_text();
-        let mut keys: Vec<ApiKeyInfo> = self
-            .keys()
-            .iter()
-            .filter(|k| k.tenant_id == tenant_id)
-            .map(|k| ApiKeyInfo {
-                id: k.id,
-                tenant_id: k.tenant_id,
-                label: k.label.clone(),
-                created_at: now.clone(),
-                revoked_at: if k.revoked { Some(now.clone()) } else { None },
-                last_used_at: None,
-            })
-            .collect();
-        // Oldest first (in-memory keys are appended in mint order).
-        keys.sort_by_key(|k| k.created_at.clone());
-        Ok(keys)
-    }
-
-    async fn revoke_api_key(
-        &self,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let mut keys = self.keys();
-        if let Some(k) = keys.iter_mut().find(|k| k.id == key_id && !k.revoked) {
-            k.revoked = true;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    async fn insert_tenant(
-        &self,
-        upstream_key: Option<&str>,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
-        let id = Uuid::new_v4();
-        self.tenants().insert(
-            id,
-            Tenant {
-                id,
-                upstream_openai_key: upstream_key.map(str::to_string),
-            },
-        );
-        Ok(id)
-    }
-
-    async fn revoke_tenant_key(
-        &self,
-        tenant_id: Uuid,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let mut keys = self.keys();
-        let hit = keys
-            .iter_mut()
-            .find(|k| k.id == key_id && k.tenant_id == tenant_id && !k.revoked);
-        match hit {
-            Some(k) => {
-                k.revoked = true;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
-    }
-}
-
-pub struct PostgresTenantStore {
-    pool: sqlx::PgPool,
-}
-
-impl PostgresTenantStore {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait::async_trait]
-impl TenantStore for PostgresTenantStore {
-    async fn tenant_by_api_key_hash(
-        &self,
-        api_key_hash: &str,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let row = sqlx::query_as::<_, (Uuid, Option<String>)>(
-            "SELECT t.id, t.upstream_openai_key
-             FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
-             WHERE k.key_hash = $1 AND k.revoked_at IS NULL",
-        )
-        .bind(api_key_hash)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|(id, upstream_openai_key)| Tenant {
-            id,
-            upstream_openai_key,
-        }))
-    }
-
-    async fn tenant_by_id(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let row = sqlx::query_as::<_, (Uuid, Option<String>)>(
-            "SELECT id, upstream_openai_key FROM tenants WHERE id = $1",
-        )
-        .bind(tenant_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|(id, upstream_openai_key)| Tenant {
-            id,
-            upstream_openai_key,
-        }))
-    }
-
-    async fn insert_api_key(
-        &self,
-        tenant_id: Uuid,
-        label: &str,
-        key_hash: &str,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
-        let row: (Uuid,) = sqlx::query_as(
-            "INSERT INTO api_keys (tenant_id, label, key_hash)
-             VALUES ($1, $2, $3) RETURNING id",
-        )
-        .bind(tenant_id)
-        .bind(label)
-        .bind(key_hash)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
-    }
-
-    async fn list_api_keys(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>)>(
-            "SELECT id, tenant_id, label, created_at::text, revoked_at::text, last_used_at::text
-             FROM api_keys WHERE tenant_id = $1 ORDER BY created_at",
-        )
-        .bind(tenant_id)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|(id, tenant_id, label, created_at, revoked_at, last_used_at)| ApiKeyInfo {
-                id,
-                tenant_id,
-                label,
-                created_at,
-                revoked_at,
-                last_used_at,
-            })
-            .collect())
-    }
-
-    async fn revoke_api_key(
-        &self,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let result = sqlx::query("UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL")
-            .bind(key_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() > 0)
-    }
-
-    async fn insert_tenant(
-        &self,
-        upstream_key: Option<&str>,
-    ) -> Result<Uuid, Box<dyn std::error::Error + Send + Sync>> {
-        let row: (Uuid,) = sqlx::query_as(
-            "INSERT INTO tenants (upstream_openai_key) VALUES ($1) RETURNING id",
-        )
-        .bind(upstream_key)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
-    }
-
-    async fn revoke_tenant_key(
-        &self,
-        tenant_id: Uuid,
-        key_id: Uuid,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let result = sqlx::query(
-            "UPDATE api_keys SET revoked_at = NOW()
-             WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL",
-        )
-        .bind(key_id)
-        .bind(tenant_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(result.rows_affected() > 0)
-    }
-}
-
-/// One completed request, queued for the batch telemetry worker (ITEM-005).
-/// The worker fills `waste_detected` and `upstream_cost_usd` (ITEM-006) before
-/// handing the message to the sink.
-#[derive(Clone, Debug)]
-pub struct TraceMessage {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub request_model: String,
-    pub system_prompt_hash: Option<String>,
-    pub prompt_tokens: i32,
-    pub completion_tokens: i32,
-    /// Provider-reported prompt tokens served from cache
-    /// (`usage.prompt_tokens_details.cached_tokens`), when the provider sends it.
-    pub cached_prompt_tokens: Option<i64>,
-    pub ttft_ms: Option<i64>,
-    pub total_duration_ms: i64,
-    pub status_code: u16,
-    pub raw_prompt: Option<Value>,
-    pub raw_completion: Option<Value>,
-    pub waste_detected: Option<Value>,
-    pub upstream_cost_usd: rust_decimal::Decimal,
-    /// True when a streaming response ended before the upstream finished
-    /// (client abort or mid-stream error) — token counts are then best-effort.
-    pub truncated: bool,
-    /// Schema-guard event (ITEM-025): present only when the guard fired on a
-    /// guarded request (cheap tier + schema contract). Unguarded traffic keeps
-    /// this None — the telemetry is additive only (ITEM-026 AC4).
-    pub guard_event: Option<Value>,
-}
-
-/// Flush seam for the telemetry worker: batches of TraceMessages are handed
-/// to a sink exactly once per flush (one DB transaction for PostgresTraceSink).
-#[async_trait::async_trait]
-pub trait TraceSink: Send {
-    async fn flush(&mut self, batch: &mut Vec<TraceMessage>);
-}
-
-pub async fn load_system_prompt_counts(pool: &sqlx::PgPool) -> Result<HashMap<String, u32>, sqlx::Error> {
-    let rows: Vec<(String, i32)> =
-        sqlx::query_as("SELECT hash, count FROM system_prompt_counts")
-            .fetch_all(pool)
-            .await?;
-    Ok(rows.into_iter().map(|(hash, count)| (hash, count.max(0) as u32)).collect())
-}
-
-pub struct PostgresTraceSink {
-    pool: sqlx::PgPool,
-}
-
-impl PostgresTraceSink {
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait::async_trait]
-impl TraceSink for PostgresTraceSink {
-    async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
-        let mut tx = match self.pool.begin().await {
-            Ok(tx) => tx,
-            Err(e) => {
-                tracing::error!("telemetry: cannot begin transaction, dropping {} traces: {e}", batch.len());
-                batch.clear();
-                return;
-            }
-        };
-        for msg in batch.drain(..) {
-            let result = sqlx::query(
-                r#"INSERT INTO traces (
-                    id, tenant_id, request_model, system_prompt_hash,
-                    prompt_tokens, completion_tokens, time_to_first_token_ms,
-                    total_duration_ms, status_code, raw_prompt, raw_completion,
-                    upstream_cost_usd, waste_detected, truncated, guard_event
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"#,
-            )
-            .bind(msg.id)
-            .bind(msg.tenant_id)
-            .bind(&msg.request_model)
-            .bind(msg.system_prompt_hash.as_deref())
-            .bind(msg.prompt_tokens)
-            .bind(msg.completion_tokens)
-            .bind(msg.ttft_ms.map(|t| t as i32))
-            .bind(msg.total_duration_ms as i32)
-            .bind(i32::from(msg.status_code))
-            .bind(msg.raw_prompt.as_ref().map(Json))
-            .bind(msg.raw_completion.as_ref().map(Json))
-            .bind(msg.upstream_cost_usd)
-            .bind(msg.waste_detected.as_ref().map(Json))
-            .bind(msg.truncated)
-            .bind(msg.guard_event.as_ref().map(Json))
-            .execute(&mut *tx)
-            .await;
-            if let Err(e) = result {
-                tracing::error!("telemetry: trace insert failed, rolling back batch: {e}");
-                return; // tx dropped -> rollback keeps the flush atomic (AC6)
-            }
-            // Persist the per-hash occurrence count (ITEM-010) in the same
-            // transaction, so rule B repeat counts survive restarts.
-            if let Some(hash) = &msg.system_prompt_hash {
-                let count_result = sqlx::query(
-                    "INSERT INTO system_prompt_counts (hash, count) VALUES ($1, 1)
-                     ON CONFLICT (hash) DO UPDATE SET count = system_prompt_counts.count + 1",
-                )
-                .bind(hash)
-                .execute(&mut *tx)
-                .await;
-                if let Err(e) = count_result {
-                    tracing::error!("telemetry: count upsert failed, rolling back batch: {e}");
-                    return;
-                }
-            }
-            // Accrue actual spend toward the tenant budget (ITEM-016), same
-            // transaction. No-op when the tenant has no configuration row.
-            let cents = cost::cost_to_cents(msg.upstream_cost_usd);
-            if cents > 0 {
-                let spend_result = sqlx::query(
-                    "UPDATE tenant_configurations
-                     SET current_spend_cents = current_spend_cents + $1
-                     WHERE tenant_id = $2",
-                )
-                .bind(cents)
-                .bind(msg.tenant_id)
-                .execute(&mut *tx)
-                .await;
-                if let Err(e) = spend_result {
-                    tracing::error!("telemetry: spend accrual failed, rolling back batch: {e}");
-                    return;
-                }
-            }
-        }
-        if let Err(e) = tx.commit().await {
-            tracing::error!("telemetry: commit failed: {e}");
-        }
-    }
-}
-
-/// Background worker: batches TraceMessages and flushes them to the sink every
-/// `flush_interval` or every `batch_size` items, whichever comes first. DB I/O
-/// happens only here, never on the hot request path (AC2).
-/// `initial_counts` seeds the per-hash repeat counter from persisted state so
-/// linter rule B keeps counting across restarts (ITEM-010).
-pub async fn telemetry_worker(
-    mut rx: mpsc::Receiver<TraceMessage>,
-    mut sink: Box<dyn TraceSink>,
-    flush_interval: Duration,
-    batch_size: usize,
-    initial_counts: HashMap<String, u32>,
-) {
-    let mut buffer: Vec<TraceMessage> = Vec::with_capacity(batch_size);
-    let mut interval = tokio::time::interval(flush_interval);
-    let mut hash_counts: HashMap<String, u32> = initial_counts;
-    loop {
-        tokio::select! {
-            msg = rx.recv() => match msg {
-                Some(mut msg) => {
-                    let repeat_count = match &msg.system_prompt_hash {
-                        Some(hash) => {
-                            let count = hash_counts.entry(hash.clone()).or_insert(0);
-                            *count += 1;
-                            *count
-                        }
-                        None => 0,
-                    };
-                    // Enrich off the hot path (ITEM-006): lint + cost.
-                    msg.waste_detected = linter::lint(&msg, repeat_count);
-                    msg.upstream_cost_usd = cost::calculate_cost(
-                        &msg.request_model,
-                        msg.prompt_tokens,
-                        msg.completion_tokens,
-                        msg.cached_prompt_tokens.unwrap_or(0),
-                    );
-                    buffer.push(msg);
-                    if buffer.len() >= batch_size {
-                        sink.flush(&mut buffer).await;
-                    }
-                }
-                None => {
-                    if !buffer.is_empty() {
-                        sink.flush(&mut buffer).await;
-                    }
-                    return;
-                }
-            },
-            _ = interval.tick() => {
-                if !buffer.is_empty() {
-                    sink.flush(&mut buffer).await;
-                }
-            }
-        }
-    }
-}
-
-/// Strip ASCII whitespace from both ends of a byte slice.
-fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
-    while let Some((&first, rest)) = bytes.split_first() {
-        if first.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    while let Some((&last, rest)) = bytes.split_last() {
-        if last.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    bytes
-}
-
-/// Token accounting parsed from an upstream response (usage object).
-/// `Default` = no usage reached us (transport error / provider sent none).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Usage {
-    pub prompt_tokens: i32,
-    pub completion_tokens: i32,
-    pub cached_tokens: Option<i64>,
-}
-
-/// Extract token counts from the last SSE data frame that carries a usage
-/// object — e.g. DeepSeek's final chunk before [DONE]. This is run over the
-/// already-accumulated stream bytes at stream end, so frames may be parsed
-/// whole regardless of TCP fragmentation.
-pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<Usage> {
-    let mut last = None;
-    for line in bytes.split(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(data) = line.strip_prefix(b"data:") else { continue };
-        let data = trim_ascii_ws(data);
-        if data == b"[DONE]" {
-            continue;
-        }
-        let Ok(frame) = serde_json::from_slice::<Value>(data) else {
-            continue;
-        };
-        if let (Some(p), Some(c)) = (
-            frame["usage"]["prompt_tokens"].as_i64(),
-            frame["usage"]["completion_tokens"].as_i64(),
-        ) {
-            last = Some(Usage {
-                prompt_tokens: p as i32,
-                completion_tokens: c as i32,
-                cached_tokens: frame["usage"]["prompt_tokens_details"]["cached_tokens"]
-                    .as_i64(),
-            });
-        }
-    }
-    last
-}
-
-/// SHA-256 hex of the first `role: system` message content (AC3).
-fn system_prompt_hash(payload: &Value) -> Option<String> {
-    payload["messages"]
-        .as_array()?
-        .iter()
-        .find(|m| m["role"] == "system")
-        .and_then(|m| m["content"].as_str())
-        .map(tenant_hash)
-}
-
-/// Token counts from a parsed upstream JSON response (non-streaming path).
-fn usage_from_json(response_json: &Option<Value>) -> Usage {
-    match response_json {
-        Some(json) => Usage {
-            prompt_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0) as i32,
-            completion_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32,
-            cached_tokens: json["usage"]["prompt_tokens_details"]["cached_tokens"].as_i64(),
-        },
-        None => Usage::default(),
-    }
-}
 
 pub struct AppState {
     pub http_client: Client,
@@ -1046,14 +388,14 @@ pub(crate) async fn authenticate(
     if key.is_empty() {
         return Ok(None);
     }
-    state.tenant_store.tenant_by_api_key_hash(&tenant_hash(key)).await
+    state.tenant_store.tenant_by_api_key_hash(&sha256_hex(key)).await
 }
 
-/// SHA-256 hex digest of an API key — the only form of a client key that is
-/// ever stored, compared, or logged (AC5).
-pub(crate) fn tenant_hash(key: &str) -> String {
+/// SHA-256 hex digest. API keys are only ever stored/compared/logged in this
+/// form (AC5); the system-prompt hash (linter rule B) reuses the same digest.
+pub(crate) fn sha256_hex(input: &str) -> String {
     use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(key.as_bytes()))
+    hex::encode(Sha256::digest(input.as_bytes()))
 }
 
 /// Key prefix for client API keys (ITEM-034 mints). Raw keys are shown once
@@ -1470,6 +812,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use std::collections::HashMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
@@ -1490,15 +833,10 @@ mod tests {
     const MASTER_KEY: &str = "sk-tenant-master-key";
     const TENANT_ID: &str = "11111111-1111-1111-1111-111111111111";
 
-    fn tenant_hash(key: &str) -> String {
-        use sha2::{Digest, Sha256};
-        hex::encode(Sha256::digest(key.as_bytes()))
-    }
-
     fn seeded_store() -> InMemoryTenantStore {
         let mut by_hash = std::collections::HashMap::new();
         by_hash.insert(
-            tenant_hash(CLIENT_KEY),
+            sha256_hex(CLIENT_KEY),
             Tenant {
                 id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 upstream_openai_key: Some(MASTER_KEY.to_string()),
@@ -2223,7 +1561,7 @@ mod tests {
             .insert_api_key(
                 uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 "ci",
-                &tenant_hash(SECOND_KEY),
+                &sha256_hex(SECOND_KEY),
             )
             .await
             .expect("mint succeeds");
@@ -2243,7 +1581,7 @@ mod tests {
         assert!(store.tenant_by_id(keyless).await.expect("ok").unwrap().upstream_openai_key.is_none());
 
         // A minted key on the provisioned tenant resolves back to it.
-        let hash = tenant_hash("sk-provisioned-dev");
+        let hash = sha256_hex("sk-provisioned-dev");
         store.insert_api_key(upstream, "default", &hash).await.expect("key minted");
         let resolved = store.tenant_by_api_key_hash(&hash).await.expect("ok");
         assert_eq!(resolved.map(|t| t.id), Some(upstream));
@@ -2278,7 +1616,7 @@ mod tests {
     async fn a_second_active_key_authenticates_to_the_same_tenant() {
         let (store, _) = store_with_second_key().await;
         let tenant = store
-            .tenant_by_api_key_hash(&tenant_hash(SECOND_KEY))
+            .tenant_by_api_key_hash(&sha256_hex(SECOND_KEY))
             .await
             .expect("store ok")
             .expect("second key resolves");
@@ -2295,7 +1633,7 @@ mod tests {
             .expect("revoke ok"), "revoked a live key");
         assert_eq!(
             store
-                .tenant_by_api_key_hash(&tenant_hash(SECOND_KEY))
+                .tenant_by_api_key_hash(&sha256_hex(SECOND_KEY))
                 .await
                 .expect("store ok"),
             None,
@@ -2303,7 +1641,7 @@ mod tests {
         );
         // The original key is untouched.
         assert!(store
-            .tenant_by_api_key_hash(&tenant_hash(CLIENT_KEY))
+            .tenant_by_api_key_hash(&sha256_hex(CLIENT_KEY))
             .await
             .expect("store ok")
             .is_some());
@@ -2322,7 +1660,7 @@ mod tests {
     async fn key_mint_rejects_unknown_tenants_and_list_reports_revocation() {
         let store = seeded_store();
         assert!(store
-            .insert_api_key(uuid::Uuid::new_v4(), "ci", &tenant_hash("sk-x"))
+            .insert_api_key(uuid::Uuid::new_v4(), "ci", &sha256_hex("sk-x"))
             .await
             .is_err(), "minting for a missing tenant fails");
         let (store, second_key_id) = store_with_second_key().await;
@@ -2454,7 +1792,7 @@ mod tests {
         });
         assert_eq!(
             system_prompt_hash(&payload).as_deref(),
-            Some(tenant_hash("be terse").as_str())
+            Some(sha256_hex("be terse").as_str())
         );
     }
 
@@ -2483,7 +1821,7 @@ mod tests {
         assert_eq!(msg.status_code, 200);
         assert_eq!(
             msg.system_prompt_hash.as_deref(),
-            Some(tenant_hash("be terse").as_str())
+            Some(sha256_hex("be terse").as_str())
         );
         assert_eq!(
             msg.raw_prompt.as_ref().unwrap()["messages"][0]["role"],

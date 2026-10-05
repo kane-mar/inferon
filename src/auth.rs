@@ -964,7 +964,7 @@ async fn provision_first_tenant(
     let raw_key = crate::mint_client_key();
     if let Err(e) = state
         .tenant_store
-        .insert_api_key(tenant_id, "default", &crate::tenant_hash(&raw_key))
+        .insert_api_key(tenant_id, "default", &crate::sha256_hex(&raw_key))
         .await
     {
         tracing::error!("key insert failed: {e}");
@@ -1556,7 +1556,7 @@ mod tests {
         let keys = tenants.list_api_keys(tenant_id).await.expect("ok");
         assert_eq!(keys.len(), 1, "one first key, hash-only");
         let resolved = tenants
-            .tenant_by_api_key_hash(&crate::tenant_hash(&key))
+            .tenant_by_api_key_hash(&crate::sha256_hex(&key))
             .await
             .expect("ok");
         assert_eq!(resolved.map(|t| t.id), Some(tenant_id), "the key is accepted immediately");

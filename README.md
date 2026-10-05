@@ -282,7 +282,10 @@ parent zone's DNS (DNSimple for agilefederation.com) and
 src/cost.rs      price table + cost math (rust_decimal, cache-hit aware)
 src/linter.rs    waste rules (over-provisioned / cache-miss / model misuse)
 src/dashboard.rs dashboard HTML + tenant-scoped JSON APIs
-src/lib.rs       proxy hot path, auth, telemetry worker, trace sink
+src/tenant.rs    tenant + API-key persistence (TenantStore: in-memory + Postgres)
+src/telemetry.rs batched trace worker + Postgres sink
+src/usage.rs     token-usage parsing (SSE + JSON)
+src/lib.rs       composition root: AppState, router, proxy hot path, streaming
 src/main.rs      wiring (env, Postgres pool, worker)
 db/init/         idempotent migrations (001 schema … 010 tenant invites)
 web/             Next.js human surfaces (landing, dashboard, operator console) —
