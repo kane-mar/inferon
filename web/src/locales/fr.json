@@ -1,115 +1,146 @@
 {
   "Index": {
-    "meta_title": "SaaS Template - Le template SaaS parfait pour construire et mettre à l'échelle votre entreprise en toute simplicité.",
-    "meta_description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec React, TypeScript, Shadcn UI et Tailwind CSS."
+    "meta_title": "Inferon — le coût réel de chaque requête LLM",
+    "meta_description": "Une passerelle compatible OpenAI qui mesure, protège et route votre trafic de modèles avec une visibilité réelle sur les coûts et une protection budgétaire automatique."
   },
   "Navbar": {
-    "sign_in": "Se connecter",
-    "sign_up": "S'inscrire",
-    "product": "Produit",
-    "pricing": "Tarifs",
-    "docs": "Docs",
-    "blog": "Blog",
-    "about": "À propos"
+    "sign_in": "Connexion",
+    "dashboard": "Tableau de bord",
+    "features": "Fonctionnalités",
+    "source": "Code source"
   },
   "LocaleSwitcher": {
     "button_label": "Changer de langue"
   },
   "Hero": {
-    "follow_twitter": "Suivez @Ixartz sur Twitter",
-    "title": "Le parfait <important>SaaS template</important> pour construire et mettre à l'échelle votre entreprise en toute simplicité.",
-    "description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec React, TypeScript, Shadcn UI et Tailwind CSS.",
-    "primary_button": "Obtenir Next.js SaaS Starter Kit",
-    "secondary_button": "Mettez une étoile sur GitHub"
+    "badge": "Passerelle compatible OpenAI",
+    "title": "Connaissez le <important>coût réel</important> de chaque requête LLM.",
+    "description": "Inferon mesure, protège et route votre trafic de modèles avec de vrais chiffres de coût et une protection budgétaire automatique — via une API compatible OpenAI.",
+    "primary_button": "Se connecter avec GitHub",
+    "secondary_button": "Voir le code source"
   },
   "Features": {
     "section_subtitle": "Fonctionnalités",
-    "section_title": "Débloquer le plein potentiel du SaaS Template",
-    "section_description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec React, TypeScript, Shadcn UI et Tailwind CSS.",
-    "feature1_title": "Node.js",
-    "feature2_title": "React",
-    "feature3_title": "Tailwind CSS",
-    "feature4_title": "TypeScript",
-    "feature5_title": "Shadcn UI",
-    "feature6_title": "ESLint",
-    "feature_description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec React, TypeScript, Shadcn UI et Tailwind CSS."
-  },
-  "Pricing": {
-    "section_subtitle": "Tarifs",
-    "section_title": "Débloquer le plein potentiel du SaaS Template",
-    "section_description": "Un template gratuit et open-source de landing page pour votre entreprise SaaS, construit avec React, TypeScript, Shadcn UI et Tailwind CSS.",
-    "button_text": "Commencer"
-  },
-  "PricingPlans": {
-    "free_plan_name": "Gratuit",
-    "premium_plan_name": "Premium",
-    "enterprise_plan_name": "Enterprise"
-  },
-  "PricingCard": {
-    "free_plan_description": "Pour les particuliers",
-    "premium_plan_description": "Pour les petites équipes",
-    "enterprise_plan_description": "Pour les leaders du secteur",
-    "plan_price": "${price}",
-    "plan_interval_month": "/ mois",
-    "plan_interval_year": "/ an"
-  },
-  "PricingFeatures": {
-    "feature_team_member": "Jusqu'à {number} membres",
-    "feature_website": "Jusqu'à {number} sites web",
-    "feature_storage": "{number} Go de stockage",
-    "feature_transfer": "{number} To de transfert",
-    "feature_email_support": "Support par email"
-  },
-  "SponsorLogos": {
-    "sponsored_by": "Sponsorisé par",
-    "clerk_logo": "Logo Clerk",
-    "sentry_logo": "Logo Sentry",
-    "crowdin_logo": "Logo Crowdin",
-    "arcjet_logo": "Logo Arcjet",
-    "coderabbit_logo": "Logo CodeRabbit",
-    "nextjs_boilerplate_logo": "Logo Next.js SaaS Boilerplate"
-  },
-  "FAQ": {
-    "question": "Lorem ipsum dolor sit amet, consectetur adipiscing elit?",
-    "answer": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam aliquam enim dui, id consequat turpis ullamcorper ac. Mauris id quam dolor. Nullam eu egestas turpis. Proin risus elit, sollicitudin in mi a, accumsan euismod turpis. In euismod mi sed diam tristique hendrerit."
+    "section_title": "Tout pour faire confiance à vos dépenses LLM",
+    "section_description": "Une passerelle de mesure qui reste discrète — votre client OpenAI existant continue de fonctionner.",
+    "feature1_title": "Coût réel, par requête",
+    "feature1_description": "Chaque requête enregistre ses tokens et le coût USD amont, rendus en décimales exactes — jamais en flottant.",
+    "feature2_title": "Garde budgétaire",
+    "feature2_description": "Des budgets par locataire avec un disjoncteur automatique qui dégrade proprement au lieu de dépasser la limite.",
+    "feature3_title": "Garde de schéma",
+    "feature3_description": "Valide et répare les sorties d'appels d'outils, avec repli transparent vers un modèle de pointe si besoin.",
+    "feature4_title": "API compatible OpenAI",
+    "feature4_description": "Pointez votre client vers /v1/chat/completions et gardez votre SDK, vos clés et vos formats de requête.",
+    "feature5_title": "Clés par locataire",
+    "feature5_description": "Créez et révoquez des clés API par locataire depuis le tableau de bord ; seuls les hachages sont stockés.",
+    "feature6_title": "Connexion GitHub",
+    "feature6_description": "Les utilisateurs se connectent avec GitHub et des sessions signées ; les collègues rejoignent par invitation avec leurs propres clés."
   },
   "CTA": {
-    "title": "Vous êtes prêt?",
-    "description": "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
-    "button_text": "Obtenir Next.js SaaS Starter Kit"
+    "title": "Prêt à voir vos dépenses réelles ?",
+    "description": "Connectez-vous avec GitHub et obtenez un locataire avec sa première clé API en quelques secondes.",
+    "button_text": "Se connecter avec GitHub"
   },
   "Footer": {
-    "product": "Produit",
-    "docs": "Docs",
-    "blog": "Blog",
-    "community": "Communauté",
-    "company": "Entreprise",
-    "terms_of_service": "Conditions d'utilisation",
-    "privacy_policy": "Politique de confidentialité",
-    "footer_text": "© {year} {name}. Fait avec <author></author>."
+    "sign_in": "Connexion",
+    "dashboard": "Tableau de bord",
+    "source": "Code source",
+    "footer_text": "© {year} {name}."
   },
   "SignIn": {
-    "meta_title": "Se connecter",
-    "meta_description": "Connectez-vous à votre compte avec facilité."
+    "meta_title": "Connexion",
+    "meta_description": "Connectez-vous à Inferon avec GitHub."
   },
   "SignUp": {
-    "meta_title": "S'inscrire",
-    "meta_description": "Créez un compte sans effort grâce à notre processus d'inscription intuitif."
+    "meta_title": "Inscription",
+    "meta_description": "Créez votre locataire Inferon avec GitHub."
   },
   "DashboardLayout": {
     "meta_title": "Tableau de bord Inferon",
-    "meta_description": "Votre tableau de bord Inferon des coûts et du routage.",
-    "home": "Accueil"
+    "meta_description": "Votre tableau de bord Inferon des coûts et du routage."
+  },
+  "DashboardNav": {
+    "home": "Vue d'ensemble",
+    "keys": "Clés API",
+    "members": "Membres",
+    "operator": "Opérateur"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion"
   },
   "DashboardIndexPage": {
-    "title_bar": "Tableau de bord",
-    "title_bar_description": "Bienvenue sur votre tableau de bord",
-    "message_state_title": "Commençons",
-    "message_state_description": "Personnalisez cette page en modifiant le fichier dans <code>dashboard/page.tsx</code>.",
-    "message_state_alternative": "Besoin de fonctionnalités avancées ? Next.js 16 & React 19, Multi-tenancy & Équipes, Rôles & Permissions, Shadcn UI,\nTypesafety de bout en bout avec oRPC, Paiement Stripe, Mode clair / sombre. Essayez <url></url>.",
-    "max_message": "Ou, besoin d'une stack d'auth auto-hébergée (Better Auth) ? Essayez <url></url>."
+    "title_bar": "Vue d'ensemble",
+    "title_bar_description": "Usage du locataire sur les {days} derniers jours.",
+    "requests": "Requêtes",
+    "errors": "Erreurs",
+    "total_cost": "Coût total",
+    "last_trace": "Dernière requête",
+    "since": "depuis le {date}",
+    "by_model": "Dépenses par modèle",
+    "by_prompt": "Dépenses par prompt système",
+    "model": "Modèle",
+    "prompt_hash": "Hachage du prompt système",
+    "prompt_tokens": "Tokens d'entrée",
+    "completion_tokens": "Tokens de sortie",
+    "cost": "Coût",
+    "spend": "Dépense",
+    "waste": "Indicateurs de gaspillage",
+    "waste_class": "Indicateur",
+    "waste_over_provisioned": "Sur-dimensionné",
+    "waste_cache_miss": "Cache manqué",
+    "waste_model_misuse": "Mauvais modèle",
+    "estimated_savings": "Économies estimées",
+    "no_data": "Aucune donnée pour cette fenêtre."
+  },
+  "KeysPage": {
+    "title_bar": "Clés API",
+    "title_bar_description": "Créez et révoquez les clés de ce locataire. La clé brute n'est affichée qu'une fois.",
+    "keys": "Clés",
+    "label_field": "Libellé",
+    "label_placeholder": "ex. production",
+    "create": "Créer une clé",
+    "key_created": "Nouvelle clé — copiez-la maintenant",
+    "key_once": "C'est la seule fois où la clé est affichée ; seul son hachage est stocké.",
+    "created": "Créée",
+    "last_used": "Dernière utilisation",
+    "status_label": "Statut",
+    "active": "Active",
+    "revoked": "Révoquée",
+    "revoke": "Révoquer",
+    "no_keys": "Aucune clé — créez la première ci-dessus.",
+    "error": "Une erreur est survenue."
+  },
+  "MembersPage": {
+    "title_bar": "Membres",
+    "title_bar_description": "Invitez des collègues par identifiant GitHub. Ils rejoignent comme membres à leur prochaine connexion.",
+    "members": "Membres",
+    "github_login": "Identifiant GitHub",
+    "invite_placeholder": "identifiant-github",
+    "invite": "Inviter",
+    "role": "Rôle",
+    "owner": "Propriétaire",
+    "member": "Membre",
+    "remove": "Retirer",
+    "pending_invites": "Invitations en attente",
+    "no_invites": "Aucune invitation en attente.",
+    "error": "Une erreur est survenue."
+  },
+  "OperatorPage": {
+    "title_bar": "Console opérateur",
+    "title_bar_description": "Usage de la plateforme sur les {days} derniers jours.",
+    "requests": "Requêtes",
+    "errors": "Erreurs",
+    "total_cost": "Coût total",
+    "tenants": "Locataires",
+    "tenant": "Locataire",
+    "cost": "Coût",
+    "guard": "Résultats de la garde de schéma",
+    "outcome": "Résultat",
+    "alerts": "Alertes de coût",
+    "class": "Classe",
+    "status_label": "Statut",
+    "first_fired": "Premier déclenchement",
+    "last_fired": "Dernier déclenchement",
+    "no_data": "Aucune donnée pour cette fenêtre."
   }
 }

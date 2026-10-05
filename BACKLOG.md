@@ -12,7 +12,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-042 | Hybrid web app from SaaS-Boilerplate (Next.js UI, Rust data plane) | feature | **in progress** — 042a–c landed (template vendored under `web/`, typed Inferon API seam, vendor strip: Clerk/Sentry/Drizzle/Checkly/Crowdin gone); web CI green; 042d pages next |
+| ITEM-042 | Hybrid web app from SaaS-Boilerplate (Next.js UI, Rust data plane) | feature | **in progress** — 042a–d landed (template vendored, API seam, vendor strip, real dashboard + operator pages, role-aware nav, `/auth/me` `is_operator`); 042e deploy next |
 | ITEM-018 | First real developer onboarding | improvement | **path closed (ITEM-040)** — self-serve is the only human onboarding; staged key stays valid. Remaining is a PO call: hand the key to a named developer (real-traffic data point) or archive (close-out note in item file) |
 | ITEM-028 | OmniRouting: FastEmbedder | feature | **unparked for build (Option 1, 2026-10-04)** — feature-gated ORT landed (`embedder` cargo feature; macOS loop untouched); AC2 re-baselined provisionally (≤10ms on the production tier). Host measurement blocked on ITEM-041 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
@@ -20,13 +20,13 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-05 (ITEM-042c vendor strip landed)_ — PO chose **Option A
+_Last updated: 2026-10-05 (ITEM-042d pages landed)_ — PO chose **Option A
 (hybrid)**: adopt `ixartz/SaaS-Boilerplate` for the human surfaces while the Rust
 proxy/telemetry/guard/router stay the data plane; auth stays ours (A1). Slices
-042a–c landed in `web/` (vendored template + typed API seam + stripped
-Clerk/Sentry/Drizzle/Checkly/Crowdin, MIT attribution kept); the web CI job
-(typegen → typecheck → unit tests) is green. Next: 042d pages (landing, sign-in →
-`/auth/login`, dashboard, operator console). Platform state: host live over HTTPS
-with CI/CD (deploy on every push), GitHub OAuth live, accounts horizon (034–040)
-and ITEM-041 archived. ITEM-028's ORT path is feature-gated, host measurement
-pending. OmniRouting 029–032 remain staged.
+042a–d landed in `web/` (vendored template, typed API seam, vendor strip, and the
+real landing + session-gated dashboard + operator console). Rust `/auth/me`
+reports `is_operator`. Next: 042e deploy (web Dockerfile + Caddy routing) and
+042f CI/README. Platform state: host live over HTTPS with CI/CD (deploy on every
+push), GitHub OAuth live, accounts horizon (034–040) and ITEM-041 archived.
+ITEM-028's ORT path is feature-gated, host measurement pending. OmniRouting
+029–032 remain staged.

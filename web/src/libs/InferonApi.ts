@@ -31,8 +31,7 @@ export type Me = {
   id: string;
   github_id: number;
   github_login: string;
-  /** Present once the proxy exposes it (ITEM-042d); absent means false. */
-  is_operator?: boolean;
+  is_operator: boolean;
 };
 
 export type Summary = {

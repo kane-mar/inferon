@@ -1,10 +1,13 @@
 import { useTranslations } from 'next-intl';
+import { AuthLink } from '@/components/AuthLink';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import { CenteredMenu } from '@/features/landing/CenteredMenu';
 import { Section } from '@/features/landing/Section';
 import { Link } from '@/libs/I18nNavigation';
 import { Logo } from './Logo';
+
+const REPOSITORY = 'https://github.com/kane-mar/inferon';
 
 export const Navbar = () => {
   const t = useTranslations('Navbar');
@@ -19,34 +22,22 @@ export const Navbar = () => {
               <LocaleSwitcher />
             </li>
             <li className="mr-2.5 ml-1">
-              <Link href="/sign-in">{t('sign_in')}</Link>
+              <AuthLink>{t('sign_in')}</AuthLink>
             </li>
             <li>
-              <Link className={buttonVariants()} href="/sign-up">
-                {t('sign_up')}
+              <Link className={buttonVariants()} href="/dashboard">
+                {t('dashboard')}
               </Link>
             </li>
           </>
         )}
       >
         <li>
-          <Link href="/sign-up">{t('product')}</Link>
+          <Link href="/#features">{t('features')}</Link>
         </li>
 
         <li>
-          <Link href="/sign-up">{t('pricing')}</Link>
-        </li>
-
-        <li>
-          <Link href="/sign-up">{t('docs')}</Link>
-        </li>
-
-        <li>
-          <Link href="/sign-up">{t('blog')}</Link>
-        </li>
-
-        <li>
-          <Link href="/sign-up">{t('about')}</Link>
+          <a href={REPOSITORY}>{t('source')}</a>
         </li>
       </CenteredMenu>
     </Section>

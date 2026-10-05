@@ -5,12 +5,13 @@
 **So that** the product presents like a real SaaS instead of server-rendered
 Rust HTML tables — without putting the data plane at risk
 
-**Status:** refined + in progress (042c). 042a–c landed: template vendored under
-`web/` (MIT `LICENSE`/attribution kept) with a typed Inferon API seam
-(`web/src/libs/InferonApi.ts` + Vitest) and the vendor strip (Clerk, Sentry,
-Drizzle + migrations, Checkly, Crowdin, template workflows, dependent pages).
-Web CI job (next typegen → tsc → vitest unit) green. Remaining: 042d pages, 042e
-deploy, 042f CI/README.
+**Status:** refined + in progress (042d). 042a–d landed: template vendored under
+`web/` (MIT `LICENSE`/attribution kept), typed Inferon API seam
+(`web/src/libs/InferonApi.ts` + Vitest), vendor strip (Clerk/Sentry/Drizzle/
+Checkly/Crowdin gone), and the real pages: rebranded landing (sign-in →
+`/auth/login`), session-gated dashboard (overview, keys, members) and the
+operator console, with role-aware nav. Rust `/auth/me` now reports `is_operator`
+(TDD). Remaining: 042e deploy, 042f CI/README.
 
 **Decision (A1, default): keep our GitHub OAuth + sessions** (`/auth/*` on the
 Rust proxy). Clerk is stripped in 042c — the accounts horizon ITEM-034..040 is

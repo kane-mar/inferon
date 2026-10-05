@@ -1,5 +1,6 @@
 import { ArrowRightIcon } from '@radix-ui/react-icons';
 import { useTranslations } from 'next-intl';
+import { AuthLink } from '@/components/AuthLink';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import { CTABanner } from '@/features/landing/CTABanner';
 import { Section } from '@/features/landing/Section';
@@ -13,14 +14,13 @@ export const CTA = () => {
         title={t('title')}
         description={t('description')}
         buttons={(
-          <a
+          <AuthLink
             className={buttonVariants({ variant: 'secondary', size: 'lg', className: 'whitespace-pre-line' })}
-            href="https://nextjs-boilerplate.com/nextjs-saas-starter-kit"
           >
             {t('button_text')}
 
             <ArrowRightIcon className="ml-1 size-5" />
-          </a>
+          </AuthLink>
         )}
       />
     </Section>

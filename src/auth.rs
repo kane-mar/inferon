@@ -1044,6 +1044,7 @@ pub async fn me(CurrentUser(user): CurrentUser) -> Response {
         "id": user.id,
         "github_id": user.github_id,
         "github_login": user.github_login,
+        "is_operator": user.is_operator,
     }))
     .into_response()
 }
@@ -1685,6 +1686,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(forged_resp.status(), axum::http::StatusCode::UNAUTHORIZED, "forged cookie");
+    }
+
+    #[tokio::test]
+    async fn me_returns_the_signed_in_user_including_the_operator_flag() {
+        let store = std::sync::Arc::new(InMemoryUserStore::default());
+        let operator = store.upsert_github_user(42, "kane-mar", true).await.expect("ok");
+        let member = store.upsert_github_user(43, "dev", false).await.expect("ok");
+        let users: std::sync::Arc<dyn UserStore> = store;
+        let github: std::sync::Arc<dyn GithubClient> = std::sync::Arc::new(FakeGithub::default());
+        let router = crate::build_router(test_state(test_accounts(users, github)));
+
+        let op_token = crate::session::issue_session(operator.id, SECRET, now_secs(), 3600);
+        let op = router
+            .clone()
+            .oneshot(request(
+                "/auth/me",
+                "GET",
+                &[(crate::session::SESSION_COOKIE, &op_token)],
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(op.status(), axum::http::StatusCode::OK);
+        let op_json = body_json(op).await;
+        assert_eq!(op_json["github_login"], "kane-mar");
+        assert_eq!(op_json["is_operator"], true, "operator flag is exposed to the UI");
+
+        let member_token = crate::session::issue_session(member.id, SECRET, now_secs(), 3600);
+        let member_resp = router
+            .oneshot(request(
+                "/auth/me",
+                "GET",
+                &[(crate::session::SESSION_COOKIE, &member_token)],
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member_resp.status(), axum::http::StatusCode::OK);
+        assert_eq!(body_json(member_resp).await["is_operator"], false);
     }
 
     #[tokio::test]
