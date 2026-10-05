@@ -64,6 +64,9 @@ pub fn is_priced(model: &str) -> bool {
 /// default ($3.00/M input, $15.00/M output). Returns whether this call actually
 /// warned — the dedupe keeps a chatty unknown model to a single line.
 pub fn warn_if_unpriced(model: &str) -> bool {
+    if is_priced(model) {
+        return false;
+    }
     use std::collections::HashSet;
     use std::sync::{Mutex, OnceLock};
     static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -278,15 +281,21 @@ mod tests {
             .with_writer(log.clone())
             .with_max_level(tracing::Level::WARN)
             .finish();
-        let (first, second) = tracing::subscriber::with_default(subscriber, || {
+        let (priced, first, second) = tracing::subscriber::with_default(subscriber, || {
             (
+                warn_if_unpriced("deepseek-flash"),
                 warn_if_unpriced("future-model-2099"),
                 warn_if_unpriced("future-model-2099"),
             )
         });
-        assert!(first, "warns on the first sighting");
-        assert!(!second, "deduped on the second sighting");
+        assert!(!priced, "a priced model is never flagged");
+        assert!(first, "an unpriced model warns on first sighting");
+        assert!(!second, "and is deduped on the next");
         let output = log.0.lock().unwrap().clone();
+        assert!(
+            !output.contains("deepseek-flash"),
+            "no warning for a priced model: {output}"
+        );
         assert_eq!(
             output.matches("future-model-2099").count(),
             1,
