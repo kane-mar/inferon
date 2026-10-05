@@ -30,7 +30,8 @@ proxy). The app forwards the browser's session cookie to the Rust `/auth/*` and
 
 ```bash
 npm run check:types   # tsc --noEmit
-npm test              # Vitest (unit project)
+npx vitest run --project unit   # unit tests (what CI runs; no browser)
+npm test                        # all Vitest projects — the `ui` project needs `npx playwright install`
 npm run check:i18n    # locale key parity
 npm run check:deps    # knip (unused deps/exports)
 npm run lint          # eslint

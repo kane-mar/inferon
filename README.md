@@ -267,7 +267,8 @@ parent zone's DNS (DNSimple for agilefederation.com) and
   `npm run build && npm start`. Server data calls go through `INFERON_API_URL`
   (defaults to `http://proxy:8080` in compose; set it to a local proxy, e.g.
   `INFERON_API_URL=http://localhost:8080`). Checks: `npm run check:types` (tsc),
-  `npm test` (Vitest), `npm run check:i18n`, `npm run check:deps` (knip),
+  `npx vitest run --project unit` (unit tests — what CI runs; no browser),
+  `npm run check:i18n`, `npm run check:deps` (knip),
   `npm run lint`, `npm run build`. The repo sits on an SMB share where npm stalls —
   develop in a local copy
   (`rsync -a web/ ~/.cache/inferon-web-sandbox/ --exclude node_modules --exclude .next`).
