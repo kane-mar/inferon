@@ -97,7 +97,7 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: |
           ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" "\
-            mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
+            rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
             && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh \
             && docker compose up -d postgres redis \
             && ./scripts/migrate.sh \

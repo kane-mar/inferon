@@ -167,7 +167,7 @@ remote_deploy() {
     local ip=$1 env_args
     env_args=$(compose_env)
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
-        "mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon \
+        "rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon \
          && cd /opt/inferon && chmod +x scripts/*.sh \
          && docker compose up -d postgres redis \
          && ./scripts/migrate.sh \
