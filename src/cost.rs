@@ -26,11 +26,15 @@ pub struct Price {
 }
 
 /// Model-aware price lookup (USD per 1M tokens). Prefix-tolerant so dated
-/// snapshots price correctly. `deepseek-chat` is an alias of v4-flash.
+/// snapshots price correctly. `deepseek-chat` and `deepseek-flash` are aliases
+/// of v4-flash.
 pub fn price_for(model: &str) -> Price {
     if model.starts_with("deepseek-v4-pro") {
         hit("0.66", "0.022", "1.98")
-    } else if model.starts_with("deepseek-chat") || model.starts_with("deepseek-v4-flash") {
+    } else if model.starts_with("deepseek-chat")
+        || model.starts_with("deepseek-flash")
+        || model.starts_with("deepseek-v4-flash")
+    {
         hit("0.22", "0.007", "0.66")
     } else if model.starts_with("gpt-4o-mini") {
         miss_only("0.15", "0.60")
@@ -122,6 +126,16 @@ mod tests {
         assert_eq!(price_for("deepseek-v4-flash"), mk_hit("0.22", "0.007", "0.66"));
         assert_eq!(price_for("deepseek-v4-flash-vision-exp"), mk_hit("0.22", "0.007", "0.66"));
         assert_eq!(price_for("deepseek-v4-pro"), mk_hit("0.66", "0.022", "1.98"));
+    }
+
+    #[test]
+    fn deepseek_flash_prices_at_v4_flash_rates() {
+        // Regression: DeepSeek's API returns the model as `deepseek-flash`,
+        // which matched neither `deepseek-chat` nor `deepseek-v4-flash` and so
+        // fell through to the default $3/$15 row (a ~13.7x overcharge).
+        assert_eq!(price_for("deepseek-flash"), mk_hit("0.22", "0.007", "0.66"));
+        assert_eq!(calculate_cost("deepseek-flash", 1_000_000, 0, 0), dec("0.22"));
+        assert_eq!(calculate_cost("deepseek-flash", 0, 1_000_000, 0), dec("0.66"));
     }
 
     #[test]
