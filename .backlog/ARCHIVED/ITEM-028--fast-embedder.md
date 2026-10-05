@@ -5,9 +5,9 @@
 **So that** task-aware routing can use semantic signal instead of heuristics alone
 
 **Acceptance Criteria:**
-1. The proxy embeds prompts with the `ort` (ONNX Runtime) crate — a quantized BGE-micro-class model, (1,128) token ids/attention mask → 384-d normalized vector (spec `onnx_embed.rs` params: Level3 graph opt, 4 intra threads)
-2. Embedding adds <3ms on the hot path (Slice 5 latency target), measured, not assumed
-3. Model artifact has a documented shipping path (image layer vs first-boot download) — the choice must respect the ~25GB snapshot/backup story
+1. The proxy embeds prompts with the `ort` (ONNX Runtime) crate — a quantized BGE-micro-class model, (1,128) token ids / attention mask / segment ids → 384-d normalized vector (spec `onnx_embed.rs` params: Level3 graph opt, 4 intra threads)
+2. Re-baselined (2026-10-05, measured): one embed takes **≤150 ms** on the production tier (measured ~141–150 ms p50), so embedding runs **off the hot path** — once per task/system-prompt, cached, never per request
+3. Model artifact has a documented shipping path — **image layer** (the ~17 MB model + ~8.8 MB ORT `libonnxruntime.so` bake into the image; trivial against the ~25 GB snapshot story)
 4. Pure Rust at runtime; no Python in the serving path (project decision); graceful degradation if the embedder is unavailable (router falls back to ITEM-015 heuristics)
 
 **Technical Notes:**
@@ -119,3 +119,32 @@ on "current hardware") is falsified by measurement. Unpark options now:
 mechanics are confirmed trivial: the ~17 MB model + the 8.8 MB ORT runtime
 `libonnxruntime.so` bake into the image layer well within the ~25 GB snapshot
 story (image layer is the right call; no first-boot download needed).
+
+## Decision (2026-10-05) — AC2 re-baselined (Option 1)
+
+**PO chose Option 1**: re-baseline AC2 to **≤150 ms on the production tier**
+(measured, not assumed — ~141–150 ms p50) and treat the embedder as an
+**off-hot-path, task-level** signal: embed once per task/system-prompt and
+cache the vector (ITEM-029's centroid design already embeds tasks, not
+individual requests). The `Embedder` seam stays per-embed (a blocking ~150 ms
+call); callers (029/030) own the cache. AC3 (shipping path) resolves to the
+**image layer** (model + ORT runtime baked into the image).
+
+Remaining for 028 itself: none pending — the embedder builds, runs, measures,
+and degrades gracefully (AC4). Wiring into routing is 029/030, gated on real
+task traffic for the centroids.
+
+## Verification record (2026-10-05)
+
+- **AC1 (embed with ort)**: `OrtEmbedder` loads `bge-micro-v2` int8 ONNX +
+  `tokenizer.json` and returns a 384-d L2-normalized vector; `embed_bench` runs
+  on the host (Level3 opt, 4 intra threads). The first real run surfaced a
+  missing `token_type_ids` input — fixed.
+- **AC2 (latency, re-baselined)**: measured ~141–150 ms p50 on the production
+  tier (vc2-1c-1gb); re-baselined to ≤150 ms off-hot-path (task-level cache).
+- **AC3 (shipping path)**: **image layer** — ~17 MB model + ~8.8 MB ORT
+  `libonnxruntime.so` bake into the image (trivial vs the ~25 GB snapshot).
+- **AC4 (pure Rust + graceful degradation)**: runtime is pure Rust (ort
+  `load-dynamic`, no Python); `NoEmbedder` fallback is unit-tested
+  (`no_embedder_returns_none`); routing stays heuristic when unavailable.
+- Default `cargo test` 190 green; `cargo check --features embedder` green.

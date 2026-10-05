@@ -12,8 +12,13 @@
 //! additive, never a hard dependency (ITEM-028 AC4).
 //!
 //! Model: TaylorAI/bge-micro-v2 quantized int8 ONNX + `tokenizer.json`; the
-//! spec's params are (1,128) token ids/attention mask → 384-d normalized
-//! vector, graph optimization Level3, 4 intra threads.
+//! spec's params are (1,128) token ids / attention mask / segment ids →
+//! 384-d normalized vector, graph optimization Level3, 4 intra threads.
+//!
+//! Latency (measured on the production tier, 1 vCPU): **~141–150 ms** per
+//! embed. Embedding is therefore an **off-hot-path, task-level** signal —
+//! callers embed a task/system-prompt once and cache the vector (ITEM-029),
+//! never once per request (ITEM-028 AC2, re-baselined 2026-10-05).
 
 /// BGE-micro vector width (spec: 384-d).
 pub const EMBED_DIM: usize = 384;
@@ -22,6 +27,10 @@ pub const MAX_TOKENS: usize = 128;
 
 /// Embedding seam: `None` means "no semantic signal" — callers must degrade
 /// gracefully to the heuristic path (AC4).
+///
+/// One embed is ~150 ms on the production tier, so this is a task-level
+/// primitive: callers own the cache and embed once per task/system-prompt,
+/// not per request.
 pub trait Embedder: Send + Sync {
     /// L2-normalized 384-d embedding of `text`, or `None` when unavailable.
     fn embed(&self, text: &str) -> Option<[f32; EMBED_DIM]>;
