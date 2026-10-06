@@ -148,3 +148,18 @@ configure routing/budget from the UI, and the onboarding flow does not back the
 Ranking rationale: 043 → 044 → 045 are dependency-ordered and are the minimum for
 a tenant to run their own traffic; 047/048 make it usable; 046 is power-user
 configuration. ITEM-018 (the PO handoff) now sits after the control plane.
+
+## 2026-10-06 — ITEM-049 captured (own the app shell)
+
+Follow-up to the design pass. The web app's *content* is Inferon-written, but its
+*frame* is still the vendored SaaS-Boilerplate shell (the `(auth)` route group,
+`dashboard/layout.tsx`, `DashboardHeader`, `MobileNavigation`, `TitleBar`,
+`SlashIcon`, `CenteredContainer`, and template flourishes like the `/` separator
+and shadowed header). And there are two operator consoles: the Rust
+`/v1/dashboard/operator` HTML (bearer/operator-key, system fonts) and the Next
+`/dashboard/operator` (session, themed) — the README points at the Rust one.
+
+Captured as **ITEM-049** (type: tech-debt), ranked after the control-plane items
+(043–048) since it is consistency housekeeping, not new capability. One item
+covers both because they're the same "own all the surfaces" cleanup: exit the
+template, and leave one operator console (JSON APIs for machines unchanged).
