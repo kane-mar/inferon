@@ -125,6 +125,8 @@ export type ProvidersResponse = { providers: ProviderRow[]; kinds: string[]; rol
 
 export type NewProvider = { kind: string; name?: string; base_url: string; key: string };
 
+export type ProviderTest = { ok: boolean; status: number | null };
+
 export type CreatedKey = {
   key_id: string;
   tenant_id: string;
@@ -271,6 +273,10 @@ export class InferonApi {
 
   removeProvider(providerId: string, cookie?: string): Promise<{ provider_id: string; removed: boolean }> {
     return this.request('POST', `/v1/dashboard/api/providers/${providerId}/remove`, {}, { cookie });
+  }
+
+  testProvider(providerId: string, cookie?: string): Promise<ProviderTest> {
+    return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {

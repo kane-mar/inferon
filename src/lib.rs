@@ -72,6 +72,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/providers/:provider_id/remove",
             post(dashboard::tenant_provider_remove),
         )
+        .route(
+            "/v1/dashboard/api/providers/:provider_id/test",
+            post(dashboard::tenant_provider_test),
+        )
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))

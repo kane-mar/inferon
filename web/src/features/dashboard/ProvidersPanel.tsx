@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProvidersResponse } from '@/libs/InferonApi';
+import type { ProvidersResponse, ProviderTest } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -36,6 +36,7 @@ export const ProvidersPanel = (props: {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tested, setTested] = useState<Record<string, ProviderTest | 'pending'>>({});
 
   const canEdit = props.role === 'owner';
 
@@ -73,6 +74,19 @@ export const ProvidersPanel = (props: {
     }
   };
 
+  const test = async (providerId: string) => {
+    setTested(previous => ({ ...previous, [providerId]: 'pending' }));
+    try {
+      const result = await InferonApi.sameOrigin().testProvider(providerId);
+      setTested(previous => ({ ...previous, [providerId]: result }));
+    } catch {
+      setTested(previous => ({
+        ...previous,
+        [providerId]: { ok: false, status: null },
+      }));
+    }
+  };
+
   return (
     <div className="space-y-6">
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -83,44 +97,79 @@ export const ProvidersPanel = (props: {
               <li className="p-4 text-sm text-muted-foreground">{t('empty')}</li>
             )
           : (
-              props.data.providers.map(provider => (
-                <li
-                  key={provider.id}
-                  className="
-                    flex flex-wrap items-center gap-3 border-b px-4 py-3 text-sm
-                    last:border-0
-                  "
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium">{provider.name}</div>
-                    <div className="
-                      truncate font-mono text-xs text-muted-foreground
+              props.data.providers.map((provider) => {
+                const result = tested[provider.id];
+                return (
+                  <li
+                    key={provider.id}
+                    className="
+                      flex flex-wrap items-center gap-3 border-b px-4 py-3
+                      text-sm
+                      last:border-0
+                    "
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{provider.name}</div>
+                      <div className="
+                        truncate font-mono text-xs text-muted-foreground
+                      "
+                      >
+                        {provider.base_url}
+                      </div>
+                    </div>
+                    <span className="
+                      rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs
                     "
                     >
-                      {provider.base_url}
-                    </div>
-                  </div>
-                  <span className="
-                    rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs
-                  "
-                  >
-                    {provider.kind}
-                  </span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {provider.key_hint}
-                  </span>
-                  {canEdit && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => remove(provider.id)}
-                    >
-                      {t('remove')}
-                    </Button>
-                  )}
-                </li>
-              ))
+                      {provider.kind}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {provider.key_hint}
+                    </span>
+                    {result && result !== 'pending' && (
+                      <span
+                        className={`
+                          font-mono text-xs
+                          ${
+                      result.ok
+                        ? `
+                          text-emerald-600
+                          dark:text-emerald-400
+                        `
+                        : 'text-destructive'
+                      }
+                        `}
+                      >
+                        {result.ok
+                          ? t('connected')
+                          : result.status == null
+                            ? t('unreachable')
+                            : `${t('failed')} (${result.status})`}
+                      </span>
+                    )}
+                    {canEdit && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={result === 'pending'}
+                        onClick={() => test(provider.id)}
+                      >
+                        {result === 'pending' ? t('testing') : t('test')}
+                      </Button>
+                    )}
+                    {canEdit && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => remove(provider.id)}
+                      >
+                        {t('remove')}
+                      </Button>
+                    )}
+                  </li>
+                );
+              })
             )}
       </ul>
 

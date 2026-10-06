@@ -972,6 +972,46 @@ pub async fn tenant_provider_remove(
     }
 }
 
+/// POST /v1/dashboard/api/providers/:provider_id/test — a minimal probe of the
+/// provider's base URL + key (`GET <base>/models`, the OpenAI-compatible
+/// endpoint; costs nothing). Reports `{ ok, status }` — `status` is `null` when
+/// the provider could not be reached.
+pub async fn tenant_provider_test(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(provider_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, _role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let provider = match state.provider_store.resolve_provider(tenant_id, provider_id).await {
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
+        }
+        Err(e) => return internal(&e.to_string()),
+    };
+    let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
+    let probe = state
+        .http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", provider.api_key))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await;
+    match probe {
+        Ok(response) => json_ok(json!({
+            "ok": response.status().is_success(),
+            "status": response.status().as_u16(),
+        })),
+        Err(e) => {
+            tracing::warn!("provider probe failed for {provider_id}: {e}");
+            json_ok(json!({ "ok": false, "status": null }))
+        }
+    }
+}
+
 /// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
 /// invites (ITEM-039). Owners and members may view.
 pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {

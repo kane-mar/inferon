@@ -183,6 +183,11 @@
     "adding": "Adding…",
     "remove": "Remove",
     "owner_only": "Only the tenant owner can manage providers.",
-    "error": "Could not update providers — please retry."
+    "error": "Could not update providers — please retry.",
+    "test": "Test",
+    "testing": "Testing…",
+    "connected": "Connected",
+    "failed": "Failed",
+    "unreachable": "Unreachable"
   }
 }

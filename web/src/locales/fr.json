@@ -183,6 +183,11 @@
     "adding": "Ajout…",
     "remove": "Supprimer",
     "owner_only": "Seul le propriétaire du tenant peut gérer les fournisseurs.",
-    "error": "Impossible de mettre à jour les fournisseurs — veuillez réessayer."
+    "error": "Impossible de mettre à jour les fournisseurs — veuillez réessayer.",
+    "test": "Tester",
+    "testing": "Test…",
+    "connected": "Connecté",
+    "failed": "Échec",
+    "unreachable": "Injoignable"
   }
 }

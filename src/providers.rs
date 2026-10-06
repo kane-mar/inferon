@@ -71,6 +71,12 @@ pub trait ProviderStore: Send + Sync {
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
     /// The tenant's credential for the request path, if one is configured.
     async fn resolve(&self, tenant_id: Uuid) -> StoreResult<Option<ResolvedProvider>>;
+    /// A specific provider's credential (the test-connection probe).
+    async fn resolve_provider(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> StoreResult<Option<ResolvedProvider>>;
 }
 
 // --- Postgres ---------------------------------------------------------------
@@ -171,6 +177,29 @@ impl ProviderStore for PostgresProviderStore {
             }
         }
     }
+
+    async fn resolve_provider(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> StoreResult<Option<ResolvedProvider>> {
+        let Some(secrets) = self.secrets.as_deref() else {
+            return Ok(None);
+        };
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT base_url, key_ciphertext FROM providers WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((base_url, ciphertext)) = row else {
+            return Ok(None);
+        };
+        Ok(secrets
+            .decrypt(&ciphertext)
+            .map(|api_key| ResolvedProvider { base_url, api_key }))
+    }
 }
 
 // --- In-memory (tests) ------------------------------------------------------
@@ -254,6 +283,23 @@ impl ProviderStore for InMemoryProviderStore {
                 api_key: row.api_key.clone(),
             }))
     }
+
+    async fn resolve_provider(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> StoreResult<Option<ResolvedProvider>> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|row| row.provider.tenant_id == tenant_id && row.provider.id == id)
+            .map(|row| ResolvedProvider {
+                base_url: row.provider.base_url.clone(),
+                api_key: row.api_key.clone(),
+            }))
+    }
 }
 
 #[cfg(test)]
@@ -312,5 +358,19 @@ mod tests {
         let store = InMemoryProviderStore::with_provider(tenant, "https://x/v1", "sk-x");
         assert!(store.list(other).await.expect("list").is_empty());
         assert!(store.resolve(other).await.expect("resolve").is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_provider_targets_one_tenant_owned_row() {
+        let tenant = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let store = InMemoryProviderStore::with_provider(tenant, "https://mine/v1", "sk-mine");
+        let id = store.list(tenant).await.expect("list")[0].id;
+
+        let resolved = store.resolve_provider(tenant, id).await.expect("resolve").expect("found");
+        assert_eq!(resolved.base_url, "https://mine/v1");
+        assert_eq!(resolved.api_key, "sk-mine");
+        // Another tenant can never resolve it, even with the id.
+        assert!(store.resolve_provider(other, id).await.expect("resolve").is_none());
     }
 }
