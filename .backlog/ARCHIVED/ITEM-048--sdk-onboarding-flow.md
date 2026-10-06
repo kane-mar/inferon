@@ -37,5 +37,9 @@ this page is the only first-key surface.
   state). Added a "Connect" nav item.
 - `/auth/callback` now sends new sign-ups here (was `/dashboard/keys`).
 - AC1 ✅ (base URL + key-once + snippets), AC2 ✅ (first-request detection).
-- AC3/AC4 (links to models + own-provider) are gated on ITEM-043/044 — the page
-  currently works for a tenant on the shared platform key.
+- **Completion (2026-10-06, commit `eeda65d`)**:
+  - **AC3** ✅ — the Connect page links to `/dashboard/models` and
+    `/dashboard/providers`.
+  - **AC4** ✅ — the snippet model comes from the tenant's enabled/default
+    catalog model (datalist), so the first request works on the shared key and
+    on an own provider (including free-form `openai-compatible` ids).

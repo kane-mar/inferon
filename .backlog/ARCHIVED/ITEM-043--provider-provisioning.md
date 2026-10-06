@@ -47,6 +47,19 @@ cannot choose a different vendor. This is the first thing a real user hits.
   add/remove, member view-only), API `GET/POST /v1/dashboard/api/providers` +
   `POST …/:id/remove`, a "Providers" nav item, en/fr copy.
 - Rust 191 tests, web 48, all checks + `next build` green.
-- **Remaining**: AC4 "test connection" (a probe action) is not built yet.
+- **Remaining** at the time of 043c: AC4 "test connection".
+- **043d AC4 test connection** (commit `e666ba9`): a per-provider Test action probes
+  `GET <base>/models` with the stored key and reports ok/status or `unreachable`.
+- **043e completion (2026-10-06, commit `eeda65d`)**:
+  - **AC5 rotation**: `POST /v1/dashboard/api/providers/:id` (owner-only) updates
+    name/base_url/key/metadata in place — no redeploy.
+  - **AC2 last-updated**: `updated_at` column + shown in the list.
+  - **AC1 metadata**: optional org + arbitrary upstream headers (JSONB), applied
+    on every forwarded request and the test probe (migration 016).
+- **AC1 scope note (PO 2026-10-06)**: the `kind` allowlist is
+  `deepseek | openai | openai-compatible`. Native Anthropic is **not**
+  OpenAI-shaped (`/v1/messages`, `x-api-key`, different envelope) and is a new
+  adapter — captured separately as **ITEM-050**. This item is complete for the
+  OpenAI-compatible kinds.
 - Env: `PROVIDER_ENCRYPTION_KEY` wired through compose + CI + `deploy-durable.sh`;
   unset = provisioning disabled (fail-soft).
