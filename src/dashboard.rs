@@ -861,6 +861,117 @@ fn owner_only(role: &str) -> Result<(), Response> {
     }
 }
 
+// --- Providers (ITEM-043) ----------------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub struct ProviderBody {
+    kind: String,
+    name: Option<String>,
+    base_url: String,
+    key: String,
+}
+
+fn provider_json(provider: &crate::providers::Provider) -> Value {
+    json!({
+        "id": provider.id.to_string(),
+        "kind": provider.kind,
+        "name": provider.name,
+        "base_url": provider.base_url,
+        "key_hint": provider.key_hint,
+        "created_at": provider.created_at,
+    })
+}
+
+/// GET /v1/dashboard/api/providers (session-scoped) — masked provider list.
+pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    match state.provider_store.list(tenant_id).await {
+        Ok(providers) => json_ok(json!({
+            "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
+            "kinds": crate::providers::PROVIDER_KINDS,
+            "role": role,
+        })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/providers (owner-only) — register a provider.
+pub async fn tenant_provider_create(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ProviderBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    if !crate::providers::is_supported_kind(&body.kind) {
+        return crate::json_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_kind",
+            "that provider kind is not supported yet",
+        );
+    }
+    let base_url = body.base_url.trim().trim_end_matches('/').to_string();
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return crate::json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_base_url",
+            "base URL must start with http:// or https://",
+        );
+    }
+    let key = body.key.trim().to_string();
+    if key.is_empty() {
+        return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
+    }
+    let name = body
+        .name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| crate::providers::default_name(&body.kind));
+    let new = crate::providers::NewProvider {
+        kind: body.kind,
+        name,
+        base_url,
+        key,
+    };
+    match state.provider_store.insert(tenant_id, &new).await {
+        Ok(id) => json_ok(json!({ "id": id.to_string() })),
+        Err(e) => {
+            tracing::error!("provider insert failed: {e}");
+            internal(&e.to_string())
+        }
+    }
+}
+
+/// POST /v1/dashboard/api/providers/:provider_id/remove (owner-only).
+pub async fn tenant_provider_remove(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(provider_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    match state.provider_store.remove(tenant_id, provider_id).await {
+        Ok(removed) => json_ok(json!({
+            "provider_id": provider_id.to_string(),
+            "removed": removed,
+        })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
 /// invites (ITEM-039). Owners and members may view.
 pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
@@ -1140,6 +1251,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: "http://127.0.0.1:1/".to_string(),
             tenant_store,
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),

@@ -27,6 +27,9 @@ serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 jsonschema = "0.54.0"
+# At-rest encryption for provider credentials (ITEM-043): XChaCha20-Poly1305,
+# pure Rust (no C toolchain), keyed by PROVIDER_ENCRYPTION_KEY.
+chacha20poly1305 = "0.10"
 # Optional (feature `embedder`): ONNX Runtime + tokenizer for the prompt
 # embedder. `load-dynamic` keeps the crate link-free, so this type-checks on
 # any platform and only needs libonnxruntime at runtime (see src/embed.rs).

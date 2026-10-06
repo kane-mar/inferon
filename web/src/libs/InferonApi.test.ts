@@ -124,6 +124,34 @@ describe('InferonApi — dashboard views', () => {
 });
 
 describe('InferonApi — tenant management', () => {
+  it('lists providers with masked hints and posts a new one', async () => {
+    const fetchImpl = vi
+      .fn<FetchLike>()
+      .mockResolvedValueOnce(
+        json({
+          providers: [
+            { id: 'p1', kind: 'deepseek', name: 'Mine', base_url: 'https://api.deepseek.com/v1', key_hint: '\u2026ab12', created_at: '0' },
+          ],
+          kinds: ['deepseek', 'openai', 'openai-compatible'],
+          role: 'owner',
+        }),
+      )
+      .mockResolvedValueOnce(json({ id: 'p2' }));
+
+    const api = makeApi(fetchImpl);
+    const listed = await api.providers();
+
+    expect(listed.role).toBe('owner');
+    expect(listed.providers[0]?.key_hint).toBe('\u2026ab12');
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://proxy:8080/v1/dashboard/api/providers');
+
+    await api.createProvider({ kind: 'openai', base_url: 'https://api.openai.com/v1', key: 'sk-x' });
+    const [url, init] = fetchImpl.mock.calls[1] as unknown as [string, RequestInit];
+
+    expect(url).toBe('http://proxy:8080/v1/dashboard/api/providers');
+    expect(JSON.parse(init.body as string)).toMatchObject({ kind: 'openai', key: 'sk-x' });
+  });
+
   it('lists keys with the caller role and keeps metadata only', async () => {
     const fetchImpl = vi.fn(async () =>
       json({ role: 'owner', keys: [{ id: 'k1', label: 'ci', created_at: 'now', revoked: false, revoked_at: null, last_used_at: null }] }),

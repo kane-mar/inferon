@@ -56,6 +56,7 @@ jobs:
       OAUTH_CLIENT_ID: ${{ secrets.OAUTH_CLIENT_ID }}
       OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      PROVIDER_ENCRYPTION_KEY: ${{ secrets.PROVIDER_ENCRYPTION_KEY }}
       UPSTREAM_MASTER_KEY: ${{ secrets.UPSTREAM_MASTER_KEY }}
       OPERATOR_GITHUB_LOGINS: ${{ secrets.OPERATOR_GITHUB_LOGINS }}
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
@@ -105,6 +106,7 @@ jobs:
                NEXT_PUBLIC_APP_URL='https://$INFERON_HOST' \
                GITHUB_CLIENT_ID='$OAUTH_CLIENT_ID' GITHUB_CLIENT_SECRET='$OAUTH_CLIENT_SECRET' \
                SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
+               PROVIDER_ENCRYPTION_KEY='$PROVIDER_ENCRYPTION_KEY' \
                OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
                && docker compose --profile prod up -d --build \
                && docker compose --profile prod up -d --force-recreate caddy"

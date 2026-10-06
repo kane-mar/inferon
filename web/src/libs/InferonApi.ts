@@ -111,6 +111,20 @@ export type KeysResponse = { role: Role; keys: KeyRow[] };
 export type MemberRow = { id: string; github_login: string; role: Role };
 export type MembersResponse = { role: Role; members: MemberRow[]; invites: string[] };
 
+export type ProviderRow = {
+  id: string;
+  kind: string;
+  name: string;
+  base_url: string;
+  /** Masked, e.g. `…ab12` — the key itself never leaves the backend. */
+  key_hint: string;
+  created_at: string;
+};
+
+export type ProvidersResponse = { providers: ProviderRow[]; kinds: string[]; role: Role };
+
+export type NewProvider = { kind: string; name?: string; base_url: string; key: string };
+
 export type CreatedKey = {
   key_id: string;
   tenant_id: string;
@@ -245,6 +259,18 @@ export class InferonApi {
 
   removeMember(userId: string, cookie?: string): Promise<{ user_id: string; removed: boolean }> {
     return this.request('POST', `/v1/dashboard/api/members/${userId}/remove`, {}, { cookie });
+  }
+
+  providers(cookie?: string): Promise<ProvidersResponse> {
+    return this.request<ProvidersResponse>('GET', '/v1/dashboard/api/providers', undefined, { cookie });
+  }
+
+  createProvider(body: NewProvider, cookie?: string): Promise<{ id: string }> {
+    return this.request('POST', '/v1/dashboard/api/providers', body, { cookie });
+  }
+
+  removeProvider(providerId: string, cookie?: string): Promise<{ provider_id: string; removed: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/providers/${providerId}/remove`, {}, { cookie });
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {

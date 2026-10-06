@@ -1342,6 +1342,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: "http://127.0.0.1:1/".to_string(),
             tenant_store,
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,

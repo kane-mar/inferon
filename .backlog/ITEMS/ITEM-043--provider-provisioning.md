@@ -32,3 +32,21 @@ cannot choose a different vendor. This is the first thing a real user hits.
   (deepseek), before the dashboard page.
 
 **Source:** PO review 2026-10-06 — "no ability to provision new providers".
+
+## Progress (2026-10-06) — providers landed
+
+- **043a schema + encryption + store**: `providers` table (migration 012);
+  `src/secret.rs` (XChaCha20-Poly1305, `PROVIDER_ENCRYPTION_KEY`); `src/providers.rs`
+  (`ProviderStore` seam + `PostgresProviderStore` + `InMemoryProviderStore`,
+  tenant-scoped, masked `key_hint` only). TDD: 5 secret + 3 store tests.
+- **043b proxy resolution**: `AppState.provider_store`; each request resolves the
+  tenant's provider (`base_url` + decrypted key) and falls back to the tenant's
+  shared `upstream_openai_key` + the global `UPSTREAM_URL` (no regression). The
+  guard's frontier replay threads the same route. 3 route tests.
+- **043c dashboard**: `/dashboard/providers` page + `ProvidersPanel` (owner
+  add/remove, member view-only), API `GET/POST /v1/dashboard/api/providers` +
+  `POST …/:id/remove`, a "Providers" nav item, en/fr copy.
+- Rust 191 tests, web 48, all checks + `next build` green.
+- **Remaining**: AC4 "test connection" (a probe action) is not built yet.
+- Env: `PROVIDER_ENCRYPTION_KEY` wired through compose + CI + `deploy-durable.sh`;
+  unset = provisioning disabled (fail-soft).

@@ -9,7 +9,9 @@ pub mod auth;
 pub mod dashboard;
 pub mod embed;
 pub mod linter;
+pub mod providers;
 pub mod router;
+pub mod secret;
 pub mod session;
 pub mod tenant;
 pub mod telemetry;
@@ -46,6 +48,9 @@ pub struct AppState {
     pub http_client: Client,
     pub upstream_url: String,
     pub tenant_store: Arc<dyn TenantStore>,
+    /// Tenant-provisioned providers (ITEM-043): resolved per request, falling
+    /// back to the tenant's shared upstream key when none is configured.
+    pub provider_store: Arc<dyn providers::ProviderStore>,
     pub budget_store: Arc<dyn budget::BudgetStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
@@ -62,6 +67,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
+        .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
+        .route(
+            "/v1/dashboard/api/providers/:provider_id/remove",
+            post(dashboard::tenant_provider_remove),
+        )
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
@@ -106,6 +116,46 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// The resolved upstream target for one request (ITEM-043): the tenant's own
+/// provider when configured, else the tenant's shared key + the global URL.
+struct Route {
+    url: String,
+    key: String,
+}
+
+/// `<base>/chat/completions` — the OpenAI-compatible chat endpoint.
+fn chat_completions_url(base_url: &str) -> String {
+    format!("{}/chat/completions", base_url.trim_end_matches('/'))
+}
+
+async fn resolve_route(state: &Arc<AppState>, tenant: &Tenant) -> Result<Route, Response> {
+    match state.provider_store.resolve(tenant.id).await {
+        Ok(Some(provider)) => Ok(Route {
+            url: chat_completions_url(&provider.base_url),
+            key: provider.api_key,
+        }),
+        Ok(None) => match tenant.upstream_openai_key.as_deref() {
+            Some(key) => Ok(Route {
+                url: state.upstream_url.clone(),
+                key: key.to_string(),
+            }),
+            None => Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "tenant_misconfigured",
+                "tenant has no upstream key configured",
+            )),
+        },
+        Err(e) => {
+            tracing::error!("provider resolution failed: {e}");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "provider_error",
+                "could not resolve your provider",
+            ))
+        }
+    }
 }
 
 /// Proxy a chat completion request to the configured upstream.
@@ -170,12 +220,9 @@ async fn proxy_chat_completions(
         system_prompt_hash: system_prompt_hash(&payload),
         raw_prompt: payload,
     };
-    let Some(upstream_key) = tenant.upstream_openai_key.as_deref() else {
-        return json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "tenant_misconfigured",
-            "tenant has no upstream key configured",
-        );
+    let route = match resolve_route(&state, &tenant).await {
+        Ok(route) => route,
+        Err(resp) => return resp,
     };
 
     let started = Instant::now();
@@ -209,8 +256,8 @@ async fn proxy_chat_completions(
 
     let upstream_request = state
         .http_client
-        .post(&state.upstream_url)
-        .header("Authorization", format!("Bearer {upstream_key}"))
+        .post(&route.url)
+        .header("Authorization", format!("Bearer {}", route.key))
         .header("Content-Type", "application/json")
         .body(upstream_body);
 
@@ -253,7 +300,7 @@ async fn proxy_chat_completions(
                 tenant_id,
                 started,
                 upstream,
-                upstream_key,
+                &route,
                 state.telemetry_tx.clone(),
             )
             .await
@@ -457,7 +504,7 @@ async fn guarded_stream_response(
     tenant_id: Uuid,
     started: Instant,
     upstream: reqwest::Response,
-    upstream_key: &str,
+    route: &Route,
     tx: mpsc::Sender<TraceMessage>,
 ) -> Response {
     let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
@@ -467,7 +514,7 @@ async fn guarded_stream_response(
             tracing::error!("guarded upstream body read failed: {e}");
             // 025: a cheap stream that dies before any bytes is the
             // "connection crash" class — fall back, don't surface it.
-            return fallback_to_frontier(&mut guard_emit, state, upstream_key, GuardReason::UpstreamFailure)
+            return fallback_to_frontier(&mut guard_emit, state, route, GuardReason::UpstreamFailure)
                 .await;
         }
     };
@@ -494,7 +541,7 @@ async fn guarded_stream_response(
                 tenant_id,
                 reason.label()
             );
-            fallback_to_frontier(&mut guard_emit, state, upstream_key, reason).await
+            fallback_to_frontier(&mut guard_emit, state, route, reason).await
         }
     }
 }
@@ -510,7 +557,7 @@ async fn guarded_stream_response(
 async fn fallback_to_frontier(
     guard_emit: &mut BufferedGuard,
     state: &AppState,
-    upstream_key: &str,
+    route: &Route,
     reason: GuardReason,
 ) -> Response {
     let frontier = guard::fallback_model(&guard_emit.meta.raw_prompt);
@@ -528,8 +575,8 @@ async fn fallback_to_frontier(
     };
     let replay = state
         .http_client
-        .post(&state.upstream_url)
-        .header("Authorization", format!("Bearer {upstream_key}"))
+        .post(&route.url)
+        .header("Authorization", format!("Bearer {}", route.key))
         .header("Content-Type", "application/json")
         .body(replay_body)
         .send()
@@ -1125,6 +1172,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: upstream_url.to_string(),
             tenant_store,
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -1186,6 +1234,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store,
             telemetry_tx: tx,
             operator_key: None,
@@ -1200,6 +1249,68 @@ mod tests {
             .await
             .unwrap();
         (response, rx)
+    }
+
+    fn route_state(
+        provider_store: std::sync::Arc<dyn crate::providers::ProviderStore>,
+    ) -> std::sync::Arc<AppState> {
+        std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: "https://shared.test/v1/chat/completions".to_string(),
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store,
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: mpsc::channel(1).0,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        })
+    }
+
+    fn seeded_tenant() -> Tenant {
+        Tenant {
+            id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+            upstream_openai_key: Some(MASTER_KEY.to_string()),
+        }
+    }
+
+    #[test]
+    fn chat_completions_url_joins_the_base() {
+        assert_eq!(
+            chat_completions_url("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_completions_url("https://api.deepseek.com/v1/"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tenant_provider_overrides_the_shared_key() {
+        let tenant = seeded_tenant();
+        let state = route_state(std::sync::Arc::new(
+            crate::providers::InMemoryProviderStore::with_provider(
+                tenant.id,
+                "https://my-provider.test/v1",
+                "sk-my-provider",
+            ),
+        ));
+        let route = resolve_route(&state, &tenant).await.expect("route");
+        assert_eq!(route.url, "https://my-provider.test/v1/chat/completions");
+        assert_eq!(route.key, "sk-my-provider", "the tenant's own key wins");
+    }
+
+    #[tokio::test]
+    async fn without_a_provider_the_shared_key_is_the_fallback() {
+        let tenant = seeded_tenant();
+        let state = route_state(std::sync::Arc::new(
+            crate::providers::InMemoryProviderStore::default(),
+        ));
+        let route = resolve_route(&state, &tenant).await.expect("route");
+        assert_eq!(route.url, "https://shared.test/v1/chat/completions");
+        assert_eq!(route.key, MASTER_KEY);
     }
 
     fn dummy_trace() -> TraceMessage {
@@ -1316,6 +1427,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: upstream_url.to_string(),
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             telemetry_tx: tx,
             operator_key: None,
@@ -1337,6 +1449,7 @@ mod tests {
             http_client: state.http_client.clone(),
             upstream_url: state.upstream_url.clone(),
             tenant_store: state.tenant_store.clone(),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: state.budget_store.clone(),
             operator_key: state.operator_key.clone(),
             accounts: None,
@@ -1917,6 +2030,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2088,6 +2202,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2153,6 +2268,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2443,6 +2559,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,

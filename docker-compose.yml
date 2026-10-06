@@ -16,6 +16,8 @@ services:
       GITHUB_TOKEN_URL: ${GITHUB_TOKEN_URL:-}
       GITHUB_API_URL: ${GITHUB_API_URL:-}
       SESSION_SECRET: ${SESSION_SECRET:-}
+      # Provider-credential encryption (ITEM-043); unset disables provider provisioning.
+      PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}
       UPSTREAM_MASTER_KEY: ${UPSTREAM_MASTER_KEY:-}
       OPERATOR_GITHUB_LOGINS: ${OPERATOR_GITHUB_LOGINS:-}
       RUST_LOG: ${RUST_LOG:-info}

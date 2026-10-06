@@ -153,6 +153,7 @@ compose_env() {
     local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' NEXT_PUBLIC_APP_URL='https://$INFERON_HOST'"
     local var val
     for var in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_SECRET UPSTREAM_MASTER_KEY \
+               PROVIDER_ENCRYPTION_KEY \
                OPERATOR_GITHUB_LOGINS ALERT_WEBHOOK_URL UPSTREAM_URL; do
         val="${!var:-}"
         [ -n "$val" ] && out="$out $var='$val'"

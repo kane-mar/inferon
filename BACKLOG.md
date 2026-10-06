@@ -12,7 +12,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-043 | Provider provisioning (bring your own provider) | feature | **new** — self-serve provider keys; supersedes the shared platform key |
+| ITEM-043 | Provider provisioning (bring your own provider) | feature | **mostly done (2026-10-06)** — encrypted provider creds + proxy resolution + `/dashboard/providers`; remaining: "test connection" |
 | ITEM-044 | Model catalog & per-tenant selection | feature | **new** — depends on 043 |
 | ITEM-045 | Fallback & routing rules | feature | **new** — depends on 044 |
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |

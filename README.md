@@ -35,11 +35,18 @@ Two deployment units behind one Caddy TLS ingress (compose profile `prod`):
   JSON), `/auth/*` (GitHub OAuth + signed sessions), `/healthz`. Untouched by the
   web app.
 - **`web` (Next.js)** — the human surfaces: rebranded landing, the session-gated
-  dashboard (`/dashboard`, `/dashboard/keys`, `/dashboard/members`), and the
-  operator console (`/dashboard/operator`). Server-side it calls the Rust API over
-  the compose network (`INFERON_API_URL`) forwarding the browser's session cookie;
-  the browser calls the same public origin. The app never verifies sessions itself —
+  dashboard (`/dashboard`, `/dashboard/onboarding`, `/dashboard/providers`,
+  `/dashboard/keys`, `/dashboard/members`), and the operator console
+  (`/dashboard/operator`). Server-side it calls the Rust API over the compose
+  network (`INFERON_API_URL`) forwarding the browser's session cookie; the
+  browser calls the same public origin. The app never verifies sessions itself —
   auth stays entirely in the Rust proxy.
+
+**Providers (ITEM-043)**: a tenant can register their own upstream credentials at
+`/dashboard/providers` (DeepSeek / OpenAI / OpenAI-compatible). Keys are encrypted
+at rest (XChaCha20-Poly1305, `PROVIDER_ENCRYPTION_KEY`) and only a masked hint is
+ever read back; the proxy resolves the tenant's provider per request and falls
+back to the shared platform key when none is configured.
 
 Caddy routes `/v1/*`, `/auth/*`, `/healthz` → `proxy`; everything else → `web`
 (Next.js standalone image on a loopback-only port).
@@ -209,6 +216,7 @@ Repository secrets to set (Settings → Secrets and variables → Actions):
 | `OPERATOR_API_KEY` | operator credential (machine + console access) |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset = 503 on `/auth/login`). Note: GitHub reserves the `GITHUB_` prefix for secret **names**, so the repo secrets are `OAUTH_*`; they are passed to the container as `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` (what the app reads). |
 | `UPSTREAM_MASTER_KEY` | upstream key given to self-serve tenants (optional) |
+| `PROVIDER_ENCRYPTION_KEY` | 32-byte hex key encrypting tenant provider credentials at rest (ITEM-043; unset = provider provisioning disabled) |
 | `OPERATOR_GITHUB_LOGINS` | comma-separated operator GitHub logins (optional) |
 | `ALERT_WEBHOOK_URL` | cost-anomaly webhook (optional) |
 

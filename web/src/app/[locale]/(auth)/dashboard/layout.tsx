@@ -39,6 +39,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
   const labels = {
     home: t('home'),
     connect: t('connect'),
+    providers: t('providers'),
     keys: t('keys'),
     members: t('members'),
     operator: t('operator'),

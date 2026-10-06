@@ -62,6 +62,7 @@
   "DashboardNav": {
     "home": "Overview",
     "connect": "Connect",
+    "providers": "Providers",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator"
@@ -165,5 +166,23 @@
     "waiting": "Waiting for your first request…",
     "received": "First request received — you're live.",
     "go_to_dashboard": "Go to your dashboard"
+  },
+  "ProvidersPage": {
+    "title_bar": "Providers",
+    "title_bar_description": "Bring your own upstream account — the proxy runs on your key.",
+    "providers": "Your providers",
+    "empty": "No provider yet — traffic uses the shared platform key.",
+    "kind": "Kind",
+    "name": "Name",
+    "name_placeholder": "My DeepSeek account",
+    "base_url": "Base URL",
+    "key": "API key",
+    "key_note": "Encrypted at rest and never shown again — only a masked hint is kept.",
+    "add_title": "Add a provider",
+    "add": "Add provider",
+    "adding": "Adding…",
+    "remove": "Remove",
+    "owner_only": "Only the tenant owner can manage providers.",
+    "error": "Could not update providers — please retry."
   }
 }

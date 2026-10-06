@@ -105,6 +105,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Provider credentials are encrypted at rest (ITEM-043). Without a master
+    // key, provider provisioning is disabled — tenants keep using the shared key.
+    let secrets = inferon::secret::Secrets::from_env().map(Arc::new);
+    if secrets.is_none() {
+        tracing::info!("provider provisioning disabled — set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
+    }
+
     let state = Arc::new(AppState {
         http_client,
         upstream_url: std::env::var("UPSTREAM_URL")
@@ -112,6 +119,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| DEFAULT_UPSTREAM_URL.to_string()),
         tenant_store: Arc::new(PostgresTenantStore::new(pool.clone())),
+        provider_store: Arc::new(inferon::providers::PostgresProviderStore::new(
+            pool.clone(),
+            secrets,
+        )),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),

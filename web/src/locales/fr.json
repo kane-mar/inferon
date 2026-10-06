@@ -62,6 +62,7 @@
   "DashboardNav": {
     "home": "Vue d'ensemble",
     "connect": "Connexion",
+    "providers": "Fournisseurs",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -165,5 +166,23 @@
     "waiting": "En attente de votre première requête…",
     "received": "Première requête reçue — vous êtes en ligne.",
     "go_to_dashboard": "Accéder au tableau de bord"
+  },
+  "ProvidersPage": {
+    "title_bar": "Fournisseurs",
+    "title_bar_description": "Apportez votre propre compte amont — le proxy utilise votre clé.",
+    "providers": "Vos fournisseurs",
+    "empty": "Aucun fournisseur — le trafic utilise la clé partagée de la plateforme.",
+    "kind": "Type",
+    "name": "Nom",
+    "name_placeholder": "Mon compte DeepSeek",
+    "base_url": "URL de base",
+    "key": "Clé API",
+    "key_note": "Chiffrée au repos et jamais réaffichée — seul un indice masqué est conservé.",
+    "add_title": "Ajouter un fournisseur",
+    "add": "Ajouter le fournisseur",
+    "adding": "Ajout…",
+    "remove": "Supprimer",
+    "owner_only": "Seul le propriétaire du tenant peut gérer les fournisseurs.",
+    "error": "Impossible de mettre à jour les fournisseurs — veuillez réessayer."
   }
 }
