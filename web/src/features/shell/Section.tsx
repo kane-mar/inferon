@@ -1,5 +1,9 @@
 import { cn } from '@/utils/Helpers';
 
+/**
+ * A centered, max-width page band — the shared layout primitive for both the
+ * marketing page and the dashboard.
+ */
 export const Section = (props: {
   children: React.ReactNode;
   title?: string;

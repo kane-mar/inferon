@@ -3,8 +3,7 @@ import { useTranslations } from 'next-intl';
 import { AuthLink } from '@/components/AuthLink';
 import { badgeVariants } from '@/components/ui/badgeVariants';
 import { buttonVariants } from '@/components/ui/buttonVariants';
-import { CenteredHero } from '@/features/landing/CenteredHero';
-import { Section } from '@/features/landing/Section';
+import { Section } from '@/features/shell/Section';
 
 const REPOSITORY = 'https://github.com/kane-mar/inferon';
 
@@ -30,18 +29,25 @@ export const Hero = () => {
       md:pt-28
     "
     >
-      <CenteredHero
-        banner={(
-          <span
-            className={badgeVariants({
-              variant: 'outline',
-              className: 'font-mono text-xs tracking-wide uppercase',
-            })}
-          >
-            {t('badge')}
-          </span>
-        )}
-        title={t.rich('title', {
+      <div className="flex justify-center">
+        <span
+          className={badgeVariants({
+            variant: 'outline',
+            className: 'font-mono text-xs tracking-wide uppercase',
+          })}
+        >
+          {t('badge')}
+        </span>
+      </div>
+
+      <h1 className="
+        mx-auto mt-6 max-w-4xl text-center text-4xl font-semibold
+        tracking-tighter text-balance
+        sm:text-5xl
+        md:text-7xl
+      "
+      >
+        {t.rich('title', {
           important: chunks => (
             <span className="
               bg-linear-to-r from-accent to-chart-2 bg-clip-text
@@ -52,28 +58,38 @@ export const Hero = () => {
             </span>
           ),
         })}
-        description={t('description')}
-        buttons={(
-          <>
-            <AuthLink className={buttonVariants({ size: 'lg' })}>
-              {t('primary_button')}
-              <ArrowRightIcon className="ml-1 size-5" />
-            </AuthLink>
+      </h1>
 
-            <a
-              className={buttonVariants({ variant: 'outline', size: 'lg' })}
-              href={REPOSITORY}
-            >
-              <GitHubLogoIcon className="mr-2 size-5" />
-              {t('secondary_button')}
-            </a>
-          </>
-        )}
-      />
+      <p className="
+        mx-auto mt-6 max-w-2xl text-center text-lg text-pretty
+        text-muted-foreground
+        md:text-xl
+      "
+      >
+        {t('description')}
+      </p>
+
+      <div className="
+        mt-10 flex flex-wrap justify-center gap-3
+        max-sm:flex-col max-sm:items-center
+      "
+      >
+        <AuthLink className={buttonVariants({ size: 'lg' })}>
+          {t('primary_button')}
+          <ArrowRightIcon className="ml-1 size-5" />
+        </AuthLink>
+
+        <a
+          className={buttonVariants({ variant: 'outline', size: 'lg' })}
+          href={REPOSITORY}
+        >
+          <GitHubLogoIcon className="mr-2 size-5" />
+          {t('secondary_button')}
+        </a>
+      </div>
 
       <div className="
         mx-auto mt-16 max-w-2xl overflow-hidden rounded-lg border bg-[#1e1e1e]
-        shadow-sm
       "
       >
         <div className="

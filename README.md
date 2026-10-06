@@ -295,15 +295,15 @@ parent zone's DNS (DNSimple for agilefederation.com) and
 ```
 src/cost.rs      price table + cost math (rust_decimal, cache-hit aware)
 src/linter.rs    waste rules (over-provisioned / cache-miss / model misuse)
-src/dashboard.rs dashboard HTML + tenant-scoped JSON APIs
+src/dashboard.rs tenant-scoped + operator JSON APIs (no HTML — the frontend owns the UI)
 src/tenant.rs    tenant + API-key persistence (TenantStore: in-memory + Postgres)
 src/telemetry.rs batched trace worker + Postgres sink
 src/usage.rs     token-usage parsing (SSE + JSON)
 src/lib.rs       composition root: AppState, router, proxy hot path, streaming
 src/main.rs      wiring (env, Postgres pool, worker)
-db/init/         idempotent migrations (001 schema … 010 tenant invites)
-web/             Next.js human surfaces (landing, dashboard, operator console) —
-                 vendored SaaS-Boilerplate, stripped + Inferon-branded (ITEM-042)
+db/init/         idempotent migrations (001 schema … 016 provider metadata)
+web/             Next.js human surfaces (landing, dashboard, one operator console);
+                 Inferon-owned shell (ITEM-049)
 .backlog/        product backlog (single-ranked) + archived items + refinement log
 wiki/ raw/       design knowledge base (Karpathy-style wiki + immutable sources)
 ```

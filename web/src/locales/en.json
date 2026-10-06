@@ -7,7 +7,8 @@
     "sign_in": "Sign in",
     "dashboard": "Dashboard",
     "features": "Features",
-    "source": "Source"
+    "source": "Source",
+    "menu": "Menu"
   },
   "LocaleSwitcher": {
     "button_label": "Change language"
@@ -70,7 +71,8 @@
     "operator": "Operator"
   },
   "DashboardHeader": {
-    "sign_out": "Sign out"
+    "sign_out": "Sign out",
+    "menu": "Menu"
   },
   "DashboardIndexPage": {
     "title_bar": "Overview",

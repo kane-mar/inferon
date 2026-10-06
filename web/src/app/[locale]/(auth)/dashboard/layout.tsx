@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
-import { DashboardHeader } from '@/features/dashboard/DashboardHeader';
+import { DashboardShell } from '@/features/shell/DashboardShell';
 import { dashboardNav } from '@/libs/dashboardNav';
 import { currentSession } from '@/libs/session';
 
@@ -55,7 +55,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
     <>
       <header className="sticky top-0 z-20 border-b bg-background">
         <div className="mx-auto flex max-w-7xl items-center justify-between p-3">
-          <DashboardHeader menu={menu} />
+          <DashboardShell menu={menu} />
         </div>
       </header>
 

@@ -60,3 +60,27 @@ So **AC2 and AC4 are done**; the operator console is the Next
 **AC1/AC3**: retire the template-shaped *shell* (the Next `(auth)` route group,
 `dashboard/layout.tsx`, `DashboardHeader`, `MobileNavigation`, `TitleBar`,
 `SlashIcon`, `CenteredContainer`) so the frontend's frame is Inferon-owned too.
+
+### Completion (2026-10-06) — the shell is Inferon-owned
+
+- **New `features/shell/`**: `Logo`, `Section`, `NavLink`, `MobileMenu`,
+  `PageHeader`, `DashboardShell` — the shared shell vocabulary used by both the
+  landing and the dashboard.
+- **Marketing rebuilt on it**: `features/landing/{LandingHeader,Hero,Features,CTA,
+  LandingFooter}`; the `templates/` directory is gone.
+- **Dashboard**: `DashboardShell` replaces `DashboardHeader` + `SlashIcon` +
+  `MobileNavigation`; `PageHeader` replaces `TitleBar` across the 8 dashboard
+  pages. The `/` separator flourish is gone.
+- **Auth**: the dead `(center)` group + `CenteredContainer` are gone; sign-in and
+  sign-up live directly under `(auth)` (they redirect to the Rust `/auth/login`).
+- **Removed orphans**: `components/{ActiveLink,Background,MenuToggle*}`, the
+  `features/landing/Centered*` + `FeatureCard` + `CTABanner` + `Section`,
+  `components/ui/separator.tsx` (+ the `@radix-ui/react-separator` dependency),
+  and `hooks/UseMenu*`.
+- **README** updated: `src/dashboard.rs` is JSON-only, migrations go to 016, the
+  web shell is Inferon-owned.
+- Checks: tsc / eslint / i18n / knip / vitest-unit and `next build --webpack`
+  green; one new browser test (`features/shell/Logo.test.tsx`).
+
+All four ACs are now met: one Inferon-owned shell, one operator console (Next
+`/dashboard/operator`), no template components, Rust suite green.

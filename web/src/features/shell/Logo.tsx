@@ -1,5 +1,6 @@
 import { AppConfig } from '@/utils/AppConfig';
 
+/** The Inferon mark + wordmark. */
 export const Logo = (props: {
   isTextHidden?: boolean;
 }) => (

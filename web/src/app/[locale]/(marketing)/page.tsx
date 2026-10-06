@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
-import { CTA } from '@/templates/CTA';
-import { Features } from '@/templates/Features';
-import { Footer } from '@/templates/Footer';
-import { Hero } from '@/templates/Hero';
-import { Navbar } from '@/templates/Navbar';
+import { CTA } from '@/features/landing/CTA';
+import { Features } from '@/features/landing/Features';
+import { Hero } from '@/features/landing/Hero';
+import { LandingFooter } from '@/features/landing/LandingFooter';
+import { LandingHeader } from '@/features/landing/LandingHeader';
 
 type IndexProps = {
   params: Promise<{ locale: string }>;
@@ -29,11 +29,11 @@ export default async function Index(props: IndexProps) {
 
   return (
     <>
-      <Navbar />
+      <LandingHeader />
       <Hero />
       <Features />
       <CTA />
-      <Footer />
+      <LandingFooter />
     </>
   );
 }

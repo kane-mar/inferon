@@ -7,7 +7,8 @@
     "sign_in": "Connexion",
     "dashboard": "Tableau de bord",
     "features": "Fonctionnalités",
-    "source": "Code source"
+    "source": "Code source",
+    "menu": "Menu"
   },
   "LocaleSwitcher": {
     "button_label": "Changer de langue"
@@ -70,7 +71,8 @@
     "operator": "Opérateur"
   },
   "DashboardHeader": {
-    "sign_out": "Déconnexion"
+    "sign_out": "Déconnexion",
+    "menu": "Menu"
   },
   "DashboardIndexPage": {
     "title_bar": "Vue d'ensemble",

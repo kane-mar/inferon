@@ -18,7 +18,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **done (2026-10-06)** — `/dashboard/onboarding`: mint key → base URL → snippets (tenant model) → first-request detection; links to models/providers |
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
-| ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **in progress** — backend now renders no HTML (Rust dashboard/console + signup screen retired); remaining: replace the template-shaped Next shell |
+| ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
 | ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
 | ITEM-018 | First real developer onboarding | improvement | **PO call** — hand the staged key to a real developer; now sits *after* the control plane (043–048) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
@@ -26,10 +26,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-06 (ITEM-043 + ITEM-048 completed; native Anthropic captured as ITEM-050)_ — the
-control-plane horizon 043–048 is now fully delivered for OpenAI-compatible
-providers (provider provisioning + rotation, model catalog, fallback rules,
-budget/router controls, connect flow). Native Anthropic SDK support is a new
-adapter (ITEM-050). Remaining ranked work: **ITEM-047** (spend breakdowns +
-per-key limits), ITEM-049 (own the app shell), ITEM-018 (PO handoff), with the
-OmniRouting cluster (029–032) staged.
+_Last updated: 2026-10-06 (ITEM-049 landed; the control plane 043–049 is complete)_ — the
+whole tenant-facing control plane plus the app shell are delivered. Native
+Anthropic SDK support is captured as ITEM-050. Remaining ranked work: **ITEM-047**
+(spend breakdowns + per-key limits), ITEM-018 (PO handoff), ITEM-050 (Anthropic),
+with the OmniRouting cluster (029–032) staged.

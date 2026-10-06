@@ -2,7 +2,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { KeysPanel } from '@/features/dashboard/KeysPanel';
-import { TitleBar } from '@/features/dashboard/TitleBar';
+import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -27,7 +27,7 @@ export default async function KeysPage(props: KeysPageProps) {
 
   return (
     <>
-      <TitleBar
+      <PageHeader
         title={t('title_bar')}
         description={t('title_bar_description')}
       />

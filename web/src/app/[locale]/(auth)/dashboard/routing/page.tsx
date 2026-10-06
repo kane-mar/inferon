@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
-import { TitleBar } from '@/features/dashboard/TitleBar';
+import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -35,7 +35,7 @@ export default async function RoutingPage(props: RoutingPageProps) {
 
   return (
     <>
-      <TitleBar title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
       <Card title={t('chain')}>
         <RoutingPanel data={data} models={models.models} />
       </Card>

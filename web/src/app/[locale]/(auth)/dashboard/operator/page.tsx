@@ -2,8 +2,8 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { StatCard } from '@/features/dashboard/StatCard';
-import { TitleBar } from '@/features/dashboard/TitleBar';
 import { WindowSwitcher } from '@/features/dashboard/WindowSwitcher';
+import { PageHeader } from '@/features/shell/PageHeader';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -41,7 +41,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
   return (
     <>
       <div className="flex items-start justify-between gap-4">
-        <TitleBar
+        <PageHeader
           title={t('title_bar')}
           description={t('title_bar_description', { days })}
         />

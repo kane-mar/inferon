@@ -1,27 +1,17 @@
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+'use client';
 
-export const MobileNavigation = (props: {
-  menu: {
-    href: string;
-    label: string;
-  }[];
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Link } from '@/libs/I18nNavigation';
+
+/** The small-screen menu shared by the landing and dashboard headers. */
+export const MobileMenu = (props: {
+  menu: { href: string; label: string }[];
+  label: string;
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <Button
-        className="
-          p-2
-          focus-visible:ring-offset-0
-        "
-        variant="ghost"
-      >
+      <Button variant="ghost" size="icon" aria-label={props.label}>
         <svg
           className="size-6 stroke-current"
           xmlns="http://www.w3.org/2000/svg"
@@ -39,7 +29,9 @@ export const MobileNavigation = (props: {
     <DropdownMenuContent>
       {props.menu.map(item => (
         <DropdownMenuItem key={item.href} asChild>
-          <Link href={item.href}>{item.label}</Link>
+          {item.href.startsWith('http')
+            ? <a href={item.href}>{item.label}</a>
+            : <Link href={item.href}>{item.label}</Link>}
         </DropdownMenuItem>
       ))}
     </DropdownMenuContent>
