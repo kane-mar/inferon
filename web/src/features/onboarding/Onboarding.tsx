@@ -24,6 +24,11 @@ export type OnboardingLabels = {
   connectStep: string;
   baseUrlLabel: string;
   keyLabel: string;
+  modelLabel: string;
+  modelHelp: string;
+  linksHelp: string;
+  modelsLink: string;
+  providersLink: string;
   requestStep: string;
   waiting: string;
   received: string;
@@ -52,6 +57,9 @@ const StepHeading = (props: { n: number; children: React.ReactNode }) => (
 export const Onboarding = (props: {
   firstTraceAt: string | null;
   appUrl: string;
+  /** The tenant's enabled catalog models (may be empty for a free-form provider). */
+  models: string[];
+  defaultModel: string;
   labels: OnboardingLabels;
 }) => {
   const { labels } = props;
@@ -59,6 +67,7 @@ export const Onboarding = (props: {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [lang, setLang] = useState<SnippetLang>('python');
+  const [model, setModel] = useState(props.defaultModel);
   const [copied, setCopied] = useState<string | null>(null);
   const [connected, setConnected] = useState(props.firstTraceAt != null);
 
@@ -105,7 +114,7 @@ export const Onboarding = (props: {
 
   const apiBase = `${props.appUrl.replace(/\/+$/, '')}/v1`;
   const apiKey = key ?? 'sk-inferon-\u2026';
-  const snippet = buildSnippet(lang, props.appUrl, apiKey);
+  const snippet = buildSnippet(lang, props.appUrl, apiKey, model);
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -200,6 +209,41 @@ export const Onboarding = (props: {
             </dd>
           </div>
         </dl>
+
+        <label className="block text-sm">
+          <span className="text-muted-foreground">{labels.modelLabel}</span>
+          <input
+            value={model}
+            list="onboarding-models"
+            className="
+              mt-1 w-full rounded-md border bg-background px-3 py-1.5 font-mono
+              text-xs outline-none
+              focus-visible:border-ring focus-visible:ring-3
+              focus-visible:ring-ring/50
+            "
+            onChange={event => setModel(event.target.value)}
+          />
+          <datalist id="onboarding-models">
+            {props.models.map(item => <option key={item} value={item} />)}
+          </datalist>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {labels.modelHelp}
+          </span>
+        </label>
+
+        <p className="text-xs text-muted-foreground">
+          {labels.linksHelp}
+          {' '}
+          <Link href="/dashboard/models" className="underline">
+            {labels.modelsLink}
+          </Link>
+          {' '}
+          ·
+          {' '}
+          <Link href="/dashboard/providers" className="underline">
+            {labels.providersLink}
+          </Link>
+        </p>
 
         <div className="overflow-hidden rounded-lg border bg-[#1e1e1e]">
           <div className="

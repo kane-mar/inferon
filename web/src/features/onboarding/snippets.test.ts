@@ -20,6 +20,16 @@ describe('buildSnippet', () => {
     }
   });
 
+  it('uses the tenant model when provided (ITEM-048 AC4)', () => {
+    expect(buildSnippet('python', 'https://x.test', 'k', 'gpt-4o')).toContain('model="gpt-4o"');
+    expect(buildSnippet('node', 'https://x.test', 'k', 'gpt-4o')).toContain('model: \'gpt-4o\'');
+    expect(buildSnippet('curl', 'https://x.test', 'k', 'gpt-4o')).toContain('"model":"gpt-4o"');
+  });
+
+  it('falls back to the platform model when none is provided', () => {
+    expect(buildSnippet('python', 'https://x.test', 'k')).toContain('model="deepseek-chat"');
+  });
+
   it('uses the OpenAI SDK for python and node', () => {
     expect(buildSnippet('python', 'https://x.test', 'k')).toContain('from openai import OpenAI');
     expect(buildSnippet('node', 'https://x.test', 'k')).toContain('import OpenAI');

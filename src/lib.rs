@@ -81,6 +81,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(dashboard::tenant_provider_remove),
         )
         .route(
+            "/v1/dashboard/api/providers/:provider_id",
+            post(dashboard::tenant_provider_update),
+        )
+        .route(
             "/v1/dashboard/api/providers/:provider_id/test",
             post(dashboard::tenant_provider_test),
         )
@@ -142,6 +146,8 @@ async fn healthz() -> &'static str {
 struct Route {
     url: String,
     key: String,
+    /// Extra upstream headers from the tenant's provider (ITEM-043 AC1).
+    metadata: providers::ProviderMetadata,
 }
 
 /// `<base>/chat/completions` — the OpenAI-compatible chat endpoint.
@@ -149,16 +155,33 @@ fn chat_completions_url(base_url: &str) -> String {
     format!("{}/chat/completions", base_url.trim_end_matches('/'))
 }
 
+/// Attach the tenant's optional provider headers (org + custom) to an upstream
+/// request. An empty metadata is a no-op.
+fn apply_provider_headers(
+    mut request: reqwest::RequestBuilder,
+    metadata: &providers::ProviderMetadata,
+) -> reqwest::RequestBuilder {
+    if let Some(org) = &metadata.org {
+        request = request.header("OpenAI-Organization", org);
+    }
+    for (header, value) in &metadata.headers {
+        request = request.header(header, value);
+    }
+    request
+}
+
 async fn resolve_route(state: &Arc<AppState>, tenant: &Tenant) -> Result<Route, Response> {
     match state.provider_store.resolve(tenant.id).await {
         Ok(Some(provider)) => Ok(Route {
             url: chat_completions_url(&provider.base_url),
             key: provider.api_key,
+            metadata: provider.metadata,
         }),
         Ok(None) => match tenant.upstream_openai_key.as_deref() {
             Some(key) => Ok(Route {
                 url: state.upstream_url.clone(),
                 key: key.to_string(),
+                metadata: providers::ProviderMetadata::default(),
             }),
             None => Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -335,14 +358,17 @@ async fn proxy_chat_completions(
                 );
             }
         };
-        let attempt = state
-            .http_client
-            .post(&route.url)
-            .header("Authorization", format!("Bearer {}", route.key))
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .await;
+        let attempt = apply_provider_headers(
+            state
+                .http_client
+                .post(&route.url)
+                .header("Authorization", format!("Bearer {}", route.key))
+                .header("Content-Type", "application/json"),
+            &route.metadata,
+        )
+        .body(body)
+        .send()
+        .await;
         let is_last = index + 1 == allowed.len();
         match attempt {
             Ok(response) => {
@@ -690,14 +716,17 @@ async fn fallback_to_frontier(
             );
         }
     };
-    let replay = state
-        .http_client
-        .post(&route.url)
-        .header("Authorization", format!("Bearer {}", route.key))
-        .header("Content-Type", "application/json")
-        .body(replay_body)
-        .send()
-        .await;
+    let replay = apply_provider_headers(
+        state
+            .http_client
+            .post(&route.url)
+            .header("Authorization", format!("Bearer {}", route.key))
+            .header("Content-Type", "application/json"),
+        &route.metadata,
+    )
+    .body(replay_body)
+    .send()
+    .await;
     let guarded_model = guard_emit.meta.model.clone();
     match replay {
         Err(e) => {

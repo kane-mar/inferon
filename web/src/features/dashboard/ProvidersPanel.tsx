@@ -1,6 +1,6 @@
 'use client';
 
-import type { ProvidersResponse, ProviderTest } from '@/libs/InferonApi';
+import type { ProviderMetadata, ProviderRow, ProvidersResponse, ProviderTest } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -22,6 +22,50 @@ const INPUT = `
   focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
 `;
 
+const MONO_INPUT = `${INPUT} font-mono`;
+
+/** `Name: Value` per line → metadata headers; blank/malformed lines ignored. */
+const parseHeaders = (text: string): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const colon = line.indexOf(':');
+    if (colon === -1) {
+      continue;
+    }
+    const name = line.slice(0, colon).trim();
+    const value = line.slice(colon + 1).trim();
+    if (name) {
+      headers[name] = value;
+    }
+  }
+  return headers;
+};
+
+const formatHeaders = (headers?: Record<string, string>): string =>
+  Object.entries(headers ?? {})
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('\n');
+
+const metadataFrom = (org: string, headersText: string): ProviderMetadata | undefined => {
+  const trimmedOrg = org.trim();
+  const headers = parseHeaders(headersText);
+  const hasHeaders = Object.keys(headers).length > 0;
+  if (!trimmedOrg && !hasHeaders) {
+    return undefined;
+  }
+  return {
+    ...(trimmedOrg ? { org: trimmedOrg } : {}),
+    ...(hasHeaders ? { headers } : {}),
+  };
+};
+
+const formatDate = (value: string): string => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString();
+};
+
+const EMPTY_DRAFT = { name: '', base_url: '', key: '', org: '', headers: '' };
+
 export const ProvidersPanel = (props: {
   data: ProvidersResponse;
   role: 'owner' | 'member';
@@ -34,9 +78,13 @@ export const ProvidersPanel = (props: {
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE[kinds[0] as string] ?? '');
   const [key, setKey] = useState('');
+  const [org, setOrg] = useState('');
+  const [headers, setHeaders] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tested, setTested] = useState<Record<string, ProviderTest | 'pending'>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
 
   const canEdit = props.role === 'owner';
 
@@ -50,9 +98,43 @@ export const ProvidersPanel = (props: {
         name: name.trim() || undefined,
         base_url: baseUrl.trim(),
         key: key.trim(),
+        metadata: metadataFrom(org, headers),
       });
       setName('');
       setKey('');
+      setOrg('');
+      setHeaders('');
+      router.refresh();
+    } catch (cause) {
+      setError(errorMessage(cause, t('error')));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (provider: ProviderRow) => {
+    setEditing(provider.id);
+    setDraft({
+      name: provider.name,
+      base_url: provider.base_url,
+      key: '',
+      org: provider.metadata.org ?? '',
+      headers: formatHeaders(provider.metadata.headers),
+    });
+  };
+
+  const saveEdit = async (event: React.FormEvent, providerId: string) => {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await InferonApi.sameOrigin().updateProvider(providerId, {
+        name: draft.name.trim() || undefined,
+        base_url: draft.base_url.trim() || undefined,
+        key: draft.key.trim() || undefined,
+        metadata: metadataFrom(draft.org, draft.headers) ?? {},
+      });
+      setEditing(null);
       router.refresh();
     } catch (cause) {
       setError(errorMessage(cause, t('error')));
@@ -99,6 +181,112 @@ export const ProvidersPanel = (props: {
           : (
               props.data.providers.map((provider) => {
                 const result = tested[provider.id];
+                if (editing === provider.id) {
+                  return (
+                    <li
+                      key={provider.id}
+                      className="
+                        border-b p-4
+                        last:border-0
+                      "
+                    >
+                      <form
+                        onSubmit={event => saveEdit(event, provider.id)}
+                        className="
+                          grid gap-3
+                          sm:grid-cols-2
+                        "
+                      >
+                        <h3 className="
+                          font-mono text-xs font-medium tracking-wide uppercase
+                          sm:col-span-2
+                        "
+                        >
+                          {t('edit_title')}
+                        </h3>
+                        <label className="text-sm">
+                          <span className="text-muted-foreground">{t('name')}</span>
+                          <input
+                            value={draft.name}
+                            className={INPUT}
+                            onChange={event => setDraft(current => ({ ...current, name: event.target.value }))}
+                          />
+                        </label>
+                        <label className="text-sm">
+                          <span className="text-muted-foreground">{t('base_url')}</span>
+                          <input
+                            value={draft.base_url}
+                            className={MONO_INPUT}
+                            required
+                            onChange={event => setDraft(current => ({ ...current, base_url: event.target.value }))}
+                          />
+                        </label>
+                        <label className="text-sm">
+                          <span className="text-muted-foreground">{t('rotate_key')}</span>
+                          <input
+                            value={draft.key}
+                            type="password"
+                            className={MONO_INPUT}
+                            placeholder={provider.key_hint}
+                            autoComplete="off"
+                            onChange={event => setDraft(current => ({ ...current, key: event.target.value }))}
+                          />
+                          <span className="
+                            mt-1 block text-xs text-muted-foreground
+                          "
+                          >
+                            {t('rotate_key_note')}
+                          </span>
+                        </label>
+                        <label className="text-sm">
+                          <span className="text-muted-foreground">{t('org')}</span>
+                          <input
+                            value={draft.org}
+                            className={MONO_INPUT}
+                            onChange={event => setDraft(current => ({ ...current, org: event.target.value }))}
+                          />
+                        </label>
+                        <label className="
+                          text-sm
+                          sm:col-span-2
+                        "
+                        >
+                          <span className="text-muted-foreground">{t('headers')}</span>
+                          <textarea
+                            value={draft.headers}
+                            rows={2}
+                            className={MONO_INPUT}
+                            placeholder="anthropic-version: 2023-06-01"
+                            onChange={event => setDraft(current => ({ ...current, headers: event.target.value }))}
+                          />
+                          <span className="
+                            mt-1 block text-xs text-muted-foreground
+                          "
+                          >
+                            {t('headers_note')}
+                          </span>
+                        </label>
+                        <div className="
+                          flex items-center gap-3
+                          sm:col-span-2
+                        "
+                        >
+                          <Button type="submit" disabled={busy}>
+                            {busy ? t('saving') : t('save')}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => setEditing(null)}
+                          >
+                            {t('cancel')}
+                          </Button>
+                        </div>
+                      </form>
+                    </li>
+                  );
+                }
                 return (
                   <li
                     key={provider.id}
@@ -126,6 +314,11 @@ export const ProvidersPanel = (props: {
                     <span className="font-mono text-xs text-muted-foreground">
                       {provider.key_hint}
                     </span>
+                    {formatDate(provider.updated_at) && (
+                      <span className="text-xs text-muted-foreground">
+                        {t('updated', { date: formatDate(provider.updated_at) })}
+                      </span>
+                    )}
                     {result && result !== 'pending' && (
                       <span
                         className={`
@@ -155,6 +348,16 @@ export const ProvidersPanel = (props: {
                         onClick={() => test(provider.id)}
                       >
                         {result === 'pending' ? t('testing') : t('test')}
+                      </Button>
+                    )}
+                    {canEdit && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => startEdit(provider)}
+                      >
+                        {t('edit')}
                       </Button>
                     )}
                     {canEdit && (
@@ -224,13 +427,33 @@ export const ProvidersPanel = (props: {
                 <span className="text-muted-foreground">{t('base_url')}</span>
                 <input
                   value={baseUrl}
-                  className={`
-                    ${INPUT}
-                    font-mono
-                  `}
+                  className={MONO_INPUT}
                   placeholder="https://api.deepseek.com/v1"
                   required
                   onChange={event => setBaseUrl(event.target.value)}
+                />
+              </label>
+
+              <label className="text-sm">
+                <span className="text-muted-foreground">{t('key')}</span>
+                <input
+                  value={key}
+                  type="password"
+                  className={MONO_INPUT}
+                  placeholder="sk-…"
+                  required
+                  autoComplete="off"
+                  onChange={event => setKey(event.target.value)}
+                />
+              </label>
+
+              <label className="text-sm">
+                <span className="text-muted-foreground">{t('org')}</span>
+                <input
+                  value={org}
+                  className={MONO_INPUT}
+                  placeholder={t('org_placeholder')}
+                  onChange={event => setOrg(event.target.value)}
                 />
               </label>
 
@@ -239,23 +462,26 @@ export const ProvidersPanel = (props: {
                 sm:col-span-2
               "
               >
-                <span className="text-muted-foreground">{t('key')}</span>
-                <input
-                  value={key}
-                  type="password"
-                  className={`
-                    ${INPUT}
-                    font-mono
-                  `}
-                  placeholder="sk-…"
-                  required
-                  autoComplete="off"
-                  onChange={event => setKey(event.target.value)}
+                <span className="text-muted-foreground">{t('headers')}</span>
+                <textarea
+                  value={headers}
+                  rows={2}
+                  className={MONO_INPUT}
+                  placeholder="anthropic-version: 2023-06-01"
+                  onChange={event => setHeaders(event.target.value)}
                 />
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  {t('key_note')}
+                  {t('headers_note')}
                 </span>
               </label>
+
+              <span className="
+                block text-xs text-muted-foreground
+                sm:col-span-2
+              "
+              >
+                {t('key_note')}
+              </span>
 
               <div className="sm:col-span-2">
                 <Button type="submit" disabled={busy}>

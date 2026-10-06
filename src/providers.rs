@@ -7,10 +7,23 @@
 //! test double.
 
 use crate::secret::Secrets;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// Optional, non-secret provider configuration (ITEM-043 AC1): an OpenAI
+/// organization id and arbitrary upstream headers (e.g. `anthropic-version`
+/// for a compatible gateway). Never contains the API key.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+}
 
 /// A provider as shown to the dashboard — never carries key material.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +35,9 @@ pub struct Provider {
     pub base_url: String,
     /// Masked hint for display, e.g. `…ab12`.
     pub key_hint: String,
+    pub metadata: ProviderMetadata,
     pub created_at: String,
+    pub updated_at: String,
 }
 
 /// A provider to register (`key` is the raw upstream credential).
@@ -32,6 +47,17 @@ pub struct NewProvider {
     pub name: String,
     pub base_url: String,
     pub key: String,
+    pub metadata: ProviderMetadata,
+}
+
+/// A partial provider update (ITEM-043 AC5 rotation). `None` leaves a field
+/// unchanged; a `Some(key)` re-encrypts and re-hints.
+#[derive(Clone, Debug, Default)]
+pub struct ProviderUpdate {
+    pub name: Option<String>,
+    pub base_url: Option<String>,
+    pub key: Option<String>,
+    pub metadata: Option<ProviderMetadata>,
 }
 
 /// The decrypted credential the proxy uses for a request.
@@ -39,6 +65,7 @@ pub struct NewProvider {
 pub struct ResolvedProvider {
     pub base_url: String,
     pub api_key: String,
+    pub metadata: ProviderMetadata,
 }
 
 /// Supported provider kinds. Anthropic is not OpenAI-shaped and is not wired.
@@ -68,6 +95,14 @@ pub fn key_hint(key: &str) -> String {
 pub trait ProviderStore: Send + Sync {
     async fn list(&self, tenant_id: Uuid) -> StoreResult<Vec<Provider>>;
     async fn insert(&self, tenant_id: Uuid, new: &NewProvider) -> StoreResult<Uuid>;
+    /// Apply a partial update in place (rotation, AC5); `false` when the id is
+    /// not a provider owned by `tenant_id`.
+    async fn update(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        update: &ProviderUpdate,
+    ) -> StoreResult<bool>;
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
     /// The tenant's credential for the request path, if one is configured.
     async fn resolve(&self, tenant_id: Uuid) -> StoreResult<Option<ResolvedProvider>>;
@@ -103,8 +138,22 @@ impl PostgresProviderStore {
 #[async_trait::async_trait]
 impl ProviderStore for PostgresProviderStore {
     async fn list(&self, tenant_id: Uuid) -> StoreResult<Vec<Provider>> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, String, String, String)>(
-            "SELECT id, tenant_id, kind, name, base_url, key_hint, created_at::text
+        let rows = sqlx::query_as::<
+            _,
+            (
+                Uuid,
+                Uuid,
+                String,
+                String,
+                String,
+                String,
+                sqlx::types::Json<ProviderMetadata>,
+                String,
+                String,
+            ),
+        >(
+            "SELECT id, tenant_id, kind, name, base_url, key_hint, metadata,
+                    created_at::text, updated_at::text
              FROM providers WHERE tenant_id = $1 ORDER BY created_at",
         )
         .bind(tenant_id)
@@ -112,15 +161,21 @@ impl ProviderStore for PostgresProviderStore {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(id, tenant_id, kind, name, base_url, key_hint, created_at)| Provider {
-                id,
-                tenant_id,
-                kind,
-                name,
-                base_url,
-                key_hint,
-                created_at,
-            })
+            .map(
+                |(id, tenant_id, kind, name, base_url, key_hint, metadata, created_at, updated_at)| {
+                    Provider {
+                        id,
+                        tenant_id,
+                        kind,
+                        name,
+                        base_url,
+                        key_hint,
+                        metadata: metadata.0,
+                        created_at,
+                        updated_at,
+                    }
+                },
+            )
             .collect())
     }
 
@@ -130,8 +185,8 @@ impl ProviderStore for PostgresProviderStore {
             .encrypt(&new.key)
             .ok_or("provider key encryption failed")?;
         let row: (Uuid,) = sqlx::query_as(
-            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint)
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
         )
         .bind(tenant_id)
         .bind(&new.kind)
@@ -139,9 +194,50 @@ impl ProviderStore for PostgresProviderStore {
         .bind(&new.base_url)
         .bind(&ciphertext)
         .bind(key_hint(&new.key))
+        .bind(sqlx::types::Json(&new.metadata))
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)
+    }
+
+    async fn update(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        update: &ProviderUpdate,
+    ) -> StoreResult<bool> {
+        // A rotated key is re-encrypted; leaving it out keeps the stored one.
+        let (ciphertext, hint) = match &update.key {
+            Some(key) => (
+                Some(
+                    self.encryptor()?
+                        .encrypt(key)
+                        .ok_or("provider key encryption failed")?,
+                ),
+                Some(key_hint(key)),
+            ),
+            None => (None, None),
+        };
+        let result = sqlx::query(
+            "UPDATE providers SET
+                name = COALESCE($3, name),
+                base_url = COALESCE($4, base_url),
+                key_ciphertext = COALESCE($5, key_ciphertext),
+                key_hint = COALESCE($6, key_hint),
+                metadata = COALESCE($7, metadata),
+                updated_at = NOW()
+             WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(update.name.as_deref())
+        .bind(update.base_url.as_deref())
+        .bind(ciphertext)
+        .bind(hint)
+        .bind(update.metadata.clone().map(sqlx::types::Json))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool> {
@@ -157,18 +253,22 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT base_url, key_ciphertext FROM providers
+        let row: Option<(String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
+            "SELECT base_url, key_ciphertext, metadata FROM providers
              WHERE tenant_id = $1 ORDER BY created_at LIMIT 1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((base_url, ciphertext)) = row else {
+        let Some((base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         match secrets.decrypt(&ciphertext) {
-            Some(api_key) => Ok(Some(ResolvedProvider { base_url, api_key })),
+            Some(api_key) => Ok(Some(ResolvedProvider {
+                base_url,
+                api_key,
+                metadata: metadata.0,
+            })),
             None => {
                 tracing::error!(
                     "provider key for tenant {tenant_id} could not be decrypted (wrong PROVIDER_ENCRYPTION_KEY?)"
@@ -186,19 +286,23 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT base_url, key_ciphertext FROM providers WHERE id = $1 AND tenant_id = $2",
+        let row: Option<(String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
+            "SELECT base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
         )
         .bind(id)
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((base_url, ciphertext)) = row else {
+        let Some((base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         Ok(secrets
             .decrypt(&ciphertext)
-            .map(|api_key| ResolvedProvider { base_url, api_key }))
+            .map(|api_key| ResolvedProvider {
+                base_url,
+                api_key,
+                metadata: metadata.0,
+            }))
     }
 }
 
@@ -226,7 +330,9 @@ impl InMemoryProviderStore {
                 name: "seeded".to_string(),
                 base_url: base_url.to_string(),
                 key_hint: key_hint(api_key),
+                metadata: ProviderMetadata::default(),
                 created_at: "0".to_string(),
+                updated_at: "0".to_string(),
             },
             api_key: api_key.to_string(),
         });
@@ -257,11 +363,43 @@ impl ProviderStore for InMemoryProviderStore {
                 name: new.name.clone(),
                 base_url: new.base_url.clone(),
                 key_hint: key_hint(&new.key),
+                metadata: new.metadata.clone(),
                 created_at: "0".to_string(),
+                updated_at: "0".to_string(),
             },
             api_key: new.key.clone(),
         });
         Ok(id)
+    }
+
+    async fn update(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        update: &ProviderUpdate,
+    ) -> StoreResult<bool> {
+        let mut rows = self.rows.lock().unwrap();
+        let Some(row) = rows
+            .iter_mut()
+            .find(|row| row.provider.id == id && row.provider.tenant_id == tenant_id)
+        else {
+            return Ok(false);
+        };
+        if let Some(name) = &update.name {
+            row.provider.name = name.clone();
+        }
+        if let Some(base_url) = &update.base_url {
+            row.provider.base_url = base_url.clone();
+        }
+        if let Some(key) = &update.key {
+            row.provider.key_hint = key_hint(key);
+            row.api_key = key.clone();
+        }
+        if let Some(metadata) = &update.metadata {
+            row.provider.metadata = metadata.clone();
+        }
+        row.provider.updated_at = "1".to_string();
+        Ok(true)
     }
 
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool> {
@@ -281,6 +419,7 @@ impl ProviderStore for InMemoryProviderStore {
             .map(|row| ResolvedProvider {
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
+                metadata: row.provider.metadata.clone(),
             }))
     }
 
@@ -298,6 +437,7 @@ impl ProviderStore for InMemoryProviderStore {
             .map(|row| ResolvedProvider {
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
+                metadata: row.provider.metadata.clone(),
             }))
     }
 }
@@ -333,6 +473,10 @@ mod tests {
                     name: "My DeepSeek".to_string(),
                     base_url: "https://api.deepseek.com/v1".to_string(),
                     key: "sk-mine-ab12".to_string(),
+                    metadata: ProviderMetadata {
+                        org: Some("org-1".to_string()),
+                        headers: [("X-Trace".to_string(), "on".to_string())].into(),
+                    },
                 },
             )
             .await
@@ -342,13 +486,69 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].key_hint, "\u{2026}ab12");
         assert!(!listed[0].key_hint.contains("sk-mine"));
+        assert_eq!(listed[0].metadata.org.as_deref(), Some("org-1"));
 
         let resolved = store.resolve(tenant).await.expect("resolve").expect("configured");
         assert_eq!(resolved.base_url, "https://api.deepseek.com/v1");
         assert_eq!(resolved.api_key, "sk-mine-ab12");
+        assert_eq!(resolved.metadata.headers["X-Trace"], "on");
 
         assert!(store.remove(tenant, id).await.expect("remove"));
         assert!(store.resolve(tenant).await.expect("resolve").is_none());
+    }
+
+    #[tokio::test]
+    async fn rotation_updates_the_key_without_recreating_the_row() {
+        // ITEM-043 AC5: a provider can be rotated in place; the old id survives
+        // and the new key resolves on the request path.
+        let tenant = Uuid::new_v4();
+        let store = InMemoryProviderStore::default();
+        let id = store
+            .insert(
+                tenant,
+                &NewProvider {
+                    kind: "openai".to_string(),
+                    name: "Mine".to_string(),
+                    base_url: "https://api.openai.com/v1".to_string(),
+                    key: "sk-old-1111".to_string(),
+                    metadata: ProviderMetadata::default(),
+                },
+            )
+            .await
+            .expect("insert");
+
+        let rotated = store
+            .update(
+                tenant,
+                id,
+                &ProviderUpdate {
+                    name: Some("Renamed".to_string()),
+                    base_url: None,
+                    key: Some("sk-new-2222".to_string()),
+                    metadata: Some(ProviderMetadata {
+                        org: Some("org-2".to_string()),
+                        headers: BTreeMap::new(),
+                    }),
+                },
+            )
+            .await
+            .expect("update");
+        assert!(rotated);
+
+        let listed = store.list(tenant).await.expect("list");
+        assert_eq!(listed.len(), 1, "rotation does not create a new row");
+        assert_eq!(listed[0].id, id);
+        assert_eq!(listed[0].name, "Renamed");
+        assert_eq!(listed[0].key_hint, "\u{2026}2222");
+        assert_eq!(listed[0].metadata.org.as_deref(), Some("org-2"));
+        let resolved = store.resolve(tenant).await.expect("resolve").expect("configured");
+        assert_eq!(resolved.api_key, "sk-new-2222", "the rotated key is used");
+
+        // Another tenant cannot rotate it.
+        assert!(!store
+            .update(Uuid::new_v4(), id, &ProviderUpdate { key: Some("sk-thief".to_string()), ..Default::default() })
+            .await
+            .expect("update"));
     }
 
     #[tokio::test]

@@ -2,6 +2,7 @@ import type { OnboardingLabels } from '@/features/onboarding/Onboarding';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Onboarding } from '@/features/onboarding/Onboarding';
+import { DEFAULT_MODEL } from '@/features/onboarding/snippets';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 import { getBaseUrl } from '@/utils/Helpers';
@@ -26,7 +27,17 @@ export default async function OnboardingPage(props: OnboardingPageProps) {
 
   const t = await getTranslations({ locale, namespace: 'OnboardingPage' });
   const api = InferonApi.fromEnv();
-  const summary = await api.summary(30, 0, session.cookie);
+  const [summary, catalog] = await Promise.all([
+    api.summary(30, 0, session.cookie),
+    api.models(session.cookie),
+  ]);
+  // AC4: the snippet uses the tenant's enabled/default model so it works for a
+  // shared-key tenant and one with their own provider (free-form ids included).
+  const enabledModels = catalog.models.filter(model => model.enabled).map(model => model.id);
+  const defaultModel
+    = catalog.models.find(model => model.is_default && model.enabled)?.id
+      ?? enabledModels[0]
+      ?? DEFAULT_MODEL;
 
   const labels: OnboardingLabels = {
     keyStep: t('key_step'),
@@ -40,6 +51,11 @@ export default async function OnboardingPage(props: OnboardingPageProps) {
     connectStep: t('connect_step'),
     baseUrlLabel: t('base_url'),
     keyLabel: t('key'),
+    modelLabel: t('model_label'),
+    modelHelp: t('model_help'),
+    linksHelp: t('links_help'),
+    modelsLink: t('models_link'),
+    providersLink: t('providers_link'),
     requestStep: t('request_step'),
     waiting: t('waiting'),
     received: t('received'),
@@ -56,6 +72,8 @@ export default async function OnboardingPage(props: OnboardingPageProps) {
       <Onboarding
         firstTraceAt={summary.first_trace_at}
         appUrl={getBaseUrl()}
+        models={enabledModels}
+        defaultModel={defaultModel}
         labels={labels}
       />
     </>

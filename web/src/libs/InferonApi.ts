@@ -111,6 +111,13 @@ export type KeysResponse = { role: Role; keys: KeyRow[] };
 export type MemberRow = { id: string; github_login: string; role: Role };
 export type MembersResponse = { role: Role; members: MemberRow[]; invites: string[] };
 
+export type ProviderMetadata = {
+  /** OpenAI organization id. */
+  org?: string;
+  /** Extra upstream headers (e.g. `anthropic-version`). */
+  headers?: Record<string, string>;
+};
+
 export type ProviderRow = {
   id: string;
   kind: string;
@@ -118,12 +125,28 @@ export type ProviderRow = {
   base_url: string;
   /** Masked, e.g. `…ab12` — the key itself never leaves the backend. */
   key_hint: string;
+  metadata: ProviderMetadata;
   created_at: string;
+  updated_at: string;
 };
 
 export type ProvidersResponse = { providers: ProviderRow[]; kinds: string[]; role: Role };
 
-export type NewProvider = { kind: string; name?: string; base_url: string; key: string };
+export type NewProvider = {
+  kind: string;
+  name?: string;
+  base_url: string;
+  key: string;
+  metadata?: ProviderMetadata;
+};
+
+export type UpdateProvider = {
+  name?: string;
+  base_url?: string;
+  /** Omit to keep the stored key; provide to rotate it. */
+  key?: string;
+  metadata?: ProviderMetadata;
+};
 
 export type ProviderTest = { ok: boolean; status: number | null };
 
@@ -311,6 +334,10 @@ export class InferonApi {
 
   createProvider(body: NewProvider, cookie?: string): Promise<{ id: string }> {
     return this.request('POST', '/v1/dashboard/api/providers', body, { cookie });
+  }
+
+  updateProvider(providerId: string, body: UpdateProvider, cookie?: string): Promise<{ provider_id: string; updated: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/providers/${providerId}`, body, { cookie });
   }
 
   removeProvider(providerId: string, cookie?: string): Promise<{ provider_id: string; removed: boolean }> {

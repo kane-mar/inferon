@@ -869,6 +869,17 @@ pub struct ProviderBody {
     name: Option<String>,
     base_url: String,
     key: String,
+    #[serde(default)]
+    metadata: crate::providers::ProviderMetadata,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProviderUpdateBody {
+    name: Option<String>,
+    base_url: Option<String>,
+    key: Option<String>,
+    #[serde(default)]
+    metadata: Option<crate::providers::ProviderMetadata>,
 }
 
 fn provider_json(provider: &crate::providers::Provider) -> Value {
@@ -878,7 +889,9 @@ fn provider_json(provider: &crate::providers::Provider) -> Value {
         "name": provider.name,
         "base_url": provider.base_url,
         "key_hint": provider.key_hint,
+        "metadata": provider.metadata,
         "created_at": provider.created_at,
+        "updated_at": provider.updated_at,
     })
 }
 
@@ -940,6 +953,7 @@ pub async fn tenant_provider_create(
         name,
         base_url,
         key,
+        metadata: body.metadata,
     };
     match state.provider_store.insert(tenant_id, &new).await {
         Ok(id) => json_ok(json!({ "id": id.to_string() })),
@@ -972,6 +986,57 @@ pub async fn tenant_provider_remove(
     }
 }
 
+/// POST /v1/dashboard/api/providers/:provider_id (owner-only) — rotate/update a
+/// provider in place (ITEM-043 AC5). Omitted fields are left unchanged.
+pub async fn tenant_provider_update(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(provider_id): Path<uuid::Uuid>,
+    Json(body): Json<ProviderUpdateBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let base_url = match body.base_url {
+        Some(url) => {
+            let url = url.trim().trim_end_matches('/').to_string();
+            if !(url.starts_with("http://") || url.starts_with("https://")) {
+                return crate::json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_base_url",
+                    "base URL must start with http:// or https://",
+                );
+            }
+            Some(url)
+        }
+        None => None,
+    };
+    let key = body
+        .key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let update = crate::providers::ProviderUpdate {
+        name: body
+            .name
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty()),
+        base_url,
+        key,
+        metadata: body.metadata,
+    };
+    match state.provider_store.update(tenant_id, provider_id, &update).await {
+        Ok(true) => json_ok(json!({ "provider_id": provider_id.to_string(), "updated": true })),
+        Ok(false) => {
+            crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
+        }
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// POST /v1/dashboard/api/providers/:provider_id/test — a minimal probe of the
 /// provider's base URL + key (`GET <base>/models`, the OpenAI-compatible
 /// endpoint; costs nothing). Reports `{ ok, status }` — `status` is `null` when
@@ -993,13 +1058,18 @@ pub async fn tenant_provider_test(
         Err(e) => return internal(&e.to_string()),
     };
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
-    let probe = state
+    let mut probe = state
         .http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", provider.api_key))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await;
+        .timeout(std::time::Duration::from_secs(10));
+    if let Some(org) = &provider.metadata.org {
+        probe = probe.header("OpenAI-Organization", org);
+    }
+    for (header, value) in &provider.metadata.headers {
+        probe = probe.header(header, value);
+    }
+    let probe = probe.send().await;
     match probe {
         Ok(response) => json_ok(json!({
             "ok": response.status().is_success(),
@@ -2244,6 +2314,85 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(write.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    // --- ITEM-043: provider rotation/metadata (session-scoped, owner mutates) ---
+
+    #[tokio::test]
+    async fn owner_rotates_a_provider_and_members_cannot() {
+        let (state, token) = tenant_role_session("owner").await;
+        let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        let id = state
+            .provider_store
+            .insert(
+                tenant_id,
+                &crate::providers::NewProvider {
+                    kind: "openai".to_string(),
+                    name: "Mine".to_string(),
+                    base_url: "https://api.openai.com/v1".to_string(),
+                    key: "sk-old-1111".to_string(),
+                    metadata: Default::default(),
+                },
+            )
+            .await
+            .expect("seed");
+        let router = crate::build_router(state);
+
+        // The list exposes the last-updated date + metadata (AC2).
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), axum::http::StatusCode::OK);
+        let json: Value = body_json(listed).await;
+        assert!(json["providers"][0]["updated_at"].is_string());
+        assert!(json["providers"][0]["metadata"].is_object());
+
+        // Rotate the key + attach org/headers (AC1/AC5).
+        let updated = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{id}"),
+                &token,
+                r#"{"key":"sk-new-2222","metadata":{"org":"org-2","headers":{"X-Trace":"on"}}}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(updated.status(), axum::http::StatusCode::OK);
+        assert_eq!(body_json(updated).await["updated"], true);
+
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        assert_eq!(json["providers"][0]["key_hint"], "\u{2026}2222");
+        assert_eq!(json["providers"][0]["metadata"]["org"], "org-2");
+        assert_eq!(json["providers"][0]["metadata"]["headers"]["X-Trace"], "on");
+
+        // Unknown id -> 404; a member cannot rotate at all.
+        let missing = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers/99999999-9999-9999-9999-999999999999",
+                &token,
+                r#"{"key":"sk-x-1234"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
+        let (member_state, member_token) = tenant_role_session("member").await;
+        let member = crate::build_router(member_state)
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{id}"),
+                &member_token,
+                r#"{"key":"sk-x-1234"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     // --- ITEM-039: tenant members API (session-scoped, owner manages) ---
