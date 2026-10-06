@@ -24,3 +24,18 @@ data plane in the onboarding the promise needs.
 - Closes the loop with ITEM-018 (a real developer's first request).
 
 **Source:** PO review 2026-10-06 — the landing claim is not backed by a flow.
+
+## Progress (2026-10-06) — the connect flow landed
+
+Built with the strict FE/BE split: the backend mints no key and renders no HTML;
+this page is the only first-key surface.
+
+- New `/dashboard/onboarding` (session-gated): **create a key** (minted via the
+  session, revealed once), **point your client** at the base URL with
+  copy-paste Python / Node / cURL snippets (pure `snippets.ts`, unit-tested),
+  and **watch for the first request** (polls the summary and flips to a "live"
+  state). Added a "Connect" nav item.
+- `/auth/callback` now sends new sign-ups here (was `/dashboard/keys`).
+- AC1 ✅ (base URL + key-once + snippets), AC2 ✅ (first-request detection).
+- AC3/AC4 (links to models + own-provider) are gated on ITEM-043/044 — the page
+  currently works for a tenant on the shared platform key.

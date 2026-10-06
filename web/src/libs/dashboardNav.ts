@@ -8,6 +8,7 @@ export type DashboardNavItem = { href: string; labelKey: DashboardNavKey };
 /** The dashboard menu; the operator console is only for platform operators. */
 export const dashboardNav = (isOperator: boolean): DashboardNavItem[] => [
   { href: '/dashboard', labelKey: 'home' },
+  { href: '/dashboard/onboarding', labelKey: 'connect' },
   { href: '/dashboard/keys', labelKey: 'keys' },
   { href: '/dashboard/members', labelKey: 'members' },
   ...(isOperator

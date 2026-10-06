@@ -169,7 +169,7 @@ and `SESSION_SECRET` set:
   (`oauth_not_configured`)
 - `GET /auth/callback` — completes the dance, sets the signed session cookie
   (HttpOnly, SameSite=Lax, Secure over TLS), redirects to `/dashboard`
-  (new sign-ups land on `/dashboard/keys` to mint their first key)
+  (new sign-ups land on `/dashboard/onboarding` — the guided first-run)
 - `GET /auth/me` — the signed-in user (`github_id`/`github_login`) or 401
 - `POST /auth/logout` — expires the session cookie
 

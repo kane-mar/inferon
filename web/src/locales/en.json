@@ -61,6 +61,7 @@
   },
   "DashboardNav": {
     "home": "Overview",
+    "connect": "Connect",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator"
@@ -145,5 +146,24 @@
     "first_fired": "First fired",
     "last_fired": "Last fired",
     "no_data": "No data for this window yet."
+  },
+  "OnboardingPage": {
+    "title": "Connect your SDK",
+    "description": "Three steps from sign-in to your first metered request.",
+    "key_step": "Create an API key",
+    "key_step_help": "Your key authenticates the API. It is shown once — copy it now.",
+    "create_key": "Create my key",
+    "creating": "Creating…",
+    "create_key_failed": "Could not create the key — please retry.",
+    "key_once": "This is the only time your key is shown. Copy it now:",
+    "copy": "Copy",
+    "copied": "Copied",
+    "connect_step": "Point your client at Inferon",
+    "base_url": "Base URL",
+    "key": "API key",
+    "request_step": "Send your first request",
+    "waiting": "Waiting for your first request…",
+    "received": "First request received — you're live.",
+    "go_to_dashboard": "Go to your dashboard"
   }
 }

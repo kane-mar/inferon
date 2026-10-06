@@ -904,7 +904,7 @@ pub async fn callback(
                                     // keys page mints the first one (shown
                                     // once) — the backend renders no HTML.
                                     Ok(()) => {
-                                        let mut response = redirect_to("/dashboard/keys");
+                                        let mut response = redirect_to("/dashboard/onboarding");
                                         add_cookie(&mut response, &session_cookie);
                                         response
                                     }
@@ -1484,7 +1484,7 @@ mod tests {
             axum::http::StatusCode::FOUND,
             "redirects to the frontend, not an HTML screen"
         );
-        assert_eq!(callback.headers()[header::LOCATION], "/dashboard/keys");
+        assert_eq!(callback.headers()[header::LOCATION], "/dashboard/onboarding");
         let cookies = set_cookies(&callback);
 
         // A session cookie was set for the new user.
@@ -1571,7 +1571,7 @@ mod tests {
         // First sign-in: provisions the tenant (no key) and redirects.
         let first = oauth_dance(&router, "code-1").await;
         assert_eq!(first.status(), axum::http::StatusCode::FOUND);
-        assert_eq!(first.headers()[header::LOCATION], "/dashboard/keys");
+        assert_eq!(first.headers()[header::LOCATION], "/dashboard/onboarding");
         let user_id = crate::session::verify_session(
             set_cookies(&first)
                 .get(crate::session::SESSION_COOKIE)

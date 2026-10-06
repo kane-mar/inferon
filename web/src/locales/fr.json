@@ -61,6 +61,7 @@
   },
   "DashboardNav": {
     "home": "Vue d'ensemble",
+    "connect": "Connexion",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -145,5 +146,24 @@
     "first_fired": "Premier déclenchement",
     "last_fired": "Dernier déclenchement",
     "no_data": "Aucune donnée pour cette fenêtre."
+  },
+  "OnboardingPage": {
+    "title": "Connectez votre SDK",
+    "description": "Trois étapes entre la connexion et votre première requête mesurée.",
+    "key_step": "Créer une clé API",
+    "key_step_help": "Votre clé authentifie l'API. Elle n'est affichée qu'une fois — copiez-la maintenant.",
+    "create_key": "Créer ma clé",
+    "creating": "Création…",
+    "create_key_failed": "Impossible de créer la clé — veuillez réessayer.",
+    "key_once": "C'est la seule fois où votre clé est affichée. Copiez-la maintenant :",
+    "copy": "Copier",
+    "copied": "Copié",
+    "connect_step": "Pointez votre client vers Inferon",
+    "base_url": "URL de base",
+    "key": "Clé API",
+    "request_step": "Envoyez votre première requête",
+    "waiting": "En attente de votre première requête…",
+    "received": "Première requête reçue — vous êtes en ligne.",
+    "go_to_dashboard": "Accéder au tableau de bord"
   }
 }
