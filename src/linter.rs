@@ -102,6 +102,7 @@ mod tests {
             upstream_cost_usd: Decimal::ZERO,
             truncated: false,
             guard_event: None,
+            routing_event: None,
         }
     }
 

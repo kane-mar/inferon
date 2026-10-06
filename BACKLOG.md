@@ -14,7 +14,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 |----|-------|------|--------|
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **mostly done (2026-10-06)** — encrypted provider creds + proxy resolution + `/dashboard/providers`; remaining: "test connection" |
 | ITEM-044 | Model catalog & per-tenant selection | feature | **done (2026-10-06)** — catalog + `tenant_models` selection + `/dashboard/models`; disabled models refused (typed 400) and never routed to |
-| ITEM-045 | Fallback & routing rules | feature | **new** — depends on 044 |
+| ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **mostly done (2026-10-06)** — `/dashboard/onboarding`: mint key → snippets → first-request detection; provider/model links await 043/044 |
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **new** — control surface for ITEM-015/016 |

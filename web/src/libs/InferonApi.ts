@@ -149,6 +149,8 @@ export type CatalogModel = {
 
 export type ModelsResponse = { models: CatalogModel[]; role: Role };
 
+export type RoutingResponse = { fallbacks: string[]; role: Role };
+
 export type CreatedKey = {
   key_id: string;
   tenant_id: string;
@@ -311,6 +313,14 @@ export class InferonApi {
     cookie?: string,
   ): Promise<{ model_id: string }> {
     return this.request('POST', `/v1/dashboard/api/models/${encodeURIComponent(modelId)}`, body, { cookie });
+  }
+
+  routing(cookie?: string): Promise<RoutingResponse> {
+    return this.request<RoutingResponse>('GET', '/v1/dashboard/api/routing', undefined, { cookie });
+  }
+
+  setRouting(fallbacks: string[], cookie?: string): Promise<{ fallbacks: string[] }> {
+    return this.request('POST', '/v1/dashboard/api/routing', { fallbacks }, { cookie });
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {

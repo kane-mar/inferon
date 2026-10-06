@@ -64,6 +64,7 @@
     "connect": "Connect",
     "providers": "Providers",
     "models": "Models",
+    "routing": "Routing",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator"
@@ -204,5 +205,19 @@
     "disable": "Disable",
     "make_default": "Make default",
     "error": "Could not update the model — please retry."
+  },
+  "RoutingPage": {
+    "title_bar": "Routing",
+    "title_bar_description": "Set an ordered fallback chain used when a request fails.",
+    "chain": "Fallback chain",
+    "help": "When the primary model fails retryably (a transport error, 429, or 5xx), Inferon retries with the next model. A request problem (4xx) is never retried.",
+    "primary": "Primary model",
+    "primary_help": "the model your request asks for",
+    "empty": "No fallback — a failing request surfaces the error.",
+    "add_placeholder": "Add a fallback model…",
+    "remove": "Remove",
+    "saved": "Saved.",
+    "owner_only": "Only the tenant owner can change routing.",
+    "error": "Could not save routing — please retry."
   }
 }

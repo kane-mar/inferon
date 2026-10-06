@@ -1344,6 +1344,7 @@ mod tests {
             tenant_store,
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,

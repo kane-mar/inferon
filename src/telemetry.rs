@@ -38,6 +38,8 @@ pub struct TraceMessage {
     /// guarded request (cheap tier + schema contract). Unguarded traffic keeps
     /// this None — the telemetry is additive only (ITEM-026 AC4).
     pub guard_event: Option<Value>,
+    /// ITEM-045: set when a fallback chain changed the serving model.
+    pub routing_event: Option<Value>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -82,8 +84,8 @@ impl TraceSink for PostgresTraceSink {
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
                     total_duration_ms, status_code, raw_prompt, raw_completion,
-                    upstream_cost_usd, waste_detected, truncated, guard_event
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"#,
+                    upstream_cost_usd, waste_detected, truncated, guard_event, routing_event
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -100,6 +102,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.waste_detected.as_ref().map(Json))
             .bind(msg.truncated)
             .bind(msg.guard_event.as_ref().map(Json))
+            .bind(msg.routing_event.as_ref().map(Json))
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {

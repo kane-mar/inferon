@@ -64,6 +64,7 @@
     "connect": "Connexion",
     "providers": "Fournisseurs",
     "models": "Modèles",
+    "routing": "Routage",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -204,5 +205,19 @@
     "disable": "Désactiver",
     "make_default": "Définir par défaut",
     "error": "Impossible de mettre à jour le modèle — veuillez réessayer."
+  },
+  "RoutingPage": {
+    "title_bar": "Routage",
+    "title_bar_description": "Définissez une chaîne de repli ordonnée en cas d'échec d'une requête.",
+    "chain": "Chaîne de repli",
+    "help": "Lorsque le modèle principal échoue de façon réessayable (erreur de transport, 429 ou 5xx), Inferon réessaie avec le modèle suivant. Une erreur de requête (4xx) n'est jamais réessayée.",
+    "primary": "Modèle principal",
+    "primary_help": "le modèle demandé par votre requête",
+    "empty": "Aucun repli — une requête en échec renvoie l'erreur.",
+    "add_placeholder": "Ajouter un modèle de repli…",
+    "remove": "Supprimer",
+    "saved": "Enregistré.",
+    "owner_only": "Seul le propriétaire du tenant peut modifier le routage.",
+    "error": "Impossible d'enregistrer le routage — veuillez réessayer."
   }
 }

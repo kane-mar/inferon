@@ -1096,6 +1096,65 @@ pub async fn tenant_model_update(
     json_ok(json!({ "model_id": model_id }))
 }
 
+// --- Routing (ITEM-045) ------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub struct RoutingBody {
+    fallbacks: Vec<String>,
+}
+
+/// GET /v1/dashboard/api/routing — the tenant's ordered fallback chain.
+pub async fn tenant_routing(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    match state.routing_store.fallbacks(tenant_id).await {
+        Ok(fallbacks) => json_ok(json!({ "fallbacks": fallbacks, "role": role })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/routing (owner-only) — set the ordered chain. The
+/// chain is capped and a disabled model is refused up front (ITEM-044).
+pub async fn tenant_routing_set(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<RoutingBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let mut chain: Vec<String> = Vec::new();
+    for model in body.fallbacks.into_iter().take(8) {
+        let model = model.trim().to_string();
+        if model.is_empty() || chain.contains(&model) {
+            continue;
+        }
+        if state
+            .model_store
+            .is_disabled(tenant_id, &model)
+            .await
+            .unwrap_or(false)
+        {
+            return crate::json_error(
+                StatusCode::BAD_REQUEST,
+                "model_disabled",
+                "a fallback model is disabled for your tenant",
+            );
+        }
+        chain.push(model);
+    }
+    match state.routing_store.set_fallbacks(tenant_id, &chain).await {
+        Ok(()) => json_ok(json!({ "fallbacks": chain })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
 /// invites (ITEM-039). Owners and members may view.
 pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
@@ -1377,6 +1436,7 @@ mod tests {
             tenant_store,
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),

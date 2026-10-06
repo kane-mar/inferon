@@ -26,3 +26,22 @@ timeouts, or rate limits. A real deployment needs "try primary, then X, then Y".
 - Keep the hot path allocation-light: the policy is loaded once, not per request.
 
 **Source:** PO review 2026-10-06 — "no rules for fall back".
+
+## Progress (2026-10-06) — fallback chains landed
+
+- `src/routing.rs`: `RoutingStore` (Postgres + in-memory) + `fallback_reason`
+  (429 / 5xx / transport are retryable; any other 4xx never is).
+- migration 014: `routing_policies` (tenant, ordered `fallbacks` JSONB) + a
+  `traces.routing_event` column.
+- **Proxy**: a request now walks the ordered chain — the primary (after any
+  router/budget override), then the tenant's fallbacks (de-duped, disabled
+  models dropped per ITEM-044) — and records `{from_model, to_model, reason}` on
+  the trace (AC2/AC3). An exhausted chain serves the last error (forwarded as-is,
+  or 502 on transport). An empty chain changes nothing (AC5, default).
+- API: `GET`/`POST /v1/dashboard/api/routing` (owner-only set).
+- UI: `/dashboard/routing` + `RoutingPanel` (ordered chain: add a catalog model,
+  remove) + a nav item; en/fr copy.
+- Rust 199 tests (incl. a 429→fallback→200 integration test asserting the traced
+  event), web 48, all checks + `next build` green.
+- **Deferred**: per-step triggers (all retryable classes share one chain) and the
+  schema-guard trigger (the guard keeps its own frontier replay, unchanged).

@@ -12,6 +12,7 @@ pub mod linter;
 pub mod models;
 pub mod providers;
 pub mod router;
+pub mod routing;
 pub mod secret;
 pub mod session;
 pub mod tenant;
@@ -34,7 +35,7 @@ use axum::{
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::Client;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     sync::Arc,
@@ -55,6 +56,9 @@ pub struct AppState {
     /// Per-tenant model selection (ITEM-044): a disabled model is rejected with
     /// a typed error; an unconfigured model is unrestricted.
     pub model_store: Arc<dyn models::ModelStore>,
+    /// Per-tenant fallback chains (ITEM-045): tried on retryable upstream
+    /// failures. Empty = no chain (behaviour unchanged).
+    pub routing_store: Arc<dyn routing::RoutingStore>,
     pub budget_store: Arc<dyn budget::BudgetStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
@@ -85,6 +89,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/models/:model_id",
             post(dashboard::tenant_model_update),
         )
+        .route("/v1/dashboard/api/routing", get(dashboard::tenant_routing).post(dashboard::tenant_routing_set))
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
@@ -232,6 +237,7 @@ async fn proxy_chat_completions(
         model: payload["model"].as_str().unwrap_or("unknown").to_string(),
         system_prompt_hash: system_prompt_hash(&payload),
         raw_prompt: payload,
+        routing_event: None,
     };
     let route = match resolve_route(&state, &tenant).await {
         Ok(route) => route,
@@ -288,11 +294,38 @@ async fn proxy_chat_completions(
             model_override = None;
         }
     }
-    let mut upstream_body = reqwest::Body::from(body_bytes);
-    if let Some(model) = model_override.take() {
-        meta.model = model.clone();
-        match budget::apply_model_override(&meta.raw_prompt, &model) {
-            Ok(bytes) => upstream_body = reqwest::Body::from(bytes),
+    // ITEM-045: the ordered chain — the primary (after any router/budget override),
+    // then the tenant's fallbacks, de-duped and with disabled models dropped
+    // (ITEM-044). Loaded once per request; an empty chain changes nothing.
+    let primary = model_override.take().unwrap_or_else(|| meta.model.clone());
+    let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
+        Ok(models) => models,
+        Err(e) => {
+            tracing::error!("routing policy load failed: {e}");
+            Vec::new()
+        }
+    };
+    let mut chain = vec![primary.clone()];
+    chain.extend(fallbacks);
+    let mut seen = std::collections::HashSet::new();
+    let mut allowed: Vec<String> = Vec::new();
+    for model in chain {
+        if seen.insert(model.clone())
+            && !state.model_store.is_disabled(tenant_id, &model).await.unwrap_or(false)
+        {
+            allowed.push(model);
+        }
+    }
+    if allowed.is_empty() {
+        allowed.push(primary.clone());
+    }
+
+    let mut routing_event: Option<Value> = None;
+    let mut upstream: Option<reqwest::Response> = None;
+    for index in 0..allowed.len() {
+        let model = allowed[index].clone();
+        let body = match budget::apply_model_override(&meta.raw_prompt, &model) {
+            Ok(bytes) => bytes,
             Err(e) => {
                 tracing::error!("payload reserialization failed: {e}");
                 return json_error(
@@ -301,30 +334,61 @@ async fn proxy_chat_completions(
                     "failed to reserialize the request payload",
                 );
             }
+        };
+        let attempt = state
+            .http_client
+            .post(&route.url)
+            .header("Authorization", format!("Bearer {}", route.key))
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await;
+        let is_last = index + 1 == allowed.len();
+        match attempt {
+            Ok(response) => {
+                let status = response.status();
+                let reason = routing::fallback_reason(status.as_u16());
+                if status.is_success() || is_last || reason.is_none() {
+                    meta.model = model;
+                    upstream = Some(response);
+                    break;
+                }
+                let next = allowed[index + 1].clone();
+                tracing::warn!(
+                    "routing fallback: {model} -> {next} (HTTP {})",
+                    status.as_u16()
+                );
+                routing_event = Some(json!({
+                    "from_model": primary,
+                    "to_model": next,
+                    "reason": reason.expect("retryable").label(),
+                }));
+            }
+            Err(e) => {
+                if is_last {
+                    tracing::error!("upstream request failed: {e}");
+                    let total_ms = started.elapsed().as_millis() as i64;
+                    let msg =
+                        build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None, false);
+                    send_trace(&state.telemetry_tx, msg);
+                    return json_error(
+                        StatusCode::BAD_GATEWAY,
+                        "upstream_error",
+                        "upstream request failed",
+                    );
+                }
+                let next = allowed[index + 1].clone();
+                tracing::warn!("routing fallback (transport): {model} -> {next}");
+                routing_event = Some(json!({
+                    "from_model": primary,
+                    "to_model": next,
+                    "reason": routing::FallbackReason::Transport.label(),
+                }));
+            }
         }
     }
-
-    let upstream_request = state
-        .http_client
-        .post(&route.url)
-        .header("Authorization", format!("Bearer {}", route.key))
-        .header("Content-Type", "application/json")
-        .body(upstream_body);
-
-    let upstream = match upstream_request.send().await {
-        Ok(response) => response,
-        Err(e) => {
-            tracing::error!("upstream request failed: {e}");
-            let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None, false);
-            send_trace(&state.telemetry_tx, msg);
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                "upstream_error",
-                "upstream request failed",
-            );
-        }
-    };
+    meta.routing_event = routing_event;
+    let upstream = upstream.expect("the chain always has at least one model");
 
     let status = upstream.status();
     if !status.is_success() {
@@ -419,6 +483,8 @@ struct RequestMeta {
     model: String,
     system_prompt_hash: Option<String>,
     raw_prompt: Value,
+    /// ITEM-045: set when a fallback chain changed the serving model.
+    routing_event: Option<Value>,
 }
 
 fn build_trace(
@@ -448,6 +514,7 @@ fn build_trace(
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
         truncated,
         guard_event: None,
+        routing_event: meta.routing_event.clone(),
     }
 }
 
@@ -1224,6 +1291,7 @@ mod tests {
             tenant_store,
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -1287,6 +1355,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
             telemetry_tx: tx,
             operator_key: None,
@@ -1312,6 +1381,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store,
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: mpsc::channel(1).0,
             operator_key: None,
@@ -1383,6 +1453,7 @@ mod tests {
                 false,
                 false,
             )),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -1403,6 +1474,52 @@ mod tests {
         assert_eq!(json["error"]["type"], "model_disabled");
     }
 
+    #[tokio::test]
+    async fn a_retryable_failure_falls_back_and_records_the_event() {
+        let tenant = seeded_tenant();
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::default(),
+            ),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(
+                crate::routing::InMemoryRoutingStore::with_fallbacks(tenant.id, &["deepseek-chat"]),
+            ),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                "{\"model\":\"rate\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::OK,
+            "the 429 primary fell back to the chain"
+        );
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["model"], "deepseek-chat", "the fallback model served the request");
+
+        let trace = rx.recv().await.expect("a trace was emitted");
+        assert_eq!(trace.request_model, "deepseek-chat", "the trace records the served model");
+        let event = trace.routing_event.expect("a routing event is recorded");
+        assert_eq!(event["reason"], "upstream_429");
+        assert_eq!(event["from_model"], "rate");
+        assert_eq!(event["to_model"], "deepseek-chat");
+    }
+
     fn dummy_trace() -> TraceMessage {
         TraceMessage {
             id: uuid::Uuid::new_v4(),
@@ -1421,6 +1538,7 @@ mod tests {
             upstream_cost_usd: rust_decimal::Decimal::ZERO,
             truncated: false,
             guard_event: None,
+            routing_event: None,
         }
     }
 
@@ -1519,6 +1637,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             telemetry_tx: tx,
             operator_key: None,
@@ -1542,6 +1661,7 @@ mod tests {
             tenant_store: state.tenant_store.clone(),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: state.budget_store.clone(),
             operator_key: state.operator_key.clone(),
             accounts: None,
@@ -2124,6 +2244,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2297,6 +2418,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2364,6 +2486,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2656,6 +2779,7 @@ mod tests {
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
