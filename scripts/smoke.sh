@@ -201,19 +201,6 @@ sum_models=$(curl -sS "$BASE/v1/dashboard/api/by-model?days=7" -H "Authorization
     || fail "summary total ($cost) != by-model sum ($sum_models)"
 echo "ok: summary total equals the by-model sum ($cost)"
 
-# ITEM-019 AC2: an empty tenant sees a meaningful empty state (the shell text
-# is present in the served page). Capture the body first: `curl | grep -q` is
-# racy under pipefail — grep -q exits on its first match, closing the pipe and
-# making curl die with SIGPIPE (exit 23) whenever the match is late in a
-# still-streaming body.
-dash=$(curl -fsS "$BASE/v1/dashboard")
-printf '%s' "$dash" | grep -qi "no requests yet" \
-    || fail "dashboard lacks the empty-state guidance"
-echo "ok: empty-state guidance present in the dashboard shell"
-
-printf '%s' "$dash" | grep -q "cost leaks" || fail "dashboard HTML not served"
-echo "ok: dashboard HTML served"
-
 echo "-- operator surface (ITEM-020 alerts view) --"
 check_status "operator alerts without key -> 401" 401 \
     "$BASE/v1/dashboard/api/operator/alerts?days=7"
@@ -254,17 +241,14 @@ oauth_dance() {
     curl -sS -L -b "$jar" -c "$jar" "$location"
 }
 
-# First sign-in: success screen showing the raw key exactly once.
+# First sign-in: provisions the tenant (no key) and redirects to the frontend's
+# keys page — the backend renders no HTML and reveals no key.
 BODY1=$(oauth_dance) || fail "first OAuth dance failed"
-printf '%s' "$BODY1" | grep -q 'not shown again' || fail "success screen lacks the hash-only note: $BODY1"
-SIGNUP_KEY=$(printf '%s' "$BODY1" | grep -o 'sk-inferon-[0-9a-f]\{32\}' | head -1)
-[ -n "$SIGNUP_KEY" ] || fail "no key on the success screen: $BODY1"
-[ "$(printf '%s' "$BODY1" | grep -o "$SIGNUP_KEY" | wc -l | tr -d ' ')" = "1" ] \
-    || fail "the raw key was rendered more than once"
-echo "ok: first sign-in shows the key once (self-serve provisioned)"
+printf '%s' "$BODY1" | grep -q 'sk-inferon-' && fail "first sign-in leaked key material: $BODY1"
+echo "ok: first sign-in redirects to the frontend (no key in the response)"
 
 # Provisioning rows in Postgres: user, owner membership, tenant with the shared
-# upstream key, exactly one hashed key.
+# upstream key, and no server-minted key (the frontend mints the first key).
 SMOKE_USER_ID=$(psql "SELECT id FROM users WHERE github_login = 'smoke-dev';")
 [ -n "$SMOKE_USER_ID" ] || fail "no user row for the signed-up developer"
 MEMBER_COUNT=$(psql "SELECT count(*) FROM tenant_members WHERE user_id = '$SMOKE_USER_ID' AND role = 'owner';")
@@ -273,66 +257,54 @@ SIGNUP_TID=$(psql "SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_
 [ -n "$SIGNUP_TID" ] || fail "no provisioned tenant"
 [ "$(psql "SELECT upstream_openai_key = 'sk-smoke-master' FROM tenants WHERE id = '$SIGNUP_TID';")" = "t" ] \
     || fail "provisioned tenant lacks the shared upstream key"
-[ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "1" ] \
-    || fail "expected exactly one first key"
-echo "ok: tenant + owner membership + one hashed key in Postgres"
+[ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "0" ] \
+    || fail "the backend must not mint the first key (the frontend does)"
+echo "ok: tenant + owner membership provisioned, no server-minted key"
 
 # The session cookie from the dance resolves /auth/me.
 ME=$(curl -sS -b "$DANCE_JAR" "$BASE/auth/me")
 printf '%s' "$ME" | grep -q '"github_login":"smoke-dev"' || fail "auth/me not signed in after the dance: $ME"
 echo "ok: session established (auth/me -> smoke-dev)"
 
-# The revealed key authenticates end-to-end: a guarded request gets the 200
-# schema-valid replay (same arms as the seeded guarded tenant).
+# The frontend mints the first key through the session; that key authenticates
+# end-to-end (guarded 200 replay, same arms as the seeded guarded tenant).
+MINTED=$(curl -sS -b "$DANCE_JAR" -X POST "$BASE/v1/dashboard/api/keys" \
+    -H 'Content-Type: application/json' -d '{"label":"first"}')
+SIGNUP_KEY=$(printf '%s' "$MINTED" | grep -o '"key":"sk-inferon-[0-9a-f]*"' | cut -d'"' -f4)
+[ -n "$SIGNUP_KEY" ] || fail "session-minted key missing from the response: $MINTED"
 resp=$(post_and_code "$SIGNUP_KEY" "$GUARDED_BODY")
 code=$(printf '%s' "$resp" | tail -1)
 body=$(printf '%s' "$resp" | sed '$d')
 [ "$code" = "200" ] || fail "signup key: expected guarded 200, got HTTP $code"
 printf '%s' "$body" | grep -q 'answer' || fail "signup key request lacked the schema-valid answer: $body"
 printf '%s' "$body" | grep -q 'other' && fail "signup key request leaked the cheap lying body: $body"
-echo "ok: the revealed key authenticates end-to-end (HTTP 200)"
+echo "ok: the session-minted key authenticates end-to-end (HTTP 200)"
 
-# Second sign-in (same GitHub identity): lands on the dashboard, no key.
+# Second sign-in (same GitHub identity): provisions nothing new.
 BODY2=$(oauth_dance) || fail "second OAuth dance failed"
 printf '%s' "$BODY2" | grep -q 'sk-inferon-' && fail "returning sign-in showed key material"
 [ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "1" ] \
     || fail "returning sign-in minted another key"
-echo "ok: returning sign-in lands on the dashboard with no second key"
+echo "ok: returning sign-in provisions nothing new"
 
-echo "-- ITEM-037 operator console (session-scoped; isolation) --"
-CONSOLE="$BASE/v1/dashboard/operator"
+echo "-- ITEM-037 operator access (session-scoped; isolation) --"
 # A platform-operator session (seeded user flagged is_operator, session cookie
-# minted with the smoke SESSION_SECRET) opens the console + operator APIs.
+# minted with the smoke SESSION_SECRET) opens the operator JSON APIs.
 SMOKE_OP_ID=$(psql "INSERT INTO users (github_id, github_login, is_operator)
       VALUES (6660002, 'smoke-op', true) RETURNING id;")
 OP_EXP=$(printf '%x' "$(( $(date +%s) + 3600 ))")
 OP_PAYLOAD="$SMOKE_OP_ID.$OP_EXP"
 OP_MAC=$(printf '%s' "$OP_PAYLOAD" | openssl dgst -sha256 -hmac "$SESSION_SECRET" -hex | awk '{print $NF}')
 OP_SESSION="$OP_PAYLOAD.$OP_MAC"
-console=$(curl -sS -H "Cookie: inferon_session=$OP_SESSION" "$CONSOLE?days=7")
-printf '%s' "$console" | grep -q 'operator console' \
-    || fail "operator session did not get the console page: $console"
-printf '%s' "$console" | grep -q 'Tenants' \
-    || fail "console page lacks the per-tenant list"
 code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: inferon_session=$OP_SESSION" "$BASE/v1/dashboard/api/operator/summary?days=7")
 [ "$code" = "200" ] || fail "operator session on the operator JSON API: expected 200, got $code"
 me=$(curl -sS -H "Cookie: inferon_session=$OP_SESSION" "$BASE/auth/me")
 printf '%s' "$me" | grep -q '"github_login":"smoke-op"' || fail "operator session cookie did not verify: $me"
-echo "ok: operator session opens the console + operator APIs"
-
-# The shared operator key still works for machines (console page too).
-code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Authorization: Bearer $OPERATOR_API_KEY")
-[ "$code" = "200" ] || fail "operator key on the console: expected 200, got $code"
-echo "ok: OPERATOR_API_KEY still opens the console (machine access)"
-
-# Isolation: a real tenant key (DEV_KEY) on the console -> 403.
-code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Authorization: Bearer $DEV_KEY")
-[ "$code" = "403" ] || fail "tenant key on the console: expected 403, got $code"
-echo "ok: tenant key is 403 on the operator console"
+echo "ok: operator session opens the operator JSON APIs"
 
 # Isolation at the session seam: a valid tenant-member session (seeded user,
-# membership, forged-but-signed cookie) is 403 on the console. The cookie is
-# minted with the same SESSION_SECRET the proxy uses, so it verifies.
+# membership, forged-but-signed cookie) is 403 on the operator APIs. The cookie
+# is minted with the same SESSION_SECRET the proxy uses, so it verifies.
 SMOKE_MEMBER_ID=$(psql "INSERT INTO users (github_id, github_login) VALUES (6660001, 'smoke-member') RETURNING id;")
 psql "INSERT INTO tenant_members (tenant_id, user_id, role)
       SELECT id, '$SMOKE_MEMBER_ID', 'member' FROM tenants LIMIT 1;" >/dev/null
@@ -340,12 +312,12 @@ MEM_EXP=$(printf '%x' "$(( $(date +%s) + 3600 ))")
 MEM_PAYLOAD="$SMOKE_MEMBER_ID.$MEM_EXP"
 MEM_MAC=$(printf '%s' "$MEM_PAYLOAD" | openssl dgst -sha256 -hmac "$SESSION_SECRET" -hex | awk '{print $NF}')
 MEM_TOKEN="$MEM_PAYLOAD.$MEM_MAC"
-code=$(curl -sS -o /dev/null -w '%{http_code}' "$CONSOLE?days=7" -H "Cookie: inferon_session=$MEM_TOKEN")
-[ "$code" = "403" ] || fail "tenant-member session on the console: expected 403, got $code"
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/v1/dashboard/api/operator/summary?days=7" -H "Cookie: inferon_session=$MEM_TOKEN")
+[ "$code" = "403" ] || fail "tenant-member session on the operator API: expected 403, got $code"
 me=$(curl -sS -H "Cookie: inferon_session=$MEM_TOKEN" "$BASE/auth/me")
 printf '%s' "$me" | grep -q '"github_login":"smoke-member"' \
     || fail "member session cookie did not verify (auth/me): $me"
-echo "ok: tenant-member session is 403 on the console (session isolation)"
+echo "ok: tenant-member session is 403 on the operator JSON API (session isolation)"
 
 echo "-- ITEM-038 tenant key management (owner vs member, via sessions) --"
 # Owner (smoke-dev session from the signup dance) lists + creates + revokes.

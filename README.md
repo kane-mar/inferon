@@ -24,7 +24,8 @@ linting, and a self-hosted cost-leak dashboard.
 - **Cost linter** (background worker): flags over-provisioned gpt-4o calls, repeated
   4k+ token uncached system prompts, and gpt-4o-on-simple-text misuse, with estimated
   $ impact.
-- **Dashboard** — `GET /v1/dashboard` (self-contained HTML + JSON APIs), tenant-scoped.
+- **Dashboard** — the TypeScript web app at `/dashboard` (tenant-scoped), backed
+  by the JSON APIs under `/v1/dashboard/api/*`.
 
 ## Architecture
 
@@ -58,9 +59,9 @@ you straight on your dashboard.
 
 - `POST /v1/chat/completions` — chat completions, streaming and non-streaming
   (`stream: true|false`), OpenAI SDK-compatible
-- `GET /v1/dashboard` — your cost dashboard (per-tenant; only your traffic; works
-  with either your API key or your browser sign-in)
-  - JSON: `/v1/dashboard/api/summary`, `/by-model`, `/by-prompt`, `/waste` (all with `?days=7|30|90`)
+- `GET /dashboard` — your cost dashboard (per-tenant, sign-in with GitHub; the
+  web app reads the JSON APIs below with your session cookie)
+  - JSON: `/v1/dashboard/api/summary`, `/timeseries`, `/by-model`, `/by-prompt`, `/waste` (all with `?days=7|30|90`)
 
 **2-minute example (OpenAI SDK):**
 
@@ -153,20 +154,22 @@ Set `UPSTREAM_URL` (full chat-completions URL) when starting the proxy/compose, 
 
 ## Dashboard
 
-`GET http://<host>:8080/v1/dashboard` in a browser; enter a tenant key when prompted
-(kept in the page only, never stored). Views: spend by model, top system-prompt
-clusters, and waste flags with estimated $ impact. Time window: 1/7/30 days.
+`https://<INFERON_HOST>/dashboard` — the Next.js app (sign in with GitHub). Views:
+KPI cards with period-over-period deltas, a time-series chart, spend by model, top
+system prompts, and waste flags; 7/30/90-day windows with a compare toggle. The
+JSON APIs below back it and stay available to scripts.
 
 ### Signing in (GitHub OAuth, ITEM-035)
 
-Humans can sign in with GitHub for browser sessions — sessions gate nothing yet
-(the dashboard still reads your tenant API key; `/v1/chat` stays key-authed). With
-`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `SESSION_SECRET` set:
+Humans sign in with GitHub for browser sessions; the dashboard is session-gated
+while `/v1/chat` stays key-authed. With `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
+and `SESSION_SECRET` set:
 
 - `GET /auth/login` — redirects to GitHub; unconfigured → HTTP 503
   (`oauth_not_configured`)
 - `GET /auth/callback` — completes the dance, sets the signed session cookie
-  (HttpOnly, SameSite=Lax, Secure over TLS), redirects to `/v1/dashboard`
+  (HttpOnly, SameSite=Lax, Secure over TLS), redirects to `/dashboard`
+  (new sign-ups land on `/dashboard/keys` to mint their first key)
 - `GET /auth/me` — the signed-in user (`github_id`/`github_login`) or 401
 - `POST /auth/logout` — expires the session cookie
 
@@ -240,7 +243,7 @@ the parent zone's DNS (DNSimple for agilefederation.com) — no registrar delega
 involved. Caddy obtains a Let's Encrypt cert automatically once the A record points
 at the host and ports 80/443 are open.
 Operator work happens in the browser console first (sign in with an operator
-GitHub login from `OPERATOR_GITHUB_LOGINS` → `https://inferon.agilefederation.com/v1/dashboard/operator`:
+GitHub login from `OPERATOR_GITHUB_LOGINS` → `https://inferon.agilefederation.com/dashboard/operator`:
 platform totals, per-tenant spend/requests/guard fallbacks, guard outcomes,
 alerts). Machines/scripts keep the operator JSON APIs +
 `OPERATOR_API_KEY` (`/v1/dashboard/api/operator/*`).

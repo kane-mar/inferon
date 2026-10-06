@@ -38,3 +38,25 @@ points at the Rust one.
 - Low risk: no data-plane behavior change.
 
 **Source:** PO review 2026-10-06 — "finish decoupling from the template shell".
+
+## Progress (2026-10-06) — the backend now renders no HTML
+
+PO directive: **backend all Rust, frontend all TypeScript, clean separation.**
+The server-rendered HTML was removed from the Rust backend entirely:
+
+- **Retired `/v1/dashboard`** (legacy ITEM-007 HTML shell) and
+  **`/v1/dashboard/operator`** (ITEM-037 HTML console): deleted `const HTML`,
+  `console_html`, `html_escape`, `ConsoleTenant`, `console_tenant_rows`,
+  `console_guard_outcomes`, `index`, `operator_console`, their routes and their
+  tests (Rust 193 → 180 tests, all green). The operator JSON APIs are unchanged.
+- **Retired the Rust signup success screen** (`success_screen` + `SIGNUP_CSS`):
+  `/auth/callback` now redirects to the frontend (`/dashboard` for returning
+  users, `/dashboard/keys` for new sign-ups, which mint their first key there).
+  `provision_first_tenant` no longer mints a key — the frontend keys page does
+  (shown once). Docs + `scripts/smoke.sh` updated to match.
+
+So **AC2 and AC4 are done**; the operator console is the Next
+`/dashboard/operator`, and the backend is JSON-only. What remains of this item is
+**AC1/AC3**: retire the template-shaped *shell* (the Next `(auth)` route group,
+`dashboard/layout.tsx`, `DashboardHeader`, `MobileNavigation`, `TitleBar`,
+`SlashIcon`, `CenteredContainer`) so the frontend's frame is Inferon-owned too.

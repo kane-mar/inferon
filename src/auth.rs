@@ -860,7 +860,7 @@ pub async fn callback(
                         }
                         // Returning user: straight to their dashboard (ITEM-036 AC2).
                         Ok(Some(_)) => {
-                            let mut response = redirect_to("/v1/dashboard");
+                            let mut response = redirect_to("/dashboard");
                             add_cookie(&mut response, &session_cookie);
                             response
                         }
@@ -891,7 +891,7 @@ pub async fn callback(
                                         )
                                     }
                                     Ok(()) => {
-                                        let mut response = redirect_to("/v1/dashboard");
+                                        let mut response = redirect_to("/dashboard");
                                         add_cookie(&mut response, &session_cookie);
                                         response
                                     }
@@ -900,8 +900,11 @@ pub async fn callback(
                             Ok(None) => {
                                 match provision_first_tenant(&state, accounts, user).await {
                                     Err(e) => e,
-                                    Ok(raw_key) => {
-                                        let mut response = success_screen(&raw_key);
+                                    // No key is minted here: the frontend's
+                                    // keys page mints the first one (shown
+                                    // once) — the backend renders no HTML.
+                                    Ok(()) => {
+                                        let mut response = redirect_to("/dashboard/keys");
                                         add_cookie(&mut response, &session_cookie);
                                         response
                                     }
@@ -925,7 +928,7 @@ pub async fn callback(
 /// POST /auth/logout — expire the session cookie and land on the dashboard
 /// (AC2). Works even when OAuth is unconfigured.
 pub async fn logout(headers: HeaderMap) -> Response {
-    let mut response = redirect_to("/v1/dashboard");
+    let mut response = redirect_to("/dashboard");
     add_cookie(&mut response, &crate::session::clear_cookie(is_secure(&headers)));
     response
 }
@@ -938,14 +941,14 @@ fn provisioning_failed() -> Response {
     )
 }
 
-/// ITEM-036 AC1: create the tenant, record the user as its owner, and mint the
-/// tenant's first key (ITEM-034 path). Returns the raw key — the only moment
-/// it exists; only its hash is stored.
+/// ITEM-036 AC1: create the tenant and record the user as its owner. The first
+/// API key is minted by the frontend's keys page (and shown once there) — the
+/// backend renders no HTML.
 async fn provision_first_tenant(
     state: &Arc<AppState>,
     accounts: &Accounts,
     user: User,
-) -> Result<String, Response> {
+) -> Result<(), Response> {
     let tenant_id = match state
         .tenant_store
         .insert_tenant(accounts.provision_upstream_key.as_deref())
@@ -961,39 +964,7 @@ async fn provision_first_tenant(
         tracing::error!("membership insert failed: {e}");
         return Err(provisioning_failed());
     }
-    let raw_key = crate::mint_client_key();
-    if let Err(e) = state
-        .tenant_store
-        .insert_api_key(tenant_id, "default", &crate::sha256_hex(&raw_key))
-        .await
-    {
-        tracing::error!("key insert failed: {e}");
-        return Err(provisioning_failed());
-    }
-    Ok(raw_key)
-}
-
-const SIGNUP_CSS: &str = "body{font:14px/1.5 system-ui,sans-serif;max-width:640px;margin:3rem auto;padding:0 1rem;color:#1a202c}h1{font-size:1.4rem}code{background:#edf2f7;padding:.2rem .4rem;border-radius:4px;word-break:break-all}button{margin-left:.5rem}.note{color:#4a5568}";
-
-/// The one-time success screen (ITEM-036 AC1): the raw key rendered exactly
-/// once, with a copy affordance and the hash-only warning. The key exists only
-/// in this response — never stored, never shown again.
-fn success_screen(raw_key: &str) -> Response {
-    let body = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
-<title>Inferon — your API key</title><style>{SIGNUP_CSS}</style></head>\
-<body><h1>Welcome — here is your API key</h1>\
-<p class=\"note\">Stored hashed, <b>not shown again</b>. Copy it now:</p>\
-<p><code id=\"key\">{raw_key}</code>\
-<button onclick=\"navigator.clipboard.writeText(document.getElementById('key').textContent); this.textContent='copied'\">copy</button></p>\
-<p><a href=\"/v1/dashboard\">Continue to your dashboard</a></p></body></html>"
-    );
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        body,
-    )
-        .into_response()
+    Ok(())
 }
 
 /// The signed-in user, resolved from the session cookie by `me` (AC4). A
@@ -1496,14 +1467,8 @@ mod tests {
     }
 
     /// The raw `sk-inferon-…` key inside an HTML body (the success screen).
-    fn raw_key_in(body: &str) -> Option<&str> {
-        let marker = "sk-inferon-";
-        let start = body.find(marker)?;
-        Some(&body[start..start + marker.len() + 32])
-    }
-
     #[tokio::test]
-    async fn first_sign_in_shows_the_key_once_and_provisions_the_tenant() {
+    async fn first_sign_in_provisions_the_tenant_and_redirects_to_the_frontend() {
         let users = std::sync::Arc::new(InMemoryUserStore::default());
         let tenants: std::sync::Arc<crate::InMemoryTenantStore> =
             std::sync::Arc::new(crate::InMemoryTenantStore::default());
@@ -1514,22 +1479,13 @@ mod tests {
         let router = crate::build_router(state);
 
         let callback = oauth_dance(&router, "the-code").await;
-        assert_eq!(callback.status(), axum::http::StatusCode::OK, "success screen, not a redirect");
-        let content_type = callback
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        assert!(content_type.starts_with("text/html"), "html: {content_type}");
+        assert_eq!(
+            callback.status(),
+            axum::http::StatusCode::FOUND,
+            "redirects to the frontend, not an HTML screen"
+        );
+        assert_eq!(callback.headers()[header::LOCATION], "/dashboard/keys");
         let cookies = set_cookies(&callback);
-        let body = String::from_utf8(
-            axum::body::to_bytes(callback.into_body(), 1024 * 1024).await.unwrap().to_vec(),
-        )
-        .unwrap();
-        let key = raw_key_in(&body).expect("the raw key is shown on the screen").to_string();
-        assert!(key.starts_with("sk-inferon-"));
-        assert!(body.contains("not shown again"), "hash-only note: {body}");
-        assert_eq!(body.matches(&key).count(), 1, "the raw key appears exactly once");
 
         // A session cookie was set for the new user.
         let token = cookies.get(crate::session::SESSION_COOKIE).expect("session cookie").to_string();
@@ -1538,7 +1494,7 @@ mod tests {
         let user = users.find_by_id(user_id).await.expect("ok").expect("user present");
         assert_eq!(user.github_login, "octocat");
 
-        // Membership: the user owns exactly one auto-provisioned tenant.
+        // The user owns exactly one auto-provisioned tenant on the shared key.
         let (tenant_id, role) = users
             .tenant_for_user(user.id)
             .await
@@ -1552,14 +1508,12 @@ mod tests {
             .expect("provisioned tenant");
         assert_eq!(tenant.upstream_openai_key.as_deref(), Some("sk-platform"));
 
-        // Exactly one key exists (the revealed one) and it authenticates.
-        let keys = tenants.list_api_keys(tenant_id).await.expect("ok");
-        assert_eq!(keys.len(), 1, "one first key, hash-only");
-        let resolved = tenants
-            .tenant_by_api_key_hash(&crate::sha256_hex(&key))
-            .await
-            .expect("ok");
-        assert_eq!(resolved.map(|t| t.id), Some(tenant_id), "the key is accepted immediately");
+        // No key is minted server-side — the frontend's keys page mints it and
+        // shows it once. The backend renders no HTML and reveals no key.
+        assert!(
+            tenants.list_api_keys(tenant_id).await.expect("ok").is_empty(),
+            "the backend mints no first key; the frontend does"
+        );
     }
 
     #[tokio::test]
@@ -1587,7 +1541,7 @@ mod tests {
             axum::http::StatusCode::FOUND,
             "an invited user lands on the dashboard, not the signup screen"
         );
-        assert_eq!(callback.headers()[header::LOCATION], "/v1/dashboard");
+        assert_eq!(callback.headers()[header::LOCATION], "/dashboard");
         let token = set_cookies(&callback)
             .get(crate::session::SESSION_COOKIE)
             .expect("session cookie")
@@ -1614,9 +1568,10 @@ mod tests {
         );
         let router = crate::build_router(state);
 
-        // First sign-in: success screen + provisioning.
+        // First sign-in: provisions the tenant (no key) and redirects.
         let first = oauth_dance(&router, "code-1").await;
-        assert_eq!(first.status(), axum::http::StatusCode::OK);
+        assert_eq!(first.status(), axum::http::StatusCode::FOUND);
+        assert_eq!(first.headers()[header::LOCATION], "/dashboard/keys");
         let user_id = crate::session::verify_session(
             set_cookies(&first)
                 .get(crate::session::SESSION_COOKIE)
@@ -1628,21 +1583,12 @@ mod tests {
         .expect("valid");
         let (tenant_id, _) = users.tenant_for_user(user_id).await.expect("ok").expect("membership");
 
-        // Second sign-in (same GitHub user): straight to the dashboard, no key.
+        // Second sign-in (same GitHub user): straight to the dashboard.
         let second = oauth_dance(&router, "code-2").await;
         assert_eq!(second.status(), axum::http::StatusCode::FOUND);
-        assert_eq!(second.headers()[header::LOCATION], "/v1/dashboard");
-        let second_body = String::from_utf8(
-            axum::body::to_bytes(second.into_body(), 1024 * 1024).await.unwrap().to_vec(),
-        )
-        .unwrap();
-        assert!(
-            !second_body.contains("sk-inferon-"),
-            "no key material on a returning sign-in: {second_body}"
-        );
-        // Still one tenant, one membership, one key — sign-in never re-provisions.
+        assert_eq!(second.headers()[header::LOCATION], "/dashboard");
+        // Still one tenant, one membership — sign-in never re-provisions.
         assert_eq!(users.tenant_for_user(user_id).await.expect("ok"), Some((tenant_id, "owner".to_string())));
-        assert_eq!(tenants.list_api_keys(tenant_id).await.expect("ok").len(), 1);
     }
 
     #[tokio::test]
@@ -1788,7 +1734,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::FOUND);
-        assert_eq!(response.headers()[header::LOCATION], "/v1/dashboard");
+        assert_eq!(response.headers()[header::LOCATION], "/dashboard");
         let raw = response
             .headers()
             .get_all(header::SET_COOKIE)

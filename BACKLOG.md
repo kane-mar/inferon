@@ -18,7 +18,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **new** — backs the landing claim; pairs with 018 |
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **new** — control surface for ITEM-015/016 |
-| ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **new** — Inferon-owned shell; retire the Rust operator HTML; housekeeping after 043–048 |
+| ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **in progress** — backend now renders no HTML (Rust dashboard/console + signup screen retired); remaining: replace the template-shaped Next shell |
 | ITEM-018 | First real developer onboarding | improvement | **PO call** — hand the staged key to a real developer; now sits *after* the control plane (043–048) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
