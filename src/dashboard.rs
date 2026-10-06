@@ -1012,6 +1012,90 @@ pub async fn tenant_provider_test(
     }
 }
 
+// --- Models (ITEM-044) -------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub struct ModelUpdateBody {
+    enabled: Option<bool>,
+    is_default: Option<bool>,
+}
+
+/// GET /v1/dashboard/api/models — the catalog for the tenant's provider kinds,
+/// merged with the tenant's enable/disable + default flags. Prices come from the
+/// cost engine (`cost::price_for`) so the two can never disagree.
+pub async fn tenant_models(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let providers = match state.provider_store.list(tenant_id).await {
+        Ok(providers) => providers,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let settings = match state.model_store.settings(tenant_id).await {
+        Ok(settings) => settings,
+        Err(e) => return internal(&e.to_string()),
+    };
+
+    let mut kinds: Vec<&str> = providers.iter().map(|provider| provider.kind.as_str()).collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+
+    let models: Vec<Value> = kinds
+        .iter()
+        .flat_map(|kind| crate::models::by_kind(kind))
+        .map(|model| {
+            let setting = settings.iter().find(|setting| setting.model_id == model.id);
+            let price = crate::cost::price_for(model.id);
+            json!({
+                "id": model.id,
+                "kind": model.kind,
+                "name": model.name,
+                "context_window": model.context_window,
+                "max_output": model.max_output,
+                "reasoning": model.reasoning,
+                "images": model.images,
+                "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
+                "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
+                "price": {
+                    "input_usd_per_million": price.prompt_miss.to_string(),
+                    "cached_input_usd_per_million": price.prompt_hit.map(|rate| rate.to_string()),
+                    "output_usd_per_million": price.completion.to_string(),
+                },
+            })
+        })
+        .collect();
+    json_ok(json!({ "models": models, "role": role }))
+}
+
+/// POST /v1/dashboard/api/models/:model_id (owner-only) — enable/disable a model
+/// and/or make it the default for its provider kind.
+pub async fn tenant_model_update(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(model_id): Path<String>,
+    Json(body): Json<ModelUpdateBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    if let Some(enabled) = body.enabled {
+        if let Err(e) = state.model_store.set_enabled(tenant_id, &model_id, enabled).await {
+            return internal(&e.to_string());
+        }
+    }
+    if body.is_default == Some(true) {
+        if let Err(e) = state.model_store.set_default(tenant_id, &model_id).await {
+            return internal(&e.to_string());
+        }
+    }
+    json_ok(json!({ "model_id": model_id }))
+}
+
 /// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
 /// invites (ITEM-039). Owners and members may view.
 pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
@@ -1292,6 +1376,7 @@ mod tests {
             upstream_url: "http://127.0.0.1:1/".to_string(),
             tenant_store,
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),

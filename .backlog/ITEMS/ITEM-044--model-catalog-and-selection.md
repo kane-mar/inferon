@@ -23,3 +23,23 @@
 - Depends on ITEM-043 (a model belongs to a provider).
 
 **Source:** PO review 2026-10-06 — "select models".
+
+## Progress (2026-10-06) — catalog + selection landed
+
+- `src/models.rs`: static `CATALOG` (id/name/kind/context/max output/reasoning/
+  images) with **prices sourced from `cost::price_for`** — one source of truth so
+  the catalog and the cost engine can never disagree; `ModelStore` seam (Postgres
+  + in-memory).
+- migration 013 `tenant_models` (tenant, model, enabled, is_default; **absent =
+  unrestricted**, so own `openai-compatible` ids need no rows); one default per
+  provider kind.
+- API: `GET /v1/dashboard/api/models` (the catalog for the tenant's provider
+  kinds, merged with the flags) and `POST …/:model_id` (owner-only enable/disable
+  + set default).
+- **AC4** (routing only selects enabled): the router/budget override is dropped
+  when it targets a disabled model; **AC5**: a request for a disabled model is
+  refused with a typed `model_disabled` 400 (traced), not a raw upstream 4xx.
+- UI: `/dashboard/models` + `ModelsPanel` (grouped by provider kind, price +
+  context + capability chips, enable/disable, make-default) + a nav item; en/fr
+  copy. Strict FE/BE split kept.
+- Rust 196 tests, web 48, all checks + `next build` green.

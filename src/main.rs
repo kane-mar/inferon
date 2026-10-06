@@ -123,6 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
             secrets,
         )),
+        model_store: Arc::new(inferon::models::PostgresModelStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),

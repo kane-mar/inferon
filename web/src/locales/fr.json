@@ -63,6 +63,7 @@
     "home": "Vue d'ensemble",
     "connect": "Connexion",
     "providers": "Fournisseurs",
+    "models": "Modèles",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -189,5 +190,19 @@
     "connected": "Connecté",
     "failed": "Échec",
     "unreachable": "Injoignable"
+  },
+  "ModelsPage": {
+    "title_bar": "Modèles",
+    "title_bar_description": "Choisissez les modèles autorisés et définissez un modèle par défaut par fournisseur.",
+    "models": "Modèles disponibles",
+    "empty": "Aucun modèle au catalogue — ajoutez d'abord un fournisseur DeepSeek ou OpenAI.",
+    "default": "Par défaut",
+    "context": "ctx",
+    "reasoning": "raisonnement",
+    "images": "images",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "make_default": "Définir par défaut",
+    "error": "Impossible de mettre à jour le modèle — veuillez réessayer."
   }
 }

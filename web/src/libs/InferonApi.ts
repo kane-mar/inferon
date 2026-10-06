@@ -127,6 +127,28 @@ export type NewProvider = { kind: string; name?: string; base_url: string; key: 
 
 export type ProviderTest = { ok: boolean; status: number | null };
 
+export type ModelPrice = {
+  input_usd_per_million: string;
+  cached_input_usd_per_million: string | null;
+  output_usd_per_million: string;
+};
+
+/** A model in the catalog, merged with the tenant's selection flags. */
+export type CatalogModel = {
+  id: string;
+  kind: string;
+  name: string;
+  context_window: number;
+  max_output: number;
+  reasoning: boolean;
+  images: boolean;
+  enabled: boolean;
+  is_default: boolean;
+  price: ModelPrice;
+};
+
+export type ModelsResponse = { models: CatalogModel[]; role: Role };
+
 export type CreatedKey = {
   key_id: string;
   tenant_id: string;
@@ -277,6 +299,18 @@ export class InferonApi {
 
   testProvider(providerId: string, cookie?: string): Promise<ProviderTest> {
     return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
+  }
+
+  models(cookie?: string): Promise<ModelsResponse> {
+    return this.request<ModelsResponse>('GET', '/v1/dashboard/api/models', undefined, { cookie });
+  }
+
+  updateModel(
+    modelId: string,
+    body: { enabled?: boolean; is_default?: boolean },
+    cookie?: string,
+  ): Promise<{ model_id: string }> {
+    return this.request('POST', `/v1/dashboard/api/models/${encodeURIComponent(modelId)}`, body, { cookie });
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {

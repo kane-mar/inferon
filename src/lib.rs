@@ -9,6 +9,7 @@ pub mod auth;
 pub mod dashboard;
 pub mod embed;
 pub mod linter;
+pub mod models;
 pub mod providers;
 pub mod router;
 pub mod secret;
@@ -51,6 +52,9 @@ pub struct AppState {
     /// Tenant-provisioned providers (ITEM-043): resolved per request, falling
     /// back to the tenant's shared upstream key when none is configured.
     pub provider_store: Arc<dyn providers::ProviderStore>,
+    /// Per-tenant model selection (ITEM-044): a disabled model is rejected with
+    /// a typed error; an unconfigured model is unrestricted.
+    pub model_store: Arc<dyn models::ModelStore>,
     pub budget_store: Arc<dyn budget::BudgetStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
@@ -75,6 +79,11 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/providers/:provider_id/test",
             post(dashboard::tenant_provider_test),
+        )
+        .route("/v1/dashboard/api/models", get(dashboard::tenant_models))
+        .route(
+            "/v1/dashboard/api/models/:model_id",
+            post(dashboard::tenant_model_update),
         )
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
@@ -230,6 +239,31 @@ async fn proxy_chat_completions(
     };
 
     let started = Instant::now();
+
+    // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
+    // error (and traced), not a raw upstream 4xx.
+    match state.model_store.is_disabled(tenant_id, &meta.model).await {
+        Ok(true) => {
+            let total_ms = started.elapsed().as_millis() as i64;
+            let msg = build_trace(&meta, tenant_id, 400, total_ms, Usage::default(), None, None, false);
+            send_trace(&state.telemetry_tx, msg);
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "model_disabled",
+                "this model is disabled for your tenant",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::error!("model selection lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "model_store_error",
+                "could not check model selection",
+            );
+        }
+    }
+
     // Budget breaker (ITEM-016): its fallback model wins over the router;
     // a hard-cap rejection is traced and answered 429 before any upstream call.
     let budget_override = match budget::check_budget(&state, tenant_id).await {
@@ -242,6 +276,18 @@ async fn proxy_chat_completions(
         }
     };
     let mut model_override = budget_override.or(router_override);
+    // ITEM-044 AC4: routing never selects a model the tenant disabled — drop the
+    // override and serve the (already-allowed) requested model.
+    if let Some(model) = model_override.clone() {
+        if state
+            .model_store
+            .is_disabled(tenant_id, &model)
+            .await
+            .unwrap_or(false)
+        {
+            model_override = None;
+        }
+    }
     let mut upstream_body = reqwest::Body::from(body_bytes);
     if let Some(model) = model_override.take() {
         meta.model = model.clone();
@@ -1177,6 +1223,7 @@ mod tests {
             upstream_url: upstream_url.to_string(),
             tenant_store,
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -1239,6 +1286,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store,
             telemetry_tx: tx,
             operator_key: None,
@@ -1263,6 +1311,7 @@ mod tests {
             upstream_url: "https://shared.test/v1/chat/completions".to_string(),
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store,
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: mpsc::channel(1).0,
             operator_key: None,
@@ -1315,6 +1364,43 @@ mod tests {
         let route = resolve_route(&state, &tenant).await.expect("route");
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_model_is_refused_with_a_typed_error() {
+        let tenant = seeded_tenant();
+        let (tx, _rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::default(),
+            ),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::seed(
+                tenant.id,
+                "gpt-4o",
+                false,
+                false,
+            )),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 64).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["type"], "model_disabled");
     }
 
     fn dummy_trace() -> TraceMessage {
@@ -1432,6 +1518,7 @@ mod tests {
             upstream_url: upstream_url.to_string(),
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             telemetry_tx: tx,
             operator_key: None,
@@ -1454,6 +1541,7 @@ mod tests {
             upstream_url: state.upstream_url.clone(),
             tenant_store: state.tenant_store.clone(),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: state.budget_store.clone(),
             operator_key: state.operator_key.clone(),
             accounts: None,
@@ -2035,6 +2123,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2207,6 +2296,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2273,6 +2363,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
@@ -2564,6 +2655,7 @@ mod tests {
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             telemetry_tx: tx,
             operator_key: None,
