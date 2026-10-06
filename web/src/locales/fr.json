@@ -218,6 +218,24 @@
     "remove": "Supprimer",
     "saved": "Enregistré.",
     "owner_only": "Seul le propriétaire du tenant peut modifier le routage.",
-    "error": "Impossible d'enregistrer le routage — veuillez réessayer."
+    "error": "Impossible d'enregistrer le routage — veuillez réessayer.",
+    "controls": "Réglages"
+  },
+  "ControlsPage": {
+    "budget": "Budget mensuel (USD)",
+    "spent_of": "{spent} dépensés sur {limit}",
+    "spent_unlimited": "{spent} dépensés — aucun plafond",
+    "cheap_fallback": "Modèle de repli économique",
+    "cheap_help": "Utilisé lorsque 85 % du budget est consommé.",
+    "none": "Aucun",
+    "guard": "Garde de schéma (valide et répare les appels d'outils)",
+    "router": "Routeur heuristique (dégrade les requêtes simples gpt-4o)",
+    "threshold": "Seuil du routeur",
+    "threshold_help": "Une complexité inférieure est dégradée vers le palier économique (0–1).",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "saved": "Enregistré.",
+    "owner_only": "Seul le propriétaire du tenant peut modifier ces réglages.",
+    "error": "Impossible d'enregistrer — veuillez réessayer."
   }
 }

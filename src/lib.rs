@@ -90,6 +90,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(dashboard::tenant_model_update),
         )
         .route("/v1/dashboard/api/routing", get(dashboard::tenant_routing).post(dashboard::tenant_routing_set))
+        .route("/v1/dashboard/api/config", get(dashboard::tenant_config).post(dashboard::tenant_config_set))
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
@@ -229,9 +230,8 @@ async fn proxy_chat_completions(
         }
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
-    // Slice 2 (ITEM-015): heuristic downgrade decision over the client payload
-    // before it is consumed into the trace metadata.
-    let router_override = router::maybe_downgrade(&payload);
+    // The router/budget override is decided per request (ITEM-045/046) — see
+    // `check_budget` below, which applies both against the tenant's config.
     let mut meta = RequestMeta {
         id: Uuid::new_v4(),
         model: payload["model"].as_str().unwrap_or("unknown").to_string(),
@@ -272,7 +272,7 @@ async fn proxy_chat_completions(
 
     // Budget breaker (ITEM-016): its fallback model wins over the router;
     // a hard-cap rejection is traced and answered 429 before any upstream call.
-    let budget_override = match budget::check_budget(&state, tenant_id).await {
+    let budget_override = match budget::check_budget(&state, tenant_id, &meta.raw_prompt).await {
         Ok(model) => model,
         Err(resp) => {
             let total_ms = started.elapsed().as_millis() as i64;
@@ -281,7 +281,7 @@ async fn proxy_chat_completions(
             return resp;
         }
     };
-    let mut model_override = budget_override.or(router_override);
+    let mut model_override = budget_override;
     // ITEM-044 AC4: routing never selects a model the tenant disabled — drop the
     // override and serve the (already-allowed) requested model.
     if let Some(model) = model_override.clone() {
@@ -1693,6 +1693,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabling_the_router_keeps_the_client_model() {
+        // ITEM-046 AC3: the controls are read per request, so an update applies
+        // without a redeploy — flipping the router off stops the downgrade.
+        let base = budgeted_state(
+            &mock_upstream().await,
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+            },
+        );
+        // Simple gpt-4o → downgraded while the router is on.
+        let response = build_router(base.clone())
+            .oneshot(chat_request_builder(
+                r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(json_body(response).await["model"], "gpt-4o-mini");
+
+        // The tenant turns the router off (no redeploy) → the client model stands.
+        base.budget_store
+            .update_config(
+                uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+                &budget::ConfigUpdate {
+                    budget_limit_cents: 0,
+                    cheap_fallback_model: None,
+                    guard_enabled: true,
+                    router_enabled: false,
+                    router_threshold: 0.35,
+                },
+            )
+            .await
+            .unwrap();
+        let response = build_router(base)
+            .oneshot(chat_request_builder(
+                r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            json_body(response).await["model"],
+            "gpt-4o",
+            "router off keeps the request model"
+        );
+    }
+
+    #[tokio::test]
     async fn tool_using_gpt4o_is_not_downgraded() {
         let (response, _rx) = traced_request(
             r#"{"model":"gpt-4o","tools":[{"type":"function"}],"messages":[{"role":"user","content":"hi"}]}"#,
@@ -1727,6 +1780,8 @@ mod tests {
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
             guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
             },
         );
         let (state, mut rx) = with_trace_channel(&base);
@@ -1751,6 +1806,8 @@ mod tests {
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
             guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
             },
         );
         let response = build_router(state)
@@ -1774,6 +1831,8 @@ mod tests {
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
             guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
             },
         );
         let response = build_router(state)
@@ -2707,6 +2766,8 @@ mod tests {
                 spent_cents: 0,
                 cheap_fallback_model: None,
                 guard_enabled: false,
+                router_enabled: true,
+                router_threshold: 0.35,
             },
         );
         let store: std::sync::Arc<dyn budget::BudgetStore> =

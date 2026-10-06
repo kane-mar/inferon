@@ -218,6 +218,24 @@
     "remove": "Remove",
     "saved": "Saved.",
     "owner_only": "Only the tenant owner can change routing.",
-    "error": "Could not save routing — please retry."
+    "error": "Could not save routing — please retry.",
+    "controls": "Controls"
+  },
+  "ControlsPage": {
+    "budget": "Monthly budget (USD)",
+    "spent_of": "{spent} spent of {limit}",
+    "spent_unlimited": "{spent} spent — no cap set",
+    "cheap_fallback": "Cheap fallback model",
+    "cheap_help": "Used when 85% of the budget is spent.",
+    "none": "None",
+    "guard": "Schema guard (validate and repair tool-call output)",
+    "router": "Heuristic router (downgrade simple gpt-4o requests)",
+    "threshold": "Router threshold",
+    "threshold_help": "Complexity below this is downgraded to the cheap tier (0–1).",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved.",
+    "owner_only": "Only the tenant owner can change these controls.",
+    "error": "Could not save — please retry."
   }
 }

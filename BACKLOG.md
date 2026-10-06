@@ -17,7 +17,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **mostly done (2026-10-06)** — `/dashboard/onboarding`: mint key → snippets → first-request detection; provider/model links await 043/044 |
-| ITEM-046 | Routing policy & budget controls (UI) | feature | **new** — control surface for ITEM-015/016 |
+| ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **in progress** — backend now renders no HTML (Rust dashboard/console + signup screen retired); remaining: replace the template-shaped Next shell |
 | ITEM-018 | First real developer onboarding | improvement | **PO call** — hand the staged key to a real developer; now sits *after* the control plane (043–048) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
@@ -25,7 +25,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-06 (control-plane horizon + shell cleanup captured)_ — PO
+_Last updated: 2026-10-06 (ITEM-046 landed — control plane 043–046 + 048 done)_ — PO
 review found the data plane far ahead of the tenant-facing configuration: no
 provider provisioning, no model selection, no fallback rules, no routing/budget
 UI, and a dashboard that shows numbers without anything to act on. Captured as

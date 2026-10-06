@@ -1155,6 +1155,80 @@ pub async fn tenant_routing_set(
     }
 }
 
+// --- Tenant controls (ITEM-046) ---------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub struct ConfigBody {
+    budget_limit_cents: i64,
+    cheap_fallback_model: Option<String>,
+    guard_enabled: bool,
+    router_enabled: bool,
+    router_threshold: f64,
+}
+
+/// GET /v1/dashboard/api/config — the tenant's routing/budget controls, with the
+/// current period's spend against the cap.
+pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let config = match state.budget_store.budget_for(tenant_id).await {
+        Ok(config) => config,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let (limit, spent, cheap, guard, router_enabled, router_threshold) = match config {
+        Some(budget) => (
+            budget.limit_cents,
+            budget.spent_cents,
+            budget.cheap_fallback_model,
+            budget.guard_enabled,
+            budget.router_enabled,
+            budget.router_threshold,
+        ),
+        // Unconfigured: the router/guard are on by default (ITEM-015/027).
+        None => (0, 0, None, true, true, 0.35),
+    };
+    json_ok(json!({
+        "budget_limit_cents": limit,
+        "current_spend_cents": spent,
+        "cheap_fallback_model": cheap,
+        "guard_enabled": guard,
+        "router_enabled": router_enabled,
+        "router_threshold": router_threshold,
+        "role": role,
+    }))
+}
+
+/// POST /v1/dashboard/api/config (owner-only) — update the controls.
+pub async fn tenant_config_set(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ConfigBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let update = crate::budget::ConfigUpdate {
+        budget_limit_cents: body.budget_limit_cents.max(0),
+        cheap_fallback_model: body
+            .cheap_fallback_model
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty()),
+        guard_enabled: body.guard_enabled,
+        router_enabled: body.router_enabled,
+        router_threshold: body.router_threshold.clamp(0.0, 1.0),
+    };
+    match state.budget_store.update_config(tenant_id, &update).await {
+        Ok(()) => json_ok(json!({ "updated": true })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// GET /v1/dashboard/api/members — the signed-in tenant's members + pending
 /// invites (ITEM-039). Owners and members may view.
 pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
@@ -2100,6 +2174,76 @@ mod tests {
             axum::http::StatusCode::NOT_FOUND,
             "another tenant's key id is unknown here"
         );
+    }
+
+    // --- ITEM-046: routing & budget controls (session-scoped, owner mutates) ---
+
+    #[tokio::test]
+    async fn owner_reads_and_updates_the_tenant_controls() {
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state);
+
+        // Unconfigured tenant: router + guard on by default, no budget cap.
+        let read = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/config", &token))
+            .await
+            .unwrap();
+        assert_eq!(read.status(), axum::http::StatusCode::OK);
+        let json: Value = body_json(read).await;
+        assert_eq!(json["budget_limit_cents"], 0);
+        assert_eq!(json["current_spend_cents"], 0);
+        assert_eq!(json["guard_enabled"], true);
+        assert_eq!(json["router_enabled"], true);
+        assert_eq!(json["router_threshold"], 0.35);
+        assert_eq!(json["role"], "owner");
+
+        // Owner writes the controls; they read back unchanged.
+        let updated = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/config",
+                &token,
+                r#"{"budget_limit_cents":2500,"cheap_fallback_model":"gpt-4o-mini","guard_enabled":false,"router_enabled":false,"router_threshold":0.8}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(updated.status(), axum::http::StatusCode::OK);
+        assert_eq!(body_json(updated).await["updated"], true);
+
+        let read = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/config", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(read).await;
+        assert_eq!(json["budget_limit_cents"], 2500);
+        assert_eq!(json["cheap_fallback_model"], "gpt-4o-mini");
+        assert_eq!(json["guard_enabled"], false);
+        assert_eq!(json["router_enabled"], false);
+        assert_eq!(json["router_threshold"], 0.8);
+    }
+
+    #[tokio::test]
+    async fn member_cannot_update_the_tenant_controls() {
+        let (state, token) = tenant_role_session("member").await;
+        let router = crate::build_router(state);
+        let read = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/config", &token))
+            .await
+            .unwrap();
+        assert_eq!(read.status(), axum::http::StatusCode::OK, "members may view");
+        let write = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/config",
+                &token,
+                r#"{"budget_limit_cents":1,"cheap_fallback_model":null,"guard_enabled":true,"router_enabled":true,"router_threshold":0.35}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(write.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     // --- ITEM-039: tenant members API (session-scoped, owner manages) ---

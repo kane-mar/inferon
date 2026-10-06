@@ -72,15 +72,20 @@ pub fn complexity_score(payload: &Value) -> f64 {
     score.min(1.0)
 }
 
-/// Downgrade a gpt-4o-tier request to gpt-4o-mini when it is simple enough
-/// (complexity < 0.35). Returns the model to use; `None` = keep the client's.
-pub fn maybe_downgrade(payload: &Value) -> Option<String> {
+/// Downgrade a gpt-4o-tier request to gpt-4o-mini when it is simpler than
+/// `threshold`. Returns the model to use; `None` = keep the client's.
+pub fn maybe_downgrade_with(payload: &Value, threshold: f64) -> Option<String> {
     let model = payload["model"].as_str()?;
-    if is_gpt4o_tier(model) && complexity_score(payload) < DOWNGRADE_THRESHOLD {
+    if is_gpt4o_tier(model) && complexity_score(payload) < threshold {
         Some("gpt-4o-mini".to_string())
     } else {
         None
     }
+}
+
+/// Downgrade with the default threshold (ITEM-015 behaviour).
+pub fn maybe_downgrade(payload: &Value) -> Option<String> {
+    maybe_downgrade_with(payload, DOWNGRADE_THRESHOLD)
 }
 
 #[cfg(test)]
@@ -186,5 +191,14 @@ mod tests {
     fn never_downgrades_mini_or_other_models() {
         assert_eq!(maybe_downgrade(&payload("gpt-4o-mini", serde_json::json!({}))), None);
         assert_eq!(maybe_downgrade(&payload("deepseek-chat", serde_json::json!({}))), None);
+    }
+
+    #[test]
+    fn the_threshold_is_configurable_per_tenant() {
+        // A trivial payload scores 0.0 — below any positive threshold, never
+        // below 0.0 (ITEM-046 turns the router off by making it unreachable).
+        let simple = payload("gpt-4o", serde_json::json!({}));
+        assert_eq!(maybe_downgrade_with(&simple, 0.0), None);
+        assert_eq!(maybe_downgrade_with(&simple, 0.35), Some("gpt-4o-mini".to_string()));
     }
 }

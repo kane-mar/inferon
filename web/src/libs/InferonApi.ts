@@ -151,6 +151,24 @@ export type ModelsResponse = { models: CatalogModel[]; role: Role };
 
 export type RoutingResponse = { fallbacks: string[]; role: Role };
 
+export type TenantConfig = {
+  budget_limit_cents: number;
+  current_spend_cents: number;
+  cheap_fallback_model: string | null;
+  guard_enabled: boolean;
+  router_enabled: boolean;
+  router_threshold: number;
+  role: Role;
+};
+
+export type ConfigUpdate = {
+  budget_limit_cents: number;
+  cheap_fallback_model: string | null;
+  guard_enabled: boolean;
+  router_enabled: boolean;
+  router_threshold: number;
+};
+
 export type CreatedKey = {
   key_id: string;
   tenant_id: string;
@@ -321,6 +339,14 @@ export class InferonApi {
 
   setRouting(fallbacks: string[], cookie?: string): Promise<{ fallbacks: string[] }> {
     return this.request('POST', '/v1/dashboard/api/routing', { fallbacks }, { cookie });
+  }
+
+  config(cookie?: string): Promise<TenantConfig> {
+    return this.request<TenantConfig>('GET', '/v1/dashboard/api/config', undefined, { cookie });
+  }
+
+  updateConfig(body: ConfigUpdate, cookie?: string): Promise<{ updated: boolean }> {
+    return this.request('POST', '/v1/dashboard/api/config', body, { cookie });
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {
