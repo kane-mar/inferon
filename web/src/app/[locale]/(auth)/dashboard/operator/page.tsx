@@ -1,3 +1,4 @@
+import type { OperatorGuard } from '@/libs/InferonApi';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
@@ -6,6 +7,22 @@ import { WindowSwitcher } from '@/features/dashboard/WindowSwitcher';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
+
+/**
+ * Guard outcomes from the aggregate: flushed = guarded minus the two fallback
+ * outcomes (never negative).
+ */
+const guardOutcomes = (guard: OperatorGuard) => [
+  {
+    outcome: 'flushed',
+    requests: Math.max(
+      0,
+      guard.guarded_requests - guard.fallback_requests - guard.fallback_failed,
+    ),
+  },
+  { outcome: 'fallback', requests: guard.fallback_requests },
+  { outcome: 'fallback_failed', requests: guard.fallback_failed },
+];
 
 type OperatorPageProps = {
   params: Promise<{ locale: string }>;
@@ -101,7 +118,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
         </Card>
 
         <Card title={t('guard')}>
-          {guard.outcomes.length === 0
+          {guard.guarded_requests === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
               )
@@ -115,7 +132,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {guard.outcomes.map(outcome => (
+                      {guardOutcomes(guard).map(outcome => (
                         <tr
                           key={outcome.outcome}
                           className="

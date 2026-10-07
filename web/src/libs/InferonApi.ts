@@ -246,12 +246,13 @@ export type OperatorTenantRow = {
 
 export type OperatorTenants = { tenants: OperatorTenantRow[]; window_days: number };
 
-export type OperatorGuardRow = {
-  outcome: string;
-  requests: number;
+export type OperatorGuard = {
+  guarded_requests: number;
+  fallback_requests: number;
+  fallback_failed: number;
+  by_reason: { reason: string; events: number }[];
+  window_days: number;
 };
-
-export type OperatorGuard = { outcomes: OperatorGuardRow[]; window_days: number };
 
 export type OperatorAlertRow = {
   tenant_id: string;
