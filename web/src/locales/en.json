@@ -64,7 +64,6 @@
     "home": "Overview",
     "connect": "Connect",
     "providers": "Providers",
-    "models": "Models",
     "routing": "Routing",
     "keys": "API keys",
     "members": "Members",
@@ -225,21 +224,16 @@
     "save": "Save",
     "saving": "Saving…",
     "cancel": "Cancel",
-    "updated": "Updated {date}"
-  },
-  "ModelsPage": {
-    "title_bar": "Models",
-    "title_bar_description": "Choose which models your traffic may use, and set a default per provider.",
-    "models": "Available models",
-    "empty": "No catalog models — add a DeepSeek or OpenAI provider first.",
+    "updated": "Updated {date}",
+    "models_count": "Models ({count})",
+    "hide_models": "Hide models",
+    "no_models": "No catalog models for this provider kind.",
     "default": "Default",
-    "context": "ctx",
-    "reasoning": "reasoning",
-    "images": "images",
+    "disabled": "Disabled",
     "enable": "Enable",
     "disable": "Disable",
     "make_default": "Make default",
-    "error": "Could not update the model — please retry."
+    "context": "ctx"
   },
   "RoutingPage": {
     "title_bar": "Routing",

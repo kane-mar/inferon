@@ -1,6 +1,6 @@
 'use client';
 
-import type { CatalogModel, TenantConfig } from '@/libs/InferonApi';
+import type { TenantConfig } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -10,7 +10,7 @@ import { errorMessage } from '@/libs/errors';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
 
-export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[] }) => {
+export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] }) => {
   const t = useTranslations('ControlsPage');
   const router = useRouter();
   const { data } = props;
@@ -23,8 +23,7 @@ export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const canEdit = data.role === 'owner';
-
-  const modelIds = props.models.map(model => model.id);
+  const modelIds = props.modelIds;
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();

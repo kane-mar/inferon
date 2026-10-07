@@ -40,7 +40,6 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
     home: t('home'),
     connect: t('connect'),
     providers: t('providers'),
-    models: t('models'),
     routing: t('routing'),
     keys: t('keys'),
     members: t('members'),

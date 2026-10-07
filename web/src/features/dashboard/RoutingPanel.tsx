@@ -1,6 +1,6 @@
 'use client';
 
-import type { CatalogModel, RoutingResponse } from '@/libs/InferonApi';
+import type { RoutingResponse } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -13,7 +13,7 @@ const SELECT = `
   focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
 `;
 
-export const RoutingPanel = (props: { data: RoutingResponse; models: CatalogModel[] }) => {
+export const RoutingPanel = (props: { data: RoutingResponse; modelIds: string[] }) => {
   const t = useTranslations('RoutingPage');
   const router = useRouter();
   const [chain, setChain] = useState<string[]>(props.data.fallbacks);
@@ -22,9 +22,7 @@ export const RoutingPanel = (props: { data: RoutingResponse; models: CatalogMode
   const [saved, setSaved] = useState(false);
   const canEdit = props.data.role === 'owner';
 
-  const candidates = props.models
-    .map(model => model.id)
-    .filter(id => !chain.includes(id));
+  const candidates = props.modelIds.filter(id => !chain.includes(id));
 
   const save = async (next: string[]) => {
     setBusy(true);

@@ -161,6 +161,8 @@ export type ProviderRow = {
   metadata: ProviderMetadata;
   /** ITEM-047: monthly cap in cents; 0 = no limit. */
   spend_limit_cents: number;
+  /** The provider's catalog models with this provider's selection flags. */
+  models: ProviderModel[];
   created_at: string;
   updated_at: string;
 };
@@ -193,10 +195,9 @@ export type ModelPrice = {
   output_usd_per_million: string;
 };
 
-/** A model in the catalog, merged with the tenant's selection flags. */
-export type CatalogModel = {
+/** A model of one provider, merged with that provider's selection flags. */
+export type ProviderModel = {
   id: string;
-  kind: string;
   name: string;
   context_window: number;
   max_output: number;
@@ -206,8 +207,6 @@ export type CatalogModel = {
   is_default: boolean;
   price: ModelPrice;
 };
-
-export type ModelsResponse = { models: CatalogModel[]; role: Role };
 
 export type RoutingResponse = { fallbacks: string[]; role: Role };
 
@@ -412,16 +411,18 @@ export class InferonApi {
     return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
   }
 
-  models(cookie?: string): Promise<ModelsResponse> {
-    return this.request<ModelsResponse>('GET', '/v1/dashboard/api/models', undefined, { cookie });
-  }
-
-  updateModel(
+  updateProviderModel(
+    providerId: string,
     modelId: string,
     body: { enabled?: boolean; is_default?: boolean },
     cookie?: string,
-  ): Promise<{ model_id: string }> {
-    return this.request('POST', `/v1/dashboard/api/models/${encodeURIComponent(modelId)}`, body, { cookie });
+  ): Promise<{ provider_id: string; model_id: string }> {
+    return this.request(
+      'POST',
+      `/v1/dashboard/api/providers/${providerId}/models/${encodeURIComponent(modelId)}`,
+      body,
+      { cookie },
+    );
   }
 
   routing(cookie?: string): Promise<RoutingResponse> {

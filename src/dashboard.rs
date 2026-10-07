@@ -1084,7 +1084,28 @@ pub struct ProviderUpdateBody {
     spend_limit_cents: Option<i64>,
 }
 
-fn provider_json(provider: &crate::providers::Provider) -> Value {
+fn provider_json(provider: &crate::providers::Provider, settings: &[crate::models::ModelSetting]) -> Value {
+    let models: Vec<Value> = crate::models::by_kind(&provider.kind)
+        .map(|model| {
+            let setting = settings.iter().find(|setting| setting.model_id == model.id);
+            let price = crate::cost::price_for(model.id);
+            json!({
+                "id": model.id,
+                "name": model.name,
+                "context_window": model.context_window,
+                "max_output": model.max_output,
+                "reasoning": model.reasoning,
+                "images": model.images,
+                "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
+                "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
+                "price": {
+                    "input_usd_per_million": price.prompt_miss.to_string(),
+                    "cached_input_usd_per_million": price.prompt_hit.map(|rate| rate.to_string()),
+                    "output_usd_per_million": price.completion.to_string(),
+                },
+            })
+        })
+        .collect();
     json!({
         "id": provider.id.to_string(),
         "kind": provider.kind,
@@ -1095,6 +1116,7 @@ fn provider_json(provider: &crate::providers::Provider) -> Value {
         "spend_limit_cents": provider.spend_limit_cents,
         "created_at": provider.created_at,
         "updated_at": provider.updated_at,
+        "models": models,
     })
 }
 
@@ -1105,11 +1127,21 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
         Err(resp) => return resp,
     };
     match state.provider_store.list(tenant_id).await {
-        Ok(providers) => json_ok(json!({
-            "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
-            "kinds": crate::providers::PROVIDER_KINDS,
-            "role": role,
-        })),
+        Ok(providers) => {
+            let mut out = Vec::with_capacity(providers.len());
+            for provider in &providers {
+                let settings = match state.model_store.settings(provider.id).await {
+                    Ok(settings) => settings,
+                    Err(e) => return internal(&e.to_string()),
+                };
+                out.push(provider_json(provider, &settings));
+            }
+            json_ok(json!({
+                "providers": out,
+                "kinds": crate::providers::PROVIDER_KINDS,
+                "role": role,
+            }))
+        }
         Err(e) => internal(&e.to_string()),
     }
 }
@@ -1289,7 +1321,7 @@ pub async fn tenant_provider_test(
     }
 }
 
-// --- Models (ITEM-044) -------------------------------------------------------
+// --- Models (ITEM-044, per provider) ----------------------------------------
 
 #[derive(serde::Deserialize)]
 pub struct ModelUpdateBody {
@@ -1297,60 +1329,13 @@ pub struct ModelUpdateBody {
     is_default: Option<bool>,
 }
 
-/// GET /v1/dashboard/api/models — the catalog for the tenant's provider kinds,
-/// merged with the tenant's enable/disable + default flags. Prices come from the
-/// cost engine (`cost::price_for`) so the two can never disagree.
-pub async fn tenant_models(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    let (tenant_id, role) = match session_membership(&state, &headers).await {
-        Ok(membership) => membership,
-        Err(resp) => return resp,
-    };
-    let providers = match state.provider_store.list(tenant_id).await {
-        Ok(providers) => providers,
-        Err(e) => return internal(&e.to_string()),
-    };
-    let settings = match state.model_store.settings(tenant_id).await {
-        Ok(settings) => settings,
-        Err(e) => return internal(&e.to_string()),
-    };
-
-    let mut kinds: Vec<&str> = providers.iter().map(|provider| provider.kind.as_str()).collect();
-    kinds.sort_unstable();
-    kinds.dedup();
-
-    let models: Vec<Value> = kinds
-        .iter()
-        .flat_map(|kind| crate::models::by_kind(kind))
-        .map(|model| {
-            let setting = settings.iter().find(|setting| setting.model_id == model.id);
-            let price = crate::cost::price_for(model.id);
-            json!({
-                "id": model.id,
-                "kind": model.kind,
-                "name": model.name,
-                "context_window": model.context_window,
-                "max_output": model.max_output,
-                "reasoning": model.reasoning,
-                "images": model.images,
-                "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
-                "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
-                "price": {
-                    "input_usd_per_million": price.prompt_miss.to_string(),
-                    "cached_input_usd_per_million": price.prompt_hit.map(|rate| rate.to_string()),
-                    "output_usd_per_million": price.completion.to_string(),
-                },
-            })
-        })
-        .collect();
-    json_ok(json!({ "models": models, "role": role }))
-}
-
-/// POST /v1/dashboard/api/models/:model_id (owner-only) — enable/disable a model
-/// and/or make it the default for its provider kind.
-pub async fn tenant_model_update(
+/// POST /v1/dashboard/api/providers/:provider_id/models/:model_id (owner-only)
+/// — enable/disable one of the provider's catalog models and/or make it that
+/// provider's default.
+pub async fn tenant_provider_model_update(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(model_id): Path<String>,
+    Path((provider_id, model_id)): Path<(uuid::Uuid, String)>,
     Json(body): Json<ModelUpdateBody>,
 ) -> Response {
     let (tenant_id, role) = match session_membership(&state, &headers).await {
@@ -1360,17 +1345,51 @@ pub async fn tenant_model_update(
     if let Err(resp) = owner_only(&role) {
         return resp;
     }
+    let provider = match state.provider_store.list(tenant_id).await {
+        Ok(providers) => providers.into_iter().find(|provider| provider.id == provider_id),
+        Err(e) => return internal(&e.to_string()),
+    };
+    let Some(provider) = provider else {
+        return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider");
+    };
+    let Some(model) = crate::models::find(&model_id) else {
+        return crate::json_error(StatusCode::BAD_REQUEST, "unknown_model", "no such catalog model");
+    };
+    if model.kind != provider.kind {
+        return crate::json_error(
+            StatusCode::BAD_REQUEST,
+            "model_not_in_provider",
+            "that model is not served by this provider's kind",
+        );
+    }
     if let Some(enabled) = body.enabled {
-        if let Err(e) = state.model_store.set_enabled(tenant_id, &model_id, enabled).await {
+        if let Err(e) = state.model_store.set_enabled(provider_id, &model_id, enabled).await {
             return internal(&e.to_string());
         }
     }
     if body.is_default == Some(true) {
-        if let Err(e) = state.model_store.set_default(tenant_id, &model_id).await {
+        if let Err(e) = state.model_store.set_default(provider_id, &model_id).await {
             return internal(&e.to_string());
         }
     }
-    json_ok(json!({ "model_id": model_id }))
+    json_ok(json!({ "provider_id": provider_id.to_string(), "model_id": model_id }))
+}
+
+/// True when the provider that owns `model` has explicitly disabled it — the
+/// routing chain's up-front check.
+async fn model_is_disabled(state: &Arc<AppState>, tenant_id: uuid::Uuid, model: &str) -> bool {
+    let provider_id = state
+        .provider_store
+        .resolve_for(tenant_id, Some(model))
+        .await
+        .ok()
+        .flatten()
+        .map(|provider| provider.id);
+    state
+        .model_store
+        .is_disabled(provider_id, model)
+        .await
+        .unwrap_or(false)
 }
 
 // --- Routing (ITEM-045) ------------------------------------------------------
@@ -1412,12 +1431,7 @@ pub async fn tenant_routing_set(
         if model.is_empty() || chain.contains(&model) {
             continue;
         }
-        if state
-            .model_store
-            .is_disabled(tenant_id, &model)
-            .await
-            .unwrap_or(false)
-        {
+        if model_is_disabled(&state, tenant_id, &model).await {
             return crate::json_error(
                 StatusCode::BAD_REQUEST,
                 "model_disabled",
@@ -2623,6 +2637,88 @@ mod tests {
         );
         assert!(normalize_base_url("ftp://api.test").is_err());
         assert!(normalize_base_url("api.test").is_err());
+    }
+
+    #[tokio::test]
+    async fn owner_toggles_a_providers_model_and_members_cannot() {
+        // ITEM-044 rework: models live under their provider; the providers
+        // response carries each provider's catalog + flags, and the update
+        // endpoint is owner-only and kind-checked.
+        let (state, token) = tenant_role_session("owner").await;
+        let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        let provider_id = crate::providers::ProviderStore::insert(
+            &*state.provider_store,
+            tenant_id,
+            &crate::providers::NewProvider {
+                kind: "openai".to_string(),
+                name: "OpenAI".to_string(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                key: "sk-openai-ab12".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        let router = crate::build_router(state);
+
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        let models = json["providers"][0]["models"].as_array().expect("models array");
+        assert_eq!(models.len(), 2, "the openai catalog: gpt-4o + gpt-4o-mini");
+        assert_eq!(models[0]["id"], "gpt-4o");
+        assert_eq!(models[0]["enabled"], true);
+
+        let update = |model: &str, body: &str| {
+            post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{provider_id}/models/{model}"),
+                &token,
+                body,
+            )
+        };
+        let disabled = router
+            .clone()
+            .oneshot(update("gpt-4o", r#"{"enabled":false}"#))
+            .await
+            .unwrap();
+        assert_eq!(disabled.status(), axum::http::StatusCode::OK);
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        let gpt4o = json["providers"][0]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "gpt-4o")
+            .unwrap();
+        assert_eq!(gpt4o["enabled"], false);
+
+        // A deepseek model is not served by an openai provider -> 400.
+        let wrong = router
+            .clone()
+            .oneshot(update("deepseek-chat", r#"{"enabled":false}"#))
+            .await
+            .unwrap();
+        assert_eq!(wrong.status(), axum::http::StatusCode::BAD_REQUEST);
+
+        // A member cannot change model selection.
+        let (member_state, member_token) = tenant_role_session("member").await;
+        let member = crate::build_router(member_state)
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{provider_id}/models/gpt-4o"),
+                &member_token,
+                r#"{"enabled":true}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

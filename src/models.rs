@@ -1,13 +1,14 @@
-//! Model catalog + per-tenant selection (ITEM-044).
+//! Model catalog + per-provider selection (ITEM-044).
 //!
 //! `CATALOG` is the static list of models Inferon can serve, keyed by provider
 //! kind, with the metadata a tenant needs to choose. **Prices come from
 //! [`crate::cost::price_for`]** so the catalog and the cost engine can never
 //! disagree — the `deepseek-flash` default-row overcharge (2026-10-05) is why.
 //!
-//! [`ModelStore`] holds the per-tenant enable/disable + default flags. Models
-//! that are not in the catalog (e.g. an `openai-compatible` tenant's own ids)
-//! are unrestricted.
+//! [`ModelStore`] holds enable/disable + default flags **per provider**: a
+//! provider owns its models, and the curated catalog for the provider's kind is
+//! what it can serve. Models that are not in the catalog (e.g. an
+//! `openai-compatible` provider's own ids) are unrestricted — no rows needed.
 
 use uuid::Uuid;
 
@@ -85,7 +86,7 @@ pub fn ids_of_kind(kind: &str) -> Vec<&'static str> {
     by_kind(kind).map(|model| model.id).collect()
 }
 
-/// One model's per-tenant flags.
+/// One model's flags for a provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelSetting {
     pub model_id: String,
@@ -95,12 +96,13 @@ pub struct ModelSetting {
 
 #[async_trait::async_trait]
 pub trait ModelStore: Send + Sync {
-    async fn settings(&self, tenant_id: Uuid) -> StoreResult<Vec<ModelSetting>>;
-    async fn set_enabled(&self, tenant_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()>;
-    /// Mark one model default, clearing the default among its kind.
-    async fn set_default(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<()>;
-    /// True only when the tenant has **explicitly** disabled the model.
-    async fn is_disabled(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<bool>;
+    async fn settings(&self, provider_id: Uuid) -> StoreResult<Vec<ModelSetting>>;
+    async fn set_enabled(&self, provider_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()>;
+    /// Mark one of the provider's models the default (there is at most one).
+    async fn set_default(&self, provider_id: Uuid, model_id: &str) -> StoreResult<()>;
+    /// True only when the provider has **explicitly** disabled the model. The
+    /// shared platform key (`None`) is never disabled.
+    async fn is_disabled(&self, provider_id: Option<Uuid>, model_id: &str) -> StoreResult<bool>;
 }
 
 // --- Postgres ---------------------------------------------------------------
@@ -117,12 +119,12 @@ impl PostgresModelStore {
 
 #[async_trait::async_trait]
 impl ModelStore for PostgresModelStore {
-    async fn settings(&self, tenant_id: Uuid) -> StoreResult<Vec<ModelSetting>> {
+    async fn settings(&self, provider_id: Uuid) -> StoreResult<Vec<ModelSetting>> {
         let rows = sqlx::query_as::<_, (String, bool, bool)>(
             "SELECT model_id, enabled, is_default FROM tenant_models
-             WHERE tenant_id = $1 ORDER BY model_id",
+             WHERE provider_id = $1 ORDER BY model_id",
         )
-        .bind(tenant_id)
+        .bind(provider_id)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows
@@ -135,13 +137,13 @@ impl ModelStore for PostgresModelStore {
             .collect())
     }
 
-    async fn set_enabled(&self, tenant_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()> {
+    async fn set_enabled(&self, provider_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()> {
         sqlx::query(
-            "INSERT INTO tenant_models (tenant_id, model_id, enabled) VALUES ($1, $2, $3)
-             ON CONFLICT (tenant_id, model_id)
+            "INSERT INTO tenant_models (provider_id, model_id, enabled) VALUES ($1, $2, $3)
+             ON CONFLICT (provider_id, model_id)
              DO UPDATE SET enabled = $3, updated_at = NOW()",
         )
-        .bind(tenant_id)
+        .bind(provider_id)
         .bind(model_id)
         .bind(enabled)
         .execute(&self.pool)
@@ -149,39 +151,39 @@ impl ModelStore for PostgresModelStore {
         Ok(())
     }
 
-    async fn set_default(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<()> {
-        // One default per provider kind: clear the kind's other defaults first.
-        if let Some(kind) = find(model_id).map(|model| model.kind) {
-            let ids: Vec<String> = ids_of_kind(kind).iter().map(|id| id.to_string()).collect();
-            sqlx::query(
-                "UPDATE tenant_models SET is_default = FALSE, updated_at = NOW()
-                 WHERE tenant_id = $1 AND model_id = ANY($2)",
-            )
-            .bind(tenant_id)
-            .bind(&ids)
-            .execute(&self.pool)
-            .await?;
-        }
+    async fn set_default(&self, provider_id: Uuid, model_id: &str) -> StoreResult<()> {
+        // One default per provider: clear its other defaults first.
         sqlx::query(
-            "INSERT INTO tenant_models (tenant_id, model_id, enabled, is_default)
+            "UPDATE tenant_models SET is_default = FALSE, updated_at = NOW()
+             WHERE provider_id = $1 AND is_default",
+        )
+        .bind(provider_id)
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            "INSERT INTO tenant_models (provider_id, model_id, enabled, is_default)
              VALUES ($1, $2, TRUE, TRUE)
-             ON CONFLICT (tenant_id, model_id)
+             ON CONFLICT (provider_id, model_id)
              DO UPDATE SET is_default = TRUE, enabled = TRUE, updated_at = NOW()",
         )
-        .bind(tenant_id)
+        .bind(provider_id)
         .bind(model_id)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    async fn is_disabled(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<bool> {
-        let row: Option<(bool,)> =
-            sqlx::query_as("SELECT enabled FROM tenant_models WHERE tenant_id = $1 AND model_id = $2")
-                .bind(tenant_id)
-                .bind(model_id)
-                .fetch_optional(&self.pool)
-                .await?;
+    async fn is_disabled(&self, provider_id: Option<Uuid>, model_id: &str) -> StoreResult<bool> {
+        let Some(provider_id) = provider_id else {
+            return Ok(false);
+        };
+        let row: Option<(bool,)> = sqlx::query_as(
+            "SELECT enabled FROM tenant_models WHERE provider_id = $1 AND model_id = $2",
+        )
+        .bind(provider_id)
+        .bind(model_id)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(matches!(row, Some((false,))))
     }
 }
@@ -194,15 +196,15 @@ pub struct InMemoryModelStore {
 }
 
 struct ModelSettingRow {
-    tenant_id: Uuid,
+    provider_id: Uuid,
     setting: ModelSetting,
 }
 
 impl InMemoryModelStore {
-    pub fn seed(tenant_id: Uuid, model_id: &str, enabled: bool, is_default: bool) -> Self {
+    pub fn seed(provider_id: Uuid, model_id: &str, enabled: bool, is_default: bool) -> Self {
         let store = Self::default();
         store.rows.lock().unwrap().push(ModelSettingRow {
-            tenant_id,
+            provider_id,
             setting: ModelSetting {
                 model_id: model_id.to_string(),
                 enabled,
@@ -215,26 +217,26 @@ impl InMemoryModelStore {
 
 #[async_trait::async_trait]
 impl ModelStore for InMemoryModelStore {
-    async fn settings(&self, tenant_id: Uuid) -> StoreResult<Vec<ModelSetting>> {
+    async fn settings(&self, provider_id: Uuid) -> StoreResult<Vec<ModelSetting>> {
         Ok(self
             .rows
             .lock()
             .unwrap()
             .iter()
-            .filter(|row| row.tenant_id == tenant_id)
+            .filter(|row| row.provider_id == provider_id)
             .map(|row| row.setting.clone())
             .collect())
     }
 
-    async fn set_enabled(&self, tenant_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()> {
+    async fn set_enabled(&self, provider_id: Uuid, model_id: &str, enabled: bool) -> StoreResult<()> {
         let mut rows = self.rows.lock().unwrap();
         match rows
             .iter_mut()
-            .find(|row| row.tenant_id == tenant_id && row.setting.model_id == model_id)
+            .find(|row| row.provider_id == provider_id && row.setting.model_id == model_id)
         {
             Some(row) => row.setting.enabled = enabled,
             None => rows.push(ModelSettingRow {
-                tenant_id,
+                provider_id,
                 setting: ModelSetting {
                     model_id: model_id.to_string(),
                     enabled,
@@ -245,24 +247,20 @@ impl ModelStore for InMemoryModelStore {
         Ok(())
     }
 
-    async fn set_default(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<()> {
-        let kind = find(model_id).map(|model| model.kind);
+    async fn set_default(&self, provider_id: Uuid, model_id: &str) -> StoreResult<()> {
         let mut rows = self.rows.lock().unwrap();
-        for row in rows.iter_mut().filter(|row| row.tenant_id == tenant_id) {
-            if kind == find(&row.setting.model_id).map(|model| model.kind) {
-                row.setting.is_default = false;
-            }
+        for row in rows.iter_mut().filter(|row| row.provider_id == provider_id) {
+            row.setting.is_default = row.setting.model_id == model_id;
             if row.setting.model_id == model_id {
-                row.setting.is_default = true;
                 row.setting.enabled = true;
             }
         }
         if !rows
             .iter()
-            .any(|row| row.tenant_id == tenant_id && row.setting.model_id == model_id)
+            .any(|row| row.provider_id == provider_id && row.setting.model_id == model_id)
         {
             rows.push(ModelSettingRow {
-                tenant_id,
+                provider_id,
                 setting: ModelSetting {
                     model_id: model_id.to_string(),
                     enabled: true,
@@ -273,13 +271,13 @@ impl ModelStore for InMemoryModelStore {
         Ok(())
     }
 
-    async fn is_disabled(&self, tenant_id: Uuid, model_id: &str) -> StoreResult<bool> {
-        Ok(self
-            .rows
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|row| row.tenant_id == tenant_id && row.setting.model_id == model_id && !row.setting.enabled))
+    async fn is_disabled(&self, provider_id: Option<Uuid>, model_id: &str) -> StoreResult<bool> {
+        let Some(provider_id) = provider_id else {
+            return Ok(false);
+        };
+        Ok(self.rows.lock().unwrap().iter().any(|row| {
+            row.provider_id == provider_id && row.setting.model_id == model_id && !row.setting.enabled
+        }))
     }
 }
 
@@ -305,22 +303,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_are_tenant_scoped_and_defaulting_clears_the_kind() {
-        let tenant = Uuid::new_v4();
+    async fn settings_are_provider_scoped_and_defaulting_clears_the_provider() {
+        let provider = Uuid::new_v4();
         let other = Uuid::new_v4();
         let store = InMemoryModelStore::default();
 
-        store.set_enabled(tenant, "deepseek-flash", false).await.unwrap();
-        assert!(store.is_disabled(tenant, "deepseek-flash").await.unwrap());
-        assert!(!store.is_disabled(other, "deepseek-flash").await.unwrap(), "other tenant untouched");
+        store.set_enabled(provider, "deepseek-flash", false).await.unwrap();
+        assert!(store.is_disabled(Some(provider), "deepseek-flash").await.unwrap());
+        assert!(!store.is_disabled(Some(other), "deepseek-flash").await.unwrap(), "other provider untouched");
+        assert!(!store.is_disabled(None, "deepseek-flash").await.unwrap(), "shared key unrestricted");
         // An unconfigured model is not disabled (unrestricted).
-        assert!(!store.is_disabled(tenant, "deepseek-v4-pro").await.unwrap());
+        assert!(!store.is_disabled(Some(provider), "deepseek-v4-pro").await.unwrap());
 
-        store.set_default(tenant, "deepseek-chat").await.unwrap();
-        store.set_default(tenant, "deepseek-v4-pro").await.unwrap();
-        let settings = store.settings(tenant).await.unwrap();
+        store.set_default(provider, "deepseek-chat").await.unwrap();
+        store.set_default(provider, "deepseek-v4-pro").await.unwrap();
+        let settings = store.settings(provider).await.unwrap();
         let defaults: Vec<_> = settings.iter().filter(|s| s.is_default).collect();
-        assert_eq!(defaults.len(), 1, "one default per kind");
+        assert_eq!(defaults.len(), 1, "one default per provider");
         assert_eq!(defaults[0].model_id, "deepseek-v4-pro");
     }
 }

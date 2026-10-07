@@ -111,8 +111,14 @@ pub trait ProviderStore: Send + Sync {
         update: &ProviderUpdate,
     ) -> StoreResult<bool>;
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
-    /// The tenant's credential for the request path, if one is configured.
-    async fn resolve(&self, tenant_id: Uuid) -> StoreResult<Option<ResolvedProvider>>;
+    /// The credential for the request path: the provider that owns `model` (by
+    /// catalog kind), else the tenant's first provider. `None` when the tenant
+    /// has no provider (shared platform key).
+    async fn resolve_for(
+        &self,
+        tenant_id: Uuid,
+        model: Option<&str>,
+    ) -> StoreResult<Option<ResolvedProvider>>;
     /// A specific provider's credential (the test-connection probe).
     async fn resolve_provider(
         &self,
@@ -261,26 +267,38 @@ impl ProviderStore for PostgresProviderStore {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn resolve(&self, tenant_id: Uuid) -> StoreResult<Option<ResolvedProvider>> {
+    async fn resolve_for(
+        &self,
+        tenant_id: Uuid,
+        model: Option<&str>,
+    ) -> StoreResult<Option<ResolvedProvider>> {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
-            "SELECT id, base_url, key_ciphertext, metadata FROM providers
-             WHERE tenant_id = $1 ORDER BY created_at LIMIT 1",
-        )
-        .bind(tenant_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        let Some((id, base_url, ciphertext, metadata)) = row else {
+        let rows: Vec<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> =
+            sqlx::query_as(
+                "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
+                 WHERE tenant_id = $1 ORDER BY created_at",
+            )
+            .bind(tenant_id)
+            .fetch_all(&self.pool)
+            .await?;
+        // Prefer the provider whose catalog kind owns the requested model; fall
+        // back to the first provider (the pre-existing single-provider default).
+        let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
+        let chosen = rows
+            .iter()
+            .find(|(_, kind, ..)| wanted_kind == Some(kind.as_str()))
+            .or_else(|| rows.first());
+        let Some((id, _, base_url, ciphertext, metadata)) = chosen else {
             return Ok(None);
         };
-        match secrets.decrypt(&ciphertext) {
+        match secrets.decrypt(ciphertext) {
             Some(api_key) => Ok(Some(ResolvedProvider {
-                id,
-                base_url,
+                id: *id,
+                base_url: base_url.clone(),
                 api_key,
-                metadata: metadata.0,
+                metadata: metadata.0.clone(),
             })),
             None => {
                 tracing::error!(
@@ -428,19 +446,24 @@ impl ProviderStore for InMemoryProviderStore {
         Ok(rows.len() < before)
     }
 
-    async fn resolve(&self, tenant_id: Uuid) -> StoreResult<Option<ResolvedProvider>> {
-        Ok(self
-            .rows
-            .lock()
-            .unwrap()
+    async fn resolve_for(
+        &self,
+        tenant_id: Uuid,
+        model: Option<&str>,
+    ) -> StoreResult<Option<ResolvedProvider>> {
+        let rows = self.rows.lock().unwrap();
+        let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
+        let chosen = rows
             .iter()
-            .find(|row| row.provider.tenant_id == tenant_id)
-            .map(|row| ResolvedProvider {
-                id: row.provider.id,
-                base_url: row.provider.base_url.clone(),
-                api_key: row.api_key.clone(),
-                metadata: row.provider.metadata.clone(),
-            }))
+            .filter(|row| row.provider.tenant_id == tenant_id)
+            .find(|row| wanted_kind == Some(row.provider.kind.as_str()))
+            .or_else(|| rows.iter().find(|row| row.provider.tenant_id == tenant_id));
+        Ok(chosen.map(|row| ResolvedProvider {
+            id: row.provider.id,
+            base_url: row.provider.base_url.clone(),
+            api_key: row.api_key.clone(),
+            metadata: row.provider.metadata.clone(),
+        }))
     }
 
     async fn resolve_provider(
@@ -510,13 +533,13 @@ mod tests {
         assert!(!listed[0].key_hint.contains("sk-mine"));
         assert_eq!(listed[0].metadata.org.as_deref(), Some("org-1"));
 
-        let resolved = store.resolve(tenant).await.expect("resolve").expect("configured");
+        let resolved = store.resolve_for(tenant, None).await.expect("resolve").expect("configured");
         assert_eq!(resolved.base_url, "https://api.deepseek.com/v1");
         assert_eq!(resolved.api_key, "sk-mine-ab12");
         assert_eq!(resolved.metadata.headers["X-Trace"], "on");
 
         assert!(store.remove(tenant, id).await.expect("remove"));
-        assert!(store.resolve(tenant).await.expect("resolve").is_none());
+        assert!(store.resolve_for(tenant, None).await.expect("resolve").is_none());
     }
 
     #[tokio::test]
@@ -566,7 +589,7 @@ mod tests {
         assert_eq!(listed[0].key_hint, "\u{2026}2222");
         assert_eq!(listed[0].metadata.org.as_deref(), Some("org-2"));
         assert_eq!(listed[0].spend_limit_cents, 2500, "ITEM-047 limit is stored");
-        let resolved = store.resolve(tenant).await.expect("resolve").expect("configured");
+        let resolved = store.resolve_for(tenant, None).await.expect("resolve").expect("configured");
         assert_eq!(resolved.api_key, "sk-new-2222", "the rotated key is used");
 
         // Another tenant cannot rotate it.
@@ -577,12 +600,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn resolve_for_picks_the_provider_that_owns_the_model() {
+        let tenant = Uuid::new_v4();
+        let store = InMemoryProviderStore::default();
+        let new = |kind: &str, base_url: &str, key: &str| NewProvider {
+            kind: kind.to_string(),
+            name: kind.to_string(),
+            base_url: base_url.to_string(),
+            key: key.to_string(),
+            metadata: ProviderMetadata::default(),
+            spend_limit_cents: 0,
+        };
+        let deep = store
+            .insert(tenant, &new("deepseek", "https://deep.test/v1", "sk-deep"))
+            .await
+            .unwrap();
+        let open = store
+            .insert(tenant, &new("openai", "https://openai.test/v1", "sk-open"))
+            .await
+            .unwrap();
+
+        let route = store.resolve_for(tenant, Some("gpt-4o")).await.unwrap().unwrap();
+        assert_eq!(route.id, open, "gpt-4o belongs to the openai provider");
+        assert_eq!(route.base_url, "https://openai.test/v1");
+        let route = store.resolve_for(tenant, Some("deepseek-chat")).await.unwrap().unwrap();
+        assert_eq!(route.id, deep, "deepseek-chat belongs to the deepseek provider");
+        // An unknown model (or no hint) falls back to the first provider.
+        let route = store.resolve_for(tenant, Some("mystery")).await.unwrap().unwrap();
+        assert_eq!(route.id, deep);
+        let route = store.resolve_for(tenant, None).await.unwrap().unwrap();
+        assert_eq!(route.id, deep);
+    }
+
+    #[tokio::test]
     async fn tenant_scoping_is_enforced() {
         let tenant = Uuid::new_v4();
         let other = Uuid::new_v4();
         let store = InMemoryProviderStore::with_provider(tenant, "https://x/v1", "sk-x");
         assert!(store.list(other).await.expect("list").is_empty());
-        assert!(store.resolve(other).await.expect("resolve").is_none());
+        assert!(store.resolve_for(other, None).await.expect("resolve").is_none());
     }
 
     #[tokio::test]

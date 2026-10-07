@@ -93,10 +93,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/providers/:provider_id/test",
             post(dashboard::tenant_provider_test),
         )
-        .route("/v1/dashboard/api/models", get(dashboard::tenant_models))
         .route(
-            "/v1/dashboard/api/models/:model_id",
-            post(dashboard::tenant_model_update),
+            "/v1/dashboard/api/providers/:provider_id/models/:model_id",
+            post(dashboard::tenant_provider_model_update),
         )
         .route("/v1/dashboard/api/routing", get(dashboard::tenant_routing).post(dashboard::tenant_routing_set))
         .route("/v1/dashboard/api/config", get(dashboard::tenant_config).post(dashboard::tenant_config_set))
@@ -153,7 +152,9 @@ async fn healthz() -> &'static str {
 }
 
 /// The resolved upstream target for one request (ITEM-043): the tenant's own
-/// provider when configured, else the tenant's shared key + the global URL.
+/// provider that owns the requested model, else its first provider, else the
+/// shared key + the global URL.
+#[derive(Clone)]
 struct Route {
     url: String,
     key: String,
@@ -183,8 +184,12 @@ fn apply_provider_headers(
     request
 }
 
-async fn resolve_route(state: &Arc<AppState>, tenant: &Tenant) -> Result<Route, Response> {
-    match state.provider_store.resolve(tenant.id).await {
+async fn resolve_route(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    model: Option<&str>,
+) -> Result<Route, Response> {
+    match state.provider_store.resolve_for(tenant.id, model).await {
         Ok(Some(provider)) => Ok(Route {
             url: chat_completions_url(&provider.base_url),
             key: provider.api_key,
@@ -279,7 +284,7 @@ async fn proxy_chat_completions(
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
-    let route = match resolve_route(&state, &tenant).await {
+    let route = match resolve_route(&state, &tenant, Some(&meta.model)).await {
         Ok(route) => route,
         Err(resp) => return resp,
     };
@@ -289,7 +294,7 @@ async fn proxy_chat_completions(
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
     // error (and traced), not a raw upstream 4xx.
-    match state.model_store.is_disabled(tenant_id, &meta.model).await {
+    match state.model_store.is_disabled(route.provider_id, &meta.model).await {
         Ok(true) => {
             let total_ms = started.elapsed().as_millis() as i64;
             let msg = build_trace(&meta, tenant_id, TraceOutcome::error(400, total_ms));
@@ -328,7 +333,7 @@ async fn proxy_chat_completions(
     if let Some(model) = model_override.clone() {
         if state
             .model_store
-            .is_disabled(tenant_id, &model)
+            .is_disabled(route.provider_id, &model)
             .await
             .unwrap_or(false)
         {
@@ -348,23 +353,40 @@ async fn proxy_chat_completions(
     };
     let mut chain = vec![primary.clone()];
     chain.extend(fallbacks);
+    // Each chain entry carries its own route — the provider that owns that
+    // model — so a fallback to another provider's model hits the right upstream.
     let mut seen = std::collections::HashSet::new();
-    let mut allowed: Vec<String> = Vec::new();
+    let mut allowed: Vec<(String, Route)> = Vec::new();
     for model in chain {
-        if seen.insert(model.clone())
-            && !state.model_store.is_disabled(tenant_id, &model).await.unwrap_or(false)
-        {
-            allowed.push(model);
+        if !seen.insert(model.clone()) {
+            continue;
         }
+        let model_route = if model == primary {
+            route.clone()
+        } else {
+            resolve_route(&state, &tenant, Some(&model))
+                .await
+                .unwrap_or_else(|_| route.clone())
+        };
+        if state
+            .model_store
+            .is_disabled(model_route.provider_id, &model)
+            .await
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        allowed.push((model, model_route));
     }
     if allowed.is_empty() {
-        allowed.push(primary.clone());
+        allowed.push((primary.clone(), route.clone()));
     }
 
     let mut routing_event: Option<Value> = None;
     let mut upstream: Option<reqwest::Response> = None;
     for index in 0..allowed.len() {
-        let model = allowed[index].clone();
+        let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
+        let model = model.clone();
         let body = match budget::apply_model_override(&meta.raw_prompt, &model) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -379,10 +401,10 @@ async fn proxy_chat_completions(
         let attempt = apply_provider_headers(
             state
                 .http_client
-                .post(&route.url)
-                .header("Authorization", format!("Bearer {}", route.key))
+                .post(&attempt_route.url)
+                .header("Authorization", format!("Bearer {}", attempt_route.key))
                 .header("Content-Type", "application/json"),
-            &route.metadata,
+            &attempt_route.metadata,
         )
         .body(body)
         .send()
@@ -397,7 +419,7 @@ async fn proxy_chat_completions(
                     upstream = Some(response);
                     break;
                 }
-                let next = allowed[index + 1].clone();
+                let next = allowed[index + 1].0.clone();
                 tracing::warn!(
                     "routing fallback: {model} -> {next} (HTTP {})",
                     status.as_u16()
@@ -421,7 +443,7 @@ async fn proxy_chat_completions(
                         "upstream request failed",
                     );
                 }
-                let next = allowed[index + 1].clone();
+                let next = allowed[index + 1].0.clone();
                 tracing::warn!("routing fallback (transport): {model} -> {next}");
                 routing_event = Some(json!({
                     "from_model": primary,
@@ -1510,7 +1532,7 @@ mod tests {
                 "sk-my-provider",
             ),
         ));
-        let route = resolve_route(&state, &tenant).await.expect("route");
+        let route = resolve_route(&state, &tenant, None).await.expect("route");
         assert_eq!(route.url, "https://my-provider.test/v1/chat/completions");
         assert_eq!(route.key, "sk-my-provider", "the tenant's own key wins");
         assert!(route.provider_id.is_some(), "ITEM-047: provider is attributed");
@@ -1522,7 +1544,7 @@ mod tests {
         let state = route_state(std::sync::Arc::new(
             crate::providers::InMemoryProviderStore::default(),
         ));
-        let route = resolve_route(&state, &tenant).await.expect("route");
+        let route = resolve_route(&state, &tenant, None).await.expect("route");
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
         assert!(route.provider_id.is_none(), "shared key = no provider");
@@ -1532,15 +1554,30 @@ mod tests {
     async fn a_disabled_model_is_refused_with_a_typed_error() {
         let tenant = seeded_tenant();
         let (tx, _rx) = mpsc::channel(8);
+        // Model selection is per provider: seed an openai provider and disable
+        // one of its catalog models.
+        let provider_store = crate::providers::InMemoryProviderStore::default();
+        let provider_id = crate::providers::ProviderStore::insert(
+            &provider_store,
+            tenant.id,
+            &crate::providers::NewProvider {
+                kind: "openai".to_string(),
+                name: "openai".to_string(),
+                base_url: "https://my-provider.test/v1".to_string(),
+                key: "sk-x".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
         let state = std::sync::Arc::new(AppState {
             http_client: reqwest::Client::new(),
             upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(
-                crate::providers::InMemoryProviderStore::default(),
-            ),
+            provider_store: std::sync::Arc::new(provider_store),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::seed(
-                tenant.id,
+                provider_id,
                 "gpt-4o",
                 false,
                 false,

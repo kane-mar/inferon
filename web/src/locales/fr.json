@@ -64,7 +64,6 @@
     "home": "Vue d'ensemble",
     "connect": "Connexion",
     "providers": "Fournisseurs",
-    "models": "Modèles",
     "routing": "Routage",
     "keys": "Clés API",
     "members": "Membres",
@@ -225,21 +224,16 @@
     "save": "Enregistrer",
     "saving": "Enregistrement…",
     "cancel": "Annuler",
-    "updated": "Mis à jour le {date}"
-  },
-  "ModelsPage": {
-    "title_bar": "Modèles",
-    "title_bar_description": "Choisissez les modèles autorisés et définissez un modèle par défaut par fournisseur.",
-    "models": "Modèles disponibles",
-    "empty": "Aucun modèle au catalogue — ajoutez d'abord un fournisseur DeepSeek ou OpenAI.",
+    "updated": "Mis à jour le {date}",
+    "models_count": "Modèles ({count})",
+    "hide_models": "Masquer les modèles",
+    "no_models": "Aucun modèle au catalogue pour ce type de fournisseur.",
     "default": "Par défaut",
-    "context": "ctx",
-    "reasoning": "raisonnement",
-    "images": "images",
+    "disabled": "Désactivé",
     "enable": "Activer",
     "disable": "Désactiver",
     "make_default": "Définir par défaut",
-    "error": "Impossible de mettre à jour le modèle — veuillez réessayer."
+    "context": "ctx"
   },
   "RoutingPage": {
     "title_bar": "Routage",
