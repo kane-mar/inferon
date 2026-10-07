@@ -103,17 +103,21 @@ fn db_err(e: sqlx::Error) -> Response {
     internal(&e.to_string())
 }
 
-/// Scope of an authenticated dashboard caller.
+/// A resolved dashboard caller. The two capabilities are independent: a
+/// platform operator who also belongs to a tenant gets BOTH the tenant view and
+/// the platform view.
 #[derive(Debug, PartialEq, Eq)]
-enum Scope {
-    Tenant(uuid::Uuid),
-    Operator,
+struct Caller {
+    /// The tenant this credential resolves to, if any.
+    tenant: Option<uuid::Uuid>,
+    /// True for the operator key or an operator session.
+    is_operator: bool,
 }
 
 /// Bearer-only resolution (ITEM-004/013 semantics, unchanged): operator key
 /// first, then the tenant key lookup. `Ok(None)` when no usable credential was
 /// presented — the caller may still fall through to the session path.
-async fn bearer_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Option<Scope>, Response> {
+async fn bearer_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Option<Caller>, Response> {
     let Some(auth) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
         return Ok(None);
     };
@@ -124,10 +128,10 @@ async fn bearer_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Opti
         return Ok(None);
     }
     if state.operator_key.as_deref() == Some(key) {
-        return Ok(Some(Scope::Operator));
+        return Ok(Some(Caller { tenant: None, is_operator: true }));
     }
     match crate::authenticate(state, headers).await {
-        Ok(Some(tenant)) => Ok(Some(Scope::Tenant(tenant.id))),
+        Ok(Some(tenant)) => Ok(Some(Caller { tenant: Some(tenant.id), is_operator: false })),
         Ok(None) => Ok(None),
         Err(e) => {
             tracing::error!("tenant lookup failed: {e}");
@@ -143,7 +147,7 @@ async fn bearer_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Opti
 async fn scope_from_session(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<Option<Scope>, Response> {
+) -> Result<Option<Caller>, Response> {
     let Some(accounts) = &state.accounts else {
         return Ok(None);
     };
@@ -166,26 +170,26 @@ async fn scope_from_session(
             return Err(internal("user lookup failed"));
         }
     };
-    // A platform operator's session scopes to the operator views (ITEM-037) —
-    // and, like the operator key, is rejected from tenant-scoped routes.
-    if user.is_operator {
-        return Ok(Some(Scope::Operator));
-    }
-    match accounts.users.tenant_for_user(user.id).await {
-        Ok(Some((tenant_id, _))) => Ok(Some(Scope::Tenant(tenant_id))),
-        Ok(None) => Ok(None),
+    // Membership and operator flag are independent: an operator may also own
+    // or belong to a tenant, and gets both views (ITEM-036 + ITEM-037).
+    let tenant = match accounts.users.tenant_for_user(user.id).await {
+        Ok(membership) => membership.map(|(tenant_id, _)| tenant_id),
         Err(e) => {
             tracing::error!("membership lookup failed: {e}");
-            Err(internal("membership lookup failed"))
+            return Err(internal("membership lookup failed"));
         }
+    };
+    if !user.is_operator && tenant.is_none() {
+        return Ok(None);
     }
+    Ok(Some(Caller { tenant, is_operator: user.is_operator }))
 }
 
 /// Resolve the caller's scope: the bearer credential (operator key, then
 /// tenant key — SDKs/scripts, ITEM-004) first, then the session cookie
 /// (humans, ITEM-036). Additive: key auth is unchanged, sessions only add a
 /// path.
-async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Scope, Response> {
+async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Caller, Response> {
     if let Some(scope) = bearer_scope(state, headers).await? {
         return Ok(scope);
     }
@@ -195,23 +199,22 @@ async fn resolve_scope(state: &Arc<AppState>, headers: &HeaderMap) -> Result<Sco
     Err(unauthorized())
 }
 
-/// Tenant-scoped handlers only: an operator credential is rejected (403).
+/// Tenant-scoped handlers: need a tenant (key or membership). A platform
+/// operator with no membership is rejected (403).
 async fn tenant_or(state: &Arc<AppState>, headers: &HeaderMap) -> Result<uuid::Uuid, Response> {
-    match resolve_scope(state, headers).await? {
-        Scope::Tenant(id) => Ok(id),
-        Scope::Operator => Err(forbidden()),
-    }
+    resolve_scope(state, headers).await?.tenant.ok_or_else(forbidden)
 }
 
-/// Operator-only handlers: tenant credentials are rejected (403). Returns the
-/// tenant filter — `None` = platform-wide.
+/// Operator-only handlers: need the operator capability. A tenant credential
+/// without it is rejected (403).
 async fn operator_or(
     state: &Arc<AppState>,
     headers: &HeaderMap,
 ) -> Result<(), Response> {
-    match resolve_scope(state, headers).await? {
-        Scope::Operator => Ok(()),
-        Scope::Tenant(_) => Err(forbidden()),
+    if resolve_scope(state, headers).await?.is_operator {
+        Ok(())
+    } else {
+        Err(forbidden())
     }
 }
 
@@ -245,9 +248,6 @@ async fn session_membership(
             return Err(internal("user lookup failed"));
         }
     };
-    if user.is_operator {
-        return Err(forbidden());
-    }
     match accounts.users.tenant_for_user(user.id).await {
         Ok(Some(membership)) => Ok(membership),
         Ok(None) => Err(unauthorized()),
@@ -2098,14 +2098,12 @@ mod tests {
             h.insert("authorization", format!("Bearer {key}").parse().unwrap());
             h
         }
-        assert!(matches!(
+        assert_eq!(
             resolve_scope(&state, &bearer("op-secret")).await.unwrap(),
-            Scope::Operator
-        ));
-        assert!(matches!(
-            resolve_scope(&state, &bearer("sk-dashboard-dev")).await.unwrap(),
-            Scope::Tenant(_)
-        ));
+            Caller { tenant: None, is_operator: true }
+        );
+        let tenant_key = resolve_scope(&state, &bearer("sk-dashboard-dev")).await.unwrap();
+        assert!(tenant_key.tenant.is_some() && !tenant_key.is_operator);
         assert!(resolve_scope(&state, &bearer("sk-nope")).await.is_err());
 
         // Operator access is disabled when no operator key is configured.
@@ -2170,7 +2168,7 @@ mod tests {
     async fn session_cookie_grants_the_owners_tenant_scope_without_a_key() {
         let (state, token, tenant_id) = signed_in_state().await;
         let scope = resolve_scope(&state, &cookie_headers(&token)).await.expect("resolved");
-        assert!(matches!(scope, Scope::Tenant(id) if id == tenant_id));
+        assert_eq!(scope, Caller { tenant: Some(tenant_id), is_operator: false });
     }
 
     #[tokio::test]
@@ -2234,14 +2232,19 @@ mod tests {
         let mut headers = cookie_headers(&token);
         headers.insert("authorization", "Bearer sk-dashboard-dev".parse().unwrap());
         let scope = resolve_scope(&state, &headers).await.expect("resolved");
-        assert!(
-            matches!(scope, Scope::Tenant(id) if id.to_string() == "22222222-2222-2222-2222-222222222222"),
+        assert_eq!(
+            scope.tenant.map(|id| id.to_string()).as_deref(),
+            Some("22222222-2222-2222-2222-222222222222"),
             "tenant key wins over the session"
         );
+        assert!(!scope.is_operator);
         let mut headers = cookie_headers(&token);
         headers.insert("authorization", "Bearer op-secret".parse().unwrap());
         let scope = resolve_scope(&state, &headers).await.expect("resolved");
-        assert!(matches!(scope, Scope::Operator), "operator key wins over the session");
+        assert!(
+            scope.is_operator && scope.tenant.is_none(),
+            "operator key wins over the session"
+        );
     }
 
     // --- ITEM-037 AC1/AC4: operator sessions + isolation ---
@@ -2264,7 +2267,41 @@ mod tests {
     async fn an_operator_session_scopes_to_operator_without_a_membership() {
         let (state, token) = operator_session_state().await;
         let scope = resolve_scope(&state, &cookie_headers(&token)).await.expect("resolved");
-        assert!(matches!(scope, Scope::Operator), "operator session -> platform scope");
+        assert_eq!(
+            scope,
+            Caller { tenant: None, is_operator: true },
+            "operator session -> platform scope"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_operator_who_owns_a_tenant_reaches_both_scopes() {
+        // Operator status and tenant membership are orthogonal: a platform
+        // operator who also owns a tenant gets the tenant view AND the
+        // platform view (the login-then-403 regression).
+        let users: std::sync::Arc<dyn crate::auth::UserStore> =
+            std::sync::Arc::new(crate::auth::InMemoryUserStore::default());
+        let user = users.upsert_github_user(42, "both", true).await.expect("ok");
+        let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        users.add_membership(tenant_id, user.id, "owner").await.expect("ok");
+        let state = dashboard_state_full(Some(crate::auth::test_helpers::dummy_accounts(users)));
+        let token = crate::session::issue_session(
+            user.id,
+            crate::auth::test_helpers::TEST_SESSION_SECRET,
+            now_secs(),
+            3600,
+        );
+        let headers = cookie_headers(&token);
+
+        assert_eq!(
+            tenant_or(&state, &headers).await.expect("tenant scope"),
+            tenant_id,
+            "an operator who owns a tenant still reaches tenant routes"
+        );
+        assert!(
+            operator_or(&state, &headers).await.is_ok(),
+            "an operator who owns a tenant still reaches operator routes"
+        );
     }
 
     #[tokio::test]
