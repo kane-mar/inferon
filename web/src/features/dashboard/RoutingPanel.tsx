@@ -5,10 +5,8 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
+import { errorMessage } from '@/libs/errors';
+import { InferonApi } from '@/libs/InferonApi';
 
 const SELECT = `
   rounded-md border bg-background px-3 py-2 text-sm outline-none

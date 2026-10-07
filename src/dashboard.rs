@@ -41,6 +41,32 @@ impl Window {
     }
 }
 
+/// `(requests, cost, errors, prompt_tokens, completion_tokens, avg_ttft,
+/// avg_duration, first_at, last_at)` — the summary aggregate row.
+type SummaryRow = (
+    i64,
+    Decimal,
+    i64,
+    i64,
+    i64,
+    Option<f64>,
+    Option<f64>,
+    Option<String>,
+    Option<String>,
+);
+
+/// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
+/// cost, limit_cents)` — one spend-by-provider row.
+type ProviderAggregateRow = (Option<uuid::Uuid>, String, String, i64, i64, i64, Decimal, i64);
+
+/// `(api_key_id, label, requests, prompt_tokens, completion_tokens, cost,
+/// limit_cents)` — one spend-by-key row.
+type KeyAggregateRow = (Option<uuid::Uuid>, String, i64, i64, i64, Decimal, i64);
+
+/// `(date, requests, errors, cost, prompt_tokens, completion_tokens, avg_ttft,
+/// avg_duration)` — one daily bucket.
+type TimeseriesRow = (String, i64, i64, Decimal, i64, i64, Option<f64>, Option<f64>);
+
 fn unauthorized() -> Response {
     crate::json_error(
         StatusCode::UNAUTHORIZED,
@@ -244,7 +270,7 @@ async fn query_summary(
 ) -> Response {
     let days = window.days();
     let offset = window.offset();
-    let row: Option<(i64, Decimal, i64, i64, i64, Option<f64>, Option<f64>, Option<String>, Option<String>)> =
+    let row: Option<SummaryRow> =
         match sqlx::query_as(
             "SELECT COUNT(*),
                     COALESCE(SUM(upstream_cost_usd), 0),
@@ -388,7 +414,7 @@ async fn query_by_provider(
 ) -> Response {
     let days = window.days();
     let offset = window.offset();
-    let rows: Vec<(Option<uuid::Uuid>, String, String, i64, i64, i64, Decimal, i64)> =
+    let rows: Vec<ProviderAggregateRow> =
         match sqlx::query_as(
             "SELECT t.provider_id,
                     COALESCE(p.name, 'Shared platform key'),
@@ -449,7 +475,7 @@ async fn query_by_key(
 ) -> Response {
     let days = window.days();
     let offset = window.offset();
-    let rows: Vec<(Option<uuid::Uuid>, String, i64, i64, i64, Decimal, i64)> = match sqlx::query_as(
+    let rows: Vec<KeyAggregateRow> = match sqlx::query_as(
         "SELECT t.api_key_id,
                 COALESCE(k.label, 'Legacy key'),
                 COUNT(*),
@@ -548,7 +574,7 @@ async fn query_timeseries(
 ) -> Response {
     let days = window.days();
     let offset = window.offset();
-    let rows: Vec<(String, i64, i64, Decimal, i64, i64, Option<f64>, Option<f64>)> =
+    let rows: Vec<TimeseriesRow> =
         match sqlx::query_as(
             "SELECT to_char(b.day, 'YYYY-MM-DD'),
                     COUNT(t.id),
@@ -835,6 +861,19 @@ pub struct CreateKeyBody {
     label: Option<String>,
 }
 
+/// Key metadata as JSON — never key material or hashes (ITEM-034/038).
+fn key_json(k: &crate::tenant::ApiKeyInfo) -> Value {
+    json!({
+        "id": k.id.to_string(),
+        "label": k.label,
+        "created_at": k.created_at,
+        "revoked": k.revoked(),
+        "revoked_at": k.revoked_at,
+        "last_used_at": k.last_used_at,
+        "spend_limit_cents": k.spend_limit_cents,
+    })
+}
+
 /// GET /v1/dashboard/api/operator/keys?tenant_id=… — a tenant's key metadata
 /// (ITEM-034 AC3). Key material is never returned — only lifecycle metadata.
 pub async fn operator_keys(
@@ -848,18 +887,11 @@ pub async fn operator_keys(
     match state.tenant_store.list_api_keys(query.tenant_id).await {
         Ok(keys) => {
             let rows: Vec<Value> = keys
-                .into_iter()
+                .iter()
                 .map(|k| {
-                    json!({
-                        "id": k.id.to_string(),
-                        "tenant_id": k.tenant_id.to_string(),
-                        "label": k.label,
-                        "created_at": k.created_at,
-                        "revoked": k.revoked(),
-                        "revoked_at": k.revoked_at,
-                        "last_used_at": k.last_used_at,
-                        "spend_limit_cents": k.spend_limit_cents,
-                    })
+                    let mut value = key_json(k);
+                    value["tenant_id"] = json!(k.tenant_id.to_string());
+                    value
                 })
                 .collect();
             json_ok(json!({"keys": rows}))
@@ -932,20 +964,7 @@ pub async fn tenant_keys(State(state): State<Arc<AppState>>, headers: HeaderMap)
     };
     match state.tenant_store.list_api_keys(tenant_id).await {
         Ok(keys) => {
-            let rows: Vec<Value> = keys
-                .into_iter()
-                .map(|k| {
-                    json!({
-                        "id": k.id.to_string(),
-                        "label": k.label,
-                        "created_at": k.created_at,
-                        "revoked": k.revoked(),
-                        "revoked_at": k.revoked_at,
-                        "last_used_at": k.last_used_at,
-                        "spend_limit_cents": k.spend_limit_cents,
-                    })
-                })
-                .collect();
+            let rows: Vec<Value> = keys.iter().map(key_json).collect();
             json_ok(json!({ "role": role, "keys": rows }))
         }
         Err(e) => internal(&e.to_string()),
@@ -1095,6 +1114,17 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
     }
 }
 
+/// Trim, drop a trailing slash and require http(s) — shared by the provider
+/// create and update paths.
+fn normalize_base_url(raw: &str) -> Result<String, &'static str> {
+    let url = raw.trim().trim_end_matches('/').to_string();
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Ok(url)
+    } else {
+        Err("base URL must start with http:// or https://")
+    }
+}
+
 /// POST /v1/dashboard/api/providers (owner-only) — register a provider.
 pub async fn tenant_provider_create(
     State(state): State<Arc<AppState>>,
@@ -1115,14 +1145,10 @@ pub async fn tenant_provider_create(
             "that provider kind is not supported yet",
         );
     }
-    let base_url = body.base_url.trim().trim_end_matches('/').to_string();
-    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-        return crate::json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_base_url",
-            "base URL must start with http:// or https://",
-        );
-    }
+    let base_url = match normalize_base_url(&body.base_url) {
+        Ok(url) => url,
+        Err(message) => return crate::json_error(StatusCode::BAD_REQUEST, "invalid_base_url", message),
+    };
     let key = body.key.trim().to_string();
     if key.is_empty() {
         return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
@@ -1187,17 +1213,12 @@ pub async fn tenant_provider_update(
         return resp;
     }
     let base_url = match body.base_url {
-        Some(url) => {
-            let url = url.trim().trim_end_matches('/').to_string();
-            if !(url.starts_with("http://") || url.starts_with("https://")) {
-                return crate::json_error(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_base_url",
-                    "base URL must start with http:// or https://",
-                );
+        Some(url) => match normalize_base_url(&url) {
+            Ok(url) => Some(url),
+            Err(message) => {
+                return crate::json_error(StatusCode::BAD_REQUEST, "invalid_base_url", message)
             }
-            Some(url)
-        }
+        },
         None => None,
     };
     let key = body
@@ -2552,6 +2573,20 @@ mod tests {
     }
 
     // --- ITEM-043: provider rotation/metadata (session-scoped, owner mutates) ---
+
+    #[test]
+    fn base_url_normalization_trims_and_requires_http() {
+        assert_eq!(
+            normalize_base_url(" https://api.test/v1/ ").unwrap(),
+            "https://api.test/v1"
+        );
+        assert_eq!(
+            normalize_base_url("http://localhost:8080").unwrap(),
+            "http://localhost:8080"
+        );
+        assert!(normalize_base_url("ftp://api.test").is_err());
+        assert!(normalize_base_url("api.test").is_err());
+    }
 
     #[tokio::test]
     async fn owner_rotates_a_provider_and_members_cannot() {

@@ -1,3 +1,8 @@
+// Every request-path helper returns its early-return HTTP response directly as
+// the error (`Result<T, Response>`) — the axum idiom. Boxing the response at
+// ~10 signatures would only add noise.
+#![allow(clippy::result_large_err)]
+
 pub mod alerts;
 pub mod budget;
 pub mod guard;
@@ -287,7 +292,7 @@ async fn proxy_chat_completions(
     match state.model_store.is_disabled(tenant_id, &meta.model).await {
         Ok(true) => {
             let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 400, total_ms, Usage::default(), None, None, false);
+            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(400, total_ms));
             send_trace(&state.telemetry_tx, msg);
             return json_error(
                 StatusCode::BAD_REQUEST,
@@ -312,7 +317,7 @@ async fn proxy_chat_completions(
         Ok(model) => model,
         Err(resp) => {
             let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, 429, total_ms, Usage::default(), None, None, false);
+            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(429, total_ms));
             send_trace(&state.telemetry_tx, msg);
             return resp;
         }
@@ -408,7 +413,7 @@ async fn proxy_chat_completions(
                     tracing::error!("upstream request failed: {e}");
                     let total_ms = started.elapsed().as_millis() as i64;
                     let msg =
-                        build_trace(&meta, tenant_id, 502, total_ms, Usage::default(), None, None, false);
+                        build_trace(&meta, tenant_id, TraceOutcome::error(502, total_ms));
                     send_trace(&state.telemetry_tx, msg);
                     return json_error(
                         StatusCode::BAD_GATEWAY,
@@ -504,7 +509,18 @@ async fn forward_buffered(
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
-    let msg = build_trace(meta, tenant_id, status.as_u16(), total_ms, usage, ttft_ms, response_json, false);
+    let msg = build_trace(
+        meta,
+        tenant_id,
+        TraceOutcome {
+            status: status.as_u16(),
+            total_duration_ms: total_ms,
+            usage,
+            ttft_ms,
+            raw_completion: response_json,
+            truncated: false,
+        },
+    );
     send_trace(&state.telemetry_tx, msg);
 
     let mut response = Response::new(Body::from(bytes));
@@ -529,32 +545,47 @@ struct RequestMeta {
     api_key_id: Option<Uuid>,
 }
 
-fn build_trace(
-    meta: &RequestMeta,
-    tenant_id: Uuid,
+/// The outcome of a proxied request, as recorded on its trace.
+struct TraceOutcome {
     status: u16,
     total_duration_ms: i64,
     usage: Usage,
     ttft_ms: Option<i64>,
     raw_completion: Option<Value>,
     truncated: bool,
-) -> TraceMessage {
+}
+
+impl TraceOutcome {
+    /// A terminal error response with no usage or completion body.
+    fn error(status: u16, total_duration_ms: i64) -> Self {
+        Self {
+            status,
+            total_duration_ms,
+            usage: Usage::default(),
+            ttft_ms: None,
+            raw_completion: None,
+            truncated: false,
+        }
+    }
+}
+
+fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> TraceMessage {
     TraceMessage {
         id: meta.id,
         tenant_id,
         request_model: meta.model.clone(),
         system_prompt_hash: meta.system_prompt_hash.clone(),
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        cached_prompt_tokens: usage.cached_tokens,
-        ttft_ms,
-        total_duration_ms,
-        status_code: status,
+        prompt_tokens: outcome.usage.prompt_tokens,
+        completion_tokens: outcome.usage.completion_tokens,
+        cached_prompt_tokens: outcome.usage.cached_tokens,
+        ttft_ms: outcome.ttft_ms,
+        total_duration_ms: outcome.total_duration_ms,
+        status_code: outcome.status,
         raw_prompt: Some(meta.raw_prompt.clone()),
-        raw_completion,
+        raw_completion: outcome.raw_completion,
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
-        truncated,
+        truncated: outcome.truncated,
         guard_event: None,
         routing_event: meta.routing_event.clone(),
         provider_id: meta.provider_id,
@@ -859,12 +890,14 @@ impl BufferedGuard {
         let mut msg = build_trace(
             &meta,
             self.tenant_id,
-            200,
-            total_ms,
-            usage,
-            None,
-            None,
-            truncated,
+            TraceOutcome {
+                status: 200,
+                total_duration_ms: total_ms,
+                usage,
+                ttft_ms: None,
+                raw_completion: None,
+                truncated,
+            },
         );
         msg.guard_event = self.guard_event.borrow().clone();
         send_trace(&self.tx, msg);
@@ -932,12 +965,14 @@ impl StreamEmit {
         let msg = build_trace(
             &self.meta,
             self.tenant_id,
-            self.status,
-            total_ms,
-            usage,
-            self.ttft_ms(),
-            None,
-            truncated,
+            TraceOutcome {
+                status: self.status,
+                total_duration_ms: total_ms,
+                usage,
+                ttft_ms: self.ttft_ms(),
+                raw_completion: None,
+                truncated,
+            },
         );
         send_trace(&self.tx, msg);
     }
@@ -1165,10 +1200,7 @@ mod tests {
                                     b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
                                 ));
                                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                                yield Err(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    "mock mid-stream failure",
-                                ));
+                                yield Err(std::io::Error::other("mock mid-stream failure"));
                             };
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")

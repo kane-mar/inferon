@@ -5,19 +5,10 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { formatUsd, InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
-
-/** Exact cents → `$x.yz`, no float money math. */
-const formatCents = (cents: number): string =>
-  formatUsd(`${Math.floor(Math.abs(cents) / 100)}.${String(Math.abs(cents) % 100).padStart(2, '0')}`);
-
-const INPUT = `
-  mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none
-  focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
-`;
+import { centsToUsd } from '@/libs/dashboardMetrics';
+import { errorMessage } from '@/libs/errors';
+import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { FIELD_INPUT } from './formStyles';
 
 export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[] }) => {
   const t = useTranslations('ControlsPage');
@@ -65,7 +56,7 @@ export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[
         <label className="text-sm">
           <span className="text-muted-foreground">{t('budget')}</span>
           <input
-            className={INPUT}
+            className={FIELD_INPUT}
             inputMode="decimal"
             value={budget}
             disabled={!canEdit}
@@ -75,17 +66,17 @@ export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[
         <p className="text-xs text-muted-foreground">
           {data.budget_limit_cents > 0
             ? t('spent_of', {
-                spent: formatCents(data.current_spend_cents),
-                limit: formatCents(data.budget_limit_cents),
+                spent: formatUsd(centsToUsd(data.current_spend_cents)),
+                limit: formatUsd(centsToUsd(data.budget_limit_cents)),
               })
-            : t('spent_unlimited', { spent: formatCents(data.current_spend_cents) })}
+            : t('spent_unlimited', { spent: formatUsd(centsToUsd(data.current_spend_cents)) })}
         </p>
       </div>
 
       <label className="block text-sm">
         <span className="text-muted-foreground">{t('cheap_fallback')}</span>
         <select
-          className={INPUT}
+          className={FIELD_INPUT}
           value={cheap}
           disabled={!canEdit}
           onChange={event => setCheap(event.target.value)}
@@ -121,7 +112,7 @@ export const ControlsPanel = (props: { data: TenantConfig; models: CatalogModel[
         <label className="block text-sm">
           <span className="text-muted-foreground">{t('threshold')}</span>
           <input
-            className={INPUT}
+            className={FIELD_INPUT}
             inputMode="decimal"
             value={threshold}
             disabled={!canEdit || !routerOn}

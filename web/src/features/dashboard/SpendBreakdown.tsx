@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { centsToUsd, formatCompact, formatInt, moneyDeltaPct, spiked, trend } from '@/libs/dashboardMetrics';
-import { formatUsd, InferonApi, InferonApiError } from '@/libs/InferonApi';
+import { errorMessage } from '@/libs/errors';
+import { formatUsd, InferonApi } from '@/libs/InferonApi';
 
 export type SpendBreakdownRow = {
   /** key_id / provider_id — `null` for a legacy/shared row (not editable). */
@@ -53,7 +54,7 @@ export const SpendBreakdown = (props: {
       }
       router.refresh();
     } catch (cause) {
-      setError(cause instanceof InferonApiError ? cause.message : t('limit_error'));
+      setError(errorMessage(cause, t('limit_error')));
     } finally {
       setBusy(null);
     }

@@ -58,7 +58,7 @@ pub fn cookie_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
 /// A `Set-Cookie` value for `name` with `value`, `max_age` seconds of life,
 /// and the `HttpOnly; SameSite=Lax; Path=/` attributes (+ `Secure` over TLS).
 pub fn cookie(name: &str, value: &str, max_age: u64, secure: bool) -> String {
-    let secure_attr = secure.then_some("; Secure").unwrap_or("");
+    let secure_attr = if secure { "; Secure" } else { "" };
     format!("{name}={value}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}{secure_attr}")
 }
 

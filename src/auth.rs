@@ -1693,9 +1693,7 @@ mod tests {
             .unwrap();
         assert_eq!(callback.status(), axum::http::StatusCode::BAD_REQUEST);
         assert!(
-            set_cookies(&callback)
-                .get(crate::session::SESSION_COOKIE)
-                .is_none(),
+            !set_cookies(&callback).contains_key(crate::session::SESSION_COOKIE),
             "no session on mismatch"
         );
         let json = body_json(callback).await;

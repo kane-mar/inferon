@@ -96,8 +96,8 @@ pub fn is_cheap_tier(model: &str) -> bool {
 /// Does this request qualify for the guard? True only when BOTH hold:
 ///   - it carries a JSON-schema contract (`response_format.json_schema.schema`)
 ///   - the effective model being served is a cheap-tier model
-/// (`effective_model` = whatever the proxy will actually call upstream, after
-/// router/budget overrides.)
+///     (`effective_model` = whatever the proxy will actually call upstream,
+///     after router/budget overrides.)
 pub fn is_guarded_request(payload: &Value, effective_model: &str) -> bool {
     has_json_schema_contract(payload) && is_cheap_tier(effective_model)
 }
@@ -251,6 +251,7 @@ pub fn extract_content(bytes: &[u8]) -> Option<String> {
 ///   - content is not valid JSON syntax  -> InvalidJsonSyntax
 ///   - the request's schema does not compile -> MalformedSchemaContract
 ///   - well-formed JSON violates the schema -> SchemaViolation
+///
 /// Empty/missing content on an otherwise complete stream is a defined edge
 /// case (no content to validate -> schema violation, never a panic).
 pub fn validate_content(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
@@ -456,11 +457,9 @@ mod tests {
     /// JSON string — double-encoded like a real chat completion).
     fn stream_with_content(content_json: &str) -> String {
         let escaped = content_json.replace('\\', "\\\\").replace('"', "\\\"");
-        format!(
-            "{}",
-            sse_frame(&format!(r#"{{"id":"1","choices":[{{"delta":{{"content":"{escaped}"}}}}]}}"#))
-        )
-        + &format!("data: [DONE]\n\n")
+        let frame =
+            sse_frame(&format!(r#"{{"id":"1","choices":[{{"delta":{{"content":"{escaped}"}}}}]}}"#));
+        format!("{frame}data: [DONE]\n\n")
     }
 
     #[test]

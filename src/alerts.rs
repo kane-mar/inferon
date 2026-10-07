@@ -157,31 +157,6 @@ pub struct AlertRow {
     pub last_fired_at_ms: i64,
 }
 
-/// Read the current open (firing) episodes for every tenant/class. The
-/// evaluation loop turns each row into the `is_open` input of `decide_fire`.
-pub async fn open_episodes(
-    pool: &sqlx::PgPool,
-) -> Result<Vec<AlertRow>, Box<dyn std::error::Error + Send + Sync>> {
-    let rows: Vec<(uuid::Uuid, String, String, i64, i64)> = sqlx::query_as(
-        "SELECT tenant_id, class, status,
-                EXTRACT(EPOCH FROM first_fired_at)::bigint * 1000,
-                EXTRACT(EPOCH FROM last_fired_at)::bigint * 1000
-         FROM alerts WHERE status = 'firing'",
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(tenant_id, class, status, first_fired_at_ms, last_fired_at_ms)| AlertRow {
-            tenant_id,
-            class,
-            status,
-            first_fired_at_ms,
-            last_fired_at_ms,
-        })
-        .collect())
-}
-
 /// Load a tenant's thresholds from `tenant_configurations`, falling back to
 /// the conservative defaults when the tenant has no configuration row.
 pub async fn thresholds_for(
@@ -323,20 +298,23 @@ pub struct AlertViewRow {
     pub cleared_at: Option<String>,
 }
 
+/// A raw `alerts` row, mapped into [`AlertViewRow`].
+type AlertRowTuple = (
+    uuid::Uuid,
+    String,
+    String,
+    serde_json::Value,
+    serde_json::Value,
+    String,
+    String,
+    Option<String>,
+);
+
 pub async fn list_alerts(
     pool: &sqlx::PgPool,
     window_days: i64,
 ) -> Result<Vec<AlertViewRow>, Box<dyn std::error::Error + Send + Sync>> {
-    let rows: Vec<(
-        uuid::Uuid,
-        String,
-        String,
-        serde_json::Value,
-        serde_json::Value,
-        String,
-        String,
-        Option<String>,
-    )> = sqlx::query_as(
+    let rows: Vec<AlertRowTuple> = sqlx::query_as(
         "SELECT tenant_id, class, status, detail, threshold,
                 first_fired_at::text, last_fired_at::text, cleared_at::text
          FROM alerts
@@ -365,6 +343,42 @@ pub async fn list_alerts(
         .collect())
 }
 
+/// Apply the fire/clear lifecycle for one class and persist it. Returns the
+/// `(class, fired_at)` delivery when an episode started or re-fired, `None`
+/// otherwise (keep-silent, idle, or cleared).
+async fn apply_lifecycle(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+    class: &str,
+    now_ms: i64,
+    anomalous: bool,
+    detail: &serde_json::Value,
+    thresholds: &AlertThresholds,
+) -> Result<Option<(String, i64)>, Box<dyn std::error::Error + Send + Sync>> {
+    let open = find_open(pool, tenant_id, class).await?;
+    match decide_fire(
+        open.is_some(),
+        open.as_ref().map(|r| r.last_fired_at_ms),
+        now_ms,
+        anomalous,
+        REFIRE_AFTER_MS,
+    ) {
+        FireAction::Start => {
+            insert_episode(pool, tenant_id, class, now_ms, detail, thresholds).await?;
+            Ok(Some((class.to_string(), now_ms)))
+        }
+        FireAction::ReFire => {
+            touch_episode(pool, tenant_id, class, now_ms).await?;
+            Ok(Some((class.to_string(), now_ms)))
+        }
+        FireAction::Clear => {
+            clear_episode(pool, tenant_id, class, now_ms).await?;
+            Ok(None)
+        }
+        FireAction::KeepSilent | FireAction::Idle => Ok(None),
+    }
+}
+
 /// Evaluate one tenant: read its signals, apply the pure fire/clear lifecycle
 /// for both classes, and persist. Returns the episodes that started or
 /// re-fired (each needs a delivery attempt, AC4).
@@ -386,7 +400,7 @@ pub async fn evaluate_tenant(
     let mut deliveries = Vec::new();
     for (class, anomalous, detail) in [
         (
-            SPEND_VELOCITY.to_string(),
+            SPEND_VELOCITY,
             spend.is_anomalous(&thresholds),
             serde_json::json!({
                 "window_cents": signals.window_cents,
@@ -394,29 +408,15 @@ pub async fn evaluate_tenant(
             }),
         ),
         (
-            WASTE_SPIKE.to_string(),
+            WASTE_SPIKE,
             waste.is_anomalous(&thresholds),
             serde_json::json!({"flagged_requests_24h": signals.flagged_requests_24h}),
         ),
     ] {
-        let open = find_open(pool, tenant_id, &class).await?;
-        match decide_fire(
-            open.is_some(),
-            open.as_ref().map(|r| r.last_fired_at_ms),
-            now_ms,
-            anomalous,
-            REFIRE_AFTER_MS,
-        ) {
-            FireAction::Start => {
-                insert_episode(pool, tenant_id, &class, now_ms, &detail, &thresholds).await?;
-                deliveries.push((class, now_ms));
-            }
-            FireAction::ReFire => {
-                touch_episode(pool, tenant_id, &class, now_ms).await?;
-                deliveries.push((class, now_ms));
-            }
-            FireAction::Clear => clear_episode(pool, tenant_id, &class, now_ms).await?,
-            FireAction::KeepSilent | FireAction::Idle => {}
+        if let Some(delivery) =
+            apply_lifecycle(pool, tenant_id, class, now_ms, anomalous, &detail, &thresholds).await?
+        {
+            deliveries.push(delivery);
         }
     }
     evaluate_limits(pool, tenant_id, now_ms, &thresholds, &mut deliveries).await?;
@@ -502,24 +502,18 @@ async fn evaluate_limits(
         breaches.iter().map(|b| b.class.clone()).collect();
 
     for breach in &breaches {
-        let open = find_open(pool, tenant_id, &breach.class).await?;
-        match decide_fire(
-            open.is_some(),
-            open.as_ref().map(|r| r.last_fired_at_ms),
+        if let Some(delivery) = apply_lifecycle(
+            pool,
+            tenant_id,
+            &breach.class,
             now_ms,
             true,
-            REFIRE_AFTER_MS,
-        ) {
-            FireAction::Start => {
-                insert_episode(pool, tenant_id, &breach.class, now_ms, &breach.detail, thresholds)
-                    .await?;
-                deliveries.push((breach.class.clone(), now_ms));
-            }
-            FireAction::ReFire => {
-                touch_episode(pool, tenant_id, &breach.class, now_ms).await?;
-                deliveries.push((breach.class.clone(), now_ms));
-            }
-            FireAction::Clear | FireAction::KeepSilent | FireAction::Idle => {}
+            &breach.detail,
+            thresholds,
+        )
+        .await?
+        {
+            deliveries.push(delivery);
         }
     }
 

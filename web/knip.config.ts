@@ -5,11 +5,9 @@ const config: KnipConfig = {
   ignore: [
     'src/components/ui/*',
     'src/libs/I18n.ts',
-    'src/libs/Logger.ts',
   ],
   // Dependencies to ignore during analysis
   ignoreDependencies: [
-    '@logtape/logtape',
     '@swc/helpers', // Avoid error in CI: "`npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync."
     'lefthook', // Used via lefthook.yml git hooks, not imported
   ],

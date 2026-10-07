@@ -5,10 +5,8 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { formatUsd, InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
+import { errorMessage } from '@/libs/errors';
+import { formatUsd, InferonApi } from '@/libs/InferonApi';
 
 const formatContext = (tokens: number): string =>
   tokens >= 1_000_000 ? `${tokens / 1_000_000}M` : `${Math.round(tokens / 1000)}K`;

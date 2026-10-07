@@ -5,10 +5,9 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
+import { errorMessage } from '@/libs/errors';
+import { InferonApi } from '@/libs/InferonApi';
+import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
 
 /** Convenience defaults so a tenant only has to paste a key. */
 const DEFAULT_BASE: Record<string, string> = {
@@ -16,13 +15,6 @@ const DEFAULT_BASE: Record<string, string> = {
   'openai': 'https://api.openai.com/v1',
   'openai-compatible': '',
 };
-
-const INPUT = `
-  mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none
-  focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
-`;
-
-const MONO_INPUT = `${INPUT} font-mono`;
 
 /** `Name: Value` per line → metadata headers; blank/malformed lines ignored. */
 const parseHeaders = (text: string): Record<string, string> => {
@@ -208,7 +200,7 @@ export const ProvidersPanel = (props: {
                           <span className="text-muted-foreground">{t('name')}</span>
                           <input
                             value={draft.name}
-                            className={INPUT}
+                            className={FIELD_INPUT}
                             onChange={event => setDraft(current => ({ ...current, name: event.target.value }))}
                           />
                         </label>
@@ -216,7 +208,7 @@ export const ProvidersPanel = (props: {
                           <span className="text-muted-foreground">{t('base_url')}</span>
                           <input
                             value={draft.base_url}
-                            className={MONO_INPUT}
+                            className={MONO_FIELD_INPUT}
                             required
                             onChange={event => setDraft(current => ({ ...current, base_url: event.target.value }))}
                           />
@@ -226,7 +218,7 @@ export const ProvidersPanel = (props: {
                           <input
                             value={draft.key}
                             type="password"
-                            className={MONO_INPUT}
+                            className={MONO_FIELD_INPUT}
                             placeholder={provider.key_hint}
                             autoComplete="off"
                             onChange={event => setDraft(current => ({ ...current, key: event.target.value }))}
@@ -242,7 +234,7 @@ export const ProvidersPanel = (props: {
                           <span className="text-muted-foreground">{t('org')}</span>
                           <input
                             value={draft.org}
-                            className={MONO_INPUT}
+                            className={MONO_FIELD_INPUT}
                             onChange={event => setDraft(current => ({ ...current, org: event.target.value }))}
                           />
                         </label>
@@ -255,7 +247,7 @@ export const ProvidersPanel = (props: {
                           <textarea
                             value={draft.headers}
                             rows={2}
-                            className={MONO_INPUT}
+                            className={MONO_FIELD_INPUT}
                             placeholder="anthropic-version: 2023-06-01"
                             onChange={event => setDraft(current => ({ ...current, headers: event.target.value }))}
                           />
@@ -397,7 +389,7 @@ export const ProvidersPanel = (props: {
                 <span className="text-muted-foreground">{t('kind')}</span>
                 <select
                   value={kind}
-                  className={INPUT}
+                  className={FIELD_INPUT}
                   onChange={(event) => {
                     setKind(event.target.value);
                     setBaseUrl(DEFAULT_BASE[event.target.value] ?? '');
@@ -413,7 +405,7 @@ export const ProvidersPanel = (props: {
                 <span className="text-muted-foreground">{t('name')}</span>
                 <input
                   value={name}
-                  className={INPUT}
+                  className={FIELD_INPUT}
                   placeholder={t('name_placeholder')}
                   onChange={event => setName(event.target.value)}
                 />
@@ -427,7 +419,7 @@ export const ProvidersPanel = (props: {
                 <span className="text-muted-foreground">{t('base_url')}</span>
                 <input
                   value={baseUrl}
-                  className={MONO_INPUT}
+                  className={MONO_FIELD_INPUT}
                   placeholder="https://api.deepseek.com/v1"
                   required
                   onChange={event => setBaseUrl(event.target.value)}
@@ -439,7 +431,7 @@ export const ProvidersPanel = (props: {
                 <input
                   value={key}
                   type="password"
-                  className={MONO_INPUT}
+                  className={MONO_FIELD_INPUT}
                   placeholder="sk-…"
                   required
                   autoComplete="off"
@@ -451,7 +443,7 @@ export const ProvidersPanel = (props: {
                 <span className="text-muted-foreground">{t('org')}</span>
                 <input
                   value={org}
-                  className={MONO_INPUT}
+                  className={MONO_FIELD_INPUT}
                   placeholder={t('org_placeholder')}
                   onChange={event => setOrg(event.target.value)}
                 />
@@ -466,7 +458,7 @@ export const ProvidersPanel = (props: {
                 <textarea
                   value={headers}
                   rows={2}
-                  className={MONO_INPUT}
+                  className={MONO_FIELD_INPUT}
                   placeholder="anthropic-version: 2023-06-01"
                   onChange={event => setHeaders(event.target.value)}
                 />

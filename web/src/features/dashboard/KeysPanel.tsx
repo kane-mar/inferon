@@ -4,10 +4,8 @@ import type { KeysResponse } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
+import { errorMessage } from '@/libs/errors';
+import { InferonApi } from '@/libs/InferonApi';
 
 const date = (value: string | null) => (value ? value.slice(0, 10) : '—');
 

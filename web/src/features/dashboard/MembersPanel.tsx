@@ -4,10 +4,8 @@ import type { MembersResponse } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { InferonApi, InferonApiError } from '@/libs/InferonApi';
-
-const errorMessage = (error: unknown, fallback: string) =>
-  error instanceof InferonApiError ? error.message : fallback;
+import { errorMessage } from '@/libs/errors';
+import { InferonApi } from '@/libs/InferonApi';
 
 export const MembersPanel = (props: { data: MembersResponse }) => {
   const t = useTranslations('MembersPage');
