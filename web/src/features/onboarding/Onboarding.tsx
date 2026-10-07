@@ -27,7 +27,6 @@ export type OnboardingLabels = {
   modelLabel: string;
   modelHelp: string;
   linksHelp: string;
-  modelsLink: string;
   providersLink: string;
   requestStep: string;
   waiting: string;
@@ -233,12 +232,6 @@ export const Onboarding = (props: {
 
         <p className="text-xs text-muted-foreground">
           {labels.linksHelp}
-          {' '}
-          <Link href="/dashboard/models" className="underline">
-            {labels.modelsLink}
-          </Link>
-          {' '}
-          ·
           {' '}
           <Link href="/dashboard/providers" className="underline">
             {labels.providersLink}

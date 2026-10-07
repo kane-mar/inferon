@@ -55,7 +55,6 @@ export default async function OnboardingPage(props: OnboardingPageProps) {
     modelLabel: t('model_label'),
     modelHelp: t('model_help'),
     linksHelp: t('links_help'),
-    modelsLink: t('models_link'),
     providersLink: t('providers_link'),
     requestStep: t('request_step'),
     waiting: t('waiting'),
