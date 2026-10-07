@@ -70,6 +70,37 @@ export type PromptRow = {
 
 export type ByPrompt = { prompts: PromptRow[] };
 
+/** ITEM-047: spend grouped by provider (period-comparable via `offset`). */
+export type ProviderSpendRow = {
+  provider_id: string | null;
+  name: string;
+  kind: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: string;
+  spend_limit_cents: number;
+};
+
+export type ByProvider = {
+  window_days: number;
+  offset_days: number;
+  providers: ProviderSpendRow[];
+};
+
+/** ITEM-047: spend grouped by API key. */
+export type KeySpendRow = {
+  key_id: string | null;
+  label: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd: string;
+  spend_limit_cents: number;
+};
+
+export type ByKey = { window_days: number; offset_days: number; keys: KeySpendRow[] };
+
 export type WasteFlag = {
   requests: number;
   spend_usd: string;
@@ -103,6 +134,8 @@ export type KeyRow = {
   revoked: boolean;
   revoked_at: string | null;
   last_used_at: string | null;
+  /** ITEM-047: monthly cap in cents; 0 = no limit. */
+  spend_limit_cents: number;
 };
 
 export type Role = 'owner' | 'member';
@@ -126,6 +159,8 @@ export type ProviderRow = {
   /** Masked, e.g. `…ab12` — the key itself never leaves the backend. */
   key_hint: string;
   metadata: ProviderMetadata;
+  /** ITEM-047: monthly cap in cents; 0 = no limit. */
+  spend_limit_cents: number;
   created_at: string;
   updated_at: string;
 };
@@ -138,6 +173,7 @@ export type NewProvider = {
   base_url: string;
   key: string;
   metadata?: ProviderMetadata;
+  spend_limit_cents?: number;
 };
 
 export type UpdateProvider = {
@@ -146,6 +182,7 @@ export type UpdateProvider = {
   /** Omit to keep the stored key; provide to rotate it. */
   key?: string;
   metadata?: ProviderMetadata;
+  spend_limit_cents?: number;
 };
 
 export type ProviderTest = { ok: boolean; status: number | null };
@@ -300,6 +337,24 @@ export class InferonApi {
     );
   }
 
+  byProvider(days: number, offset = 0, cookie?: string): Promise<ByProvider> {
+    return this.request<ByProvider>(
+      'GET',
+      `/v1/dashboard/api/by-provider${windowQuery(days, offset ? { offset } : {})}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  byKey(days: number, offset = 0, cookie?: string): Promise<ByKey> {
+    return this.request<ByKey>(
+      'GET',
+      `/v1/dashboard/api/by-key${windowQuery(days, offset ? { offset } : {})}`,
+      undefined,
+      { cookie },
+    );
+  }
+
   waste(days: number, cookie?: string): Promise<Waste> {
     return this.request<Waste>('GET', `/v1/dashboard/api/waste${windowQuery(days)}`, undefined, { cookie });
   }
@@ -314,6 +369,14 @@ export class InferonApi {
 
   revokeKey(keyId: string, cookie?: string): Promise<{ key_id: string; revoked: boolean }> {
     return this.request('POST', `/v1/dashboard/api/keys/${keyId}/revoke`, {}, { cookie });
+  }
+
+  setKeyLimit(
+    keyId: string,
+    spendLimitCents: number,
+    cookie?: string,
+  ): Promise<{ key_id: string; spend_limit_cents: number }> {
+    return this.request('POST', `/v1/dashboard/api/keys/${keyId}/limit`, { spend_limit_cents: spendLimitCents }, { cookie });
   }
 
   members(cookie?: string): Promise<MembersResponse> {

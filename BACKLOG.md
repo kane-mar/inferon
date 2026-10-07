@@ -15,7 +15,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 | ITEM-044 | Model catalog & per-tenant selection | feature | **done (2026-10-06)** — catalog + `tenant_models` selection + `/dashboard/models`; disabled models refused (typed 400) and never routed to |
 | ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
-| ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **new** — depends on 043/044 |
+| ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **done (2026-10-06)** — spend by provider/model/key/prompt with period deltas + inline spike badge; per-key/per-provider monthly limits (owner UI) with ITEM-020 alerts; onboarding empty state |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **done (2026-10-06)** — `/dashboard/onboarding`: mint key → base URL → snippets (tenant model) → first-request detection; links to models/providers |
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
@@ -26,8 +26,6 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-06 (ITEM-049 landed; the control plane 043–049 is complete)_ — the
-whole tenant-facing control plane plus the app shell are delivered. Native
-Anthropic SDK support is captured as ITEM-050. Remaining ranked work: **ITEM-047**
-(spend breakdowns + per-key limits), ITEM-018 (PO handoff), ITEM-050 (Anthropic),
-with the OmniRouting cluster (029–032) staged.
+_Last updated: 2026-10-06 (ITEM-047 landed — the control plane + spend view 043–049 are complete)_ —
+remaining: ITEM-050 (native Anthropic adapter), ITEM-018 (PO handoff), and the
+staged OmniRouting cluster (029–032).

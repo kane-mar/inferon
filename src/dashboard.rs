@@ -379,6 +379,125 @@ async fn query_by_prompt(
     json_ok(json!({"prompts": prompts}))
 }
 
+/// ITEM-047: spend/usage grouped by provider over the window (offset shifts it
+/// back for period comparison). A `NULL` provider_id is the shared platform key.
+async fn query_by_provider(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+) -> Response {
+    let days = window.days();
+    let offset = window.offset();
+    let rows: Vec<(Option<uuid::Uuid>, String, String, i64, i64, i64, Decimal, i64)> =
+        match sqlx::query_as(
+            "SELECT t.provider_id,
+                    COALESCE(p.name, 'Shared platform key'),
+                    COALESCE(p.kind, 'shared'),
+                    COUNT(*),
+                    COALESCE(SUM(t.prompt_tokens), 0),
+                    COALESCE(SUM(t.completion_tokens), 0),
+                    COALESCE(SUM(t.upstream_cost_usd), 0),
+                    COALESCE(p.spend_limit_cents, 0)
+             FROM traces t
+             LEFT JOIN providers p ON p.id = t.provider_id
+             WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
+               AND t.created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+               AND t.created_at < NOW() - ($3 * INTERVAL '1 day')
+             GROUP BY t.provider_id, p.name, p.kind, p.spend_limit_cents
+             ORDER BY 7 DESC",
+        )
+        .bind(tenant)
+        .bind(days)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return db_err(e),
+        };
+
+    let providers: Vec<Value> = rows
+        .into_iter()
+        .map(
+            |(id, name, kind, requests, prompt_tokens, completion_tokens, cost, limit_cents)| {
+                json!({
+                    "provider_id": id.map(|v| v.to_string()),
+                    "name": name,
+                    "kind": kind,
+                    "requests": requests,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost_usd": cost.to_string(),
+                    "spend_limit_cents": limit_cents,
+                })
+            },
+        )
+        .collect();
+    json_ok(json!({
+        "window_days": days,
+        "offset_days": offset,
+        "providers": providers,
+    }))
+}
+
+/// ITEM-047: spend/usage grouped by API key over the window. A `NULL`
+/// api_key_id is a legacy credential minted before per-key attribution.
+async fn query_by_key(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+) -> Response {
+    let days = window.days();
+    let offset = window.offset();
+    let rows: Vec<(Option<uuid::Uuid>, String, i64, i64, i64, Decimal, i64)> = match sqlx::query_as(
+        "SELECT t.api_key_id,
+                COALESCE(k.label, 'Legacy key'),
+                COUNT(*),
+                COALESCE(SUM(t.prompt_tokens), 0),
+                COALESCE(SUM(t.completion_tokens), 0),
+                COALESCE(SUM(t.upstream_cost_usd), 0),
+                COALESCE(k.spend_limit_cents, 0)
+         FROM traces t
+         LEFT JOIN api_keys k ON k.id = t.api_key_id
+         WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
+           AND t.created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND t.created_at < NOW() - ($3 * INTERVAL '1 day')
+         GROUP BY t.api_key_id, k.label, k.spend_limit_cents
+         ORDER BY 6 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+
+    let keys: Vec<Value> = rows
+        .into_iter()
+        .map(
+            |(id, label, requests, prompt_tokens, completion_tokens, cost, limit_cents)| {
+                json!({
+                    "key_id": id.map(|v| v.to_string()),
+                    "label": label,
+                    "requests": requests,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost_usd": cost.to_string(),
+                    "spend_limit_cents": limit_cents,
+                })
+            },
+        )
+        .collect();
+    json_ok(json!({
+        "window_days": days,
+        "offset_days": offset,
+        "keys": keys,
+    }))
+}
+
 async fn query_waste(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
@@ -524,6 +643,30 @@ pub async fn by_prompt(
 ) -> Response {
     match tenant_or(&state, &headers).await {
         Ok(id) => query_by_prompt(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/by-provider?days=7 (tenant scope)
+pub async fn by_provider(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_by_provider(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// GET /v1/dashboard/api/by-key?days=7 (tenant scope)
+pub async fn by_key(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_by_key(&state, Some(id), &window).await,
         Err(resp) => resp,
     }
 }
@@ -715,6 +858,7 @@ pub async fn operator_keys(
                         "revoked": k.revoked(),
                         "revoked_at": k.revoked_at,
                         "last_used_at": k.last_used_at,
+                        "spend_limit_cents": k.spend_limit_cents,
                     })
                 })
                 .collect();
@@ -798,11 +942,46 @@ pub async fn tenant_keys(State(state): State<Arc<AppState>>, headers: HeaderMap)
                         "revoked": k.revoked(),
                         "revoked_at": k.revoked_at,
                         "last_used_at": k.last_used_at,
+                        "spend_limit_cents": k.spend_limit_cents,
                     })
                 })
                 .collect();
             json_ok(json!({ "role": role, "keys": rows }))
         }
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct KeyLimitBody {
+    spend_limit_cents: i64,
+}
+
+/// POST /v1/dashboard/api/keys/:key_id/limit (owner-only, ITEM-047) — set a
+/// tenant-owned key's monthly spend cap (0 clears it).
+pub async fn tenant_key_limit(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(key_id): Path<uuid::Uuid>,
+    Json(body): Json<KeyLimitBody>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    match state
+        .tenant_store
+        .set_key_spend_limit(tenant_id, key_id, body.spend_limit_cents)
+        .await
+    {
+        Ok(true) => json_ok(json!({
+            "key_id": key_id.to_string(),
+            "spend_limit_cents": body.spend_limit_cents.max(0),
+        })),
+        Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such key"),
         Err(e) => internal(&e.to_string()),
     }
 }
@@ -871,6 +1050,8 @@ pub struct ProviderBody {
     key: String,
     #[serde(default)]
     metadata: crate::providers::ProviderMetadata,
+    #[serde(default)]
+    spend_limit_cents: Option<i64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -880,6 +1061,8 @@ pub struct ProviderUpdateBody {
     key: Option<String>,
     #[serde(default)]
     metadata: Option<crate::providers::ProviderMetadata>,
+    #[serde(default)]
+    spend_limit_cents: Option<i64>,
 }
 
 fn provider_json(provider: &crate::providers::Provider) -> Value {
@@ -890,6 +1073,7 @@ fn provider_json(provider: &crate::providers::Provider) -> Value {
         "base_url": provider.base_url,
         "key_hint": provider.key_hint,
         "metadata": provider.metadata,
+        "spend_limit_cents": provider.spend_limit_cents,
         "created_at": provider.created_at,
         "updated_at": provider.updated_at,
     })
@@ -954,6 +1138,7 @@ pub async fn tenant_provider_create(
         base_url,
         key,
         metadata: body.metadata,
+        spend_limit_cents: body.spend_limit_cents.unwrap_or(0),
     };
     match state.provider_store.insert(tenant_id, &new).await {
         Ok(id) => json_ok(json!({ "id": id.to_string() })),
@@ -1027,6 +1212,7 @@ pub async fn tenant_provider_update(
         base_url,
         key,
         metadata: body.metadata,
+        spend_limit_cents: body.spend_limit_cents,
     };
     match state.provider_store.update(tenant_id, provider_id, &update).await {
         Ok(true) => json_ok(json!({ "provider_id": provider_id.to_string(), "updated": true })),
@@ -1564,6 +1750,7 @@ mod tests {
             crate::Tenant {
                 id: uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(),
                 upstream_openai_key: Some("sk-master".to_string()),
+                api_key_id: None,
             },
         );
         std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants))
@@ -1760,6 +1947,8 @@ mod tests {
             "/v1/dashboard/api/summary",
             "/v1/dashboard/api/by-model",
             "/v1/dashboard/api/by-prompt",
+            "/v1/dashboard/api/by-provider",
+            "/v1/dashboard/api/by-key",
             "/v1/dashboard/api/waste",
         ] {
             let missing = router
@@ -1775,6 +1964,52 @@ mod tests {
                 .unwrap();
             assert_eq!(unknown.status(), axum::http::StatusCode::UNAUTHORIZED, "{uri} with unknown key");
         }
+    }
+
+    #[tokio::test]
+    async fn owner_sets_a_key_spend_limit_and_members_cannot() {
+        // ITEM-047 AC2: per-key limits are owner-managed and reflected in the
+        // key list; a member gets 403.
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state);
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/keys", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        let key_id = json["keys"][0]["id"].as_str().expect("seeded key id").to_string();
+
+        let set = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/keys/{key_id}/limit"),
+                &token,
+                r#"{"spend_limit_cents":2500}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(set.status(), axum::http::StatusCode::OK);
+        assert_eq!(body_json(set).await["spend_limit_cents"], 2500);
+
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/keys", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        assert_eq!(json["keys"][0]["spend_limit_cents"], 2500);
+
+        let (member_state, member_token) = tenant_role_session("member").await;
+        let member = crate::build_router(member_state)
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/keys/{key_id}/limit"),
+                &member_token,
+                r#"{"spend_limit_cents":1}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -2332,6 +2567,7 @@ mod tests {
                     base_url: "https://api.openai.com/v1".to_string(),
                     key: "sk-old-1111".to_string(),
                     metadata: Default::default(),
+                    spend_limit_cents: 0,
                 },
             )
             .await

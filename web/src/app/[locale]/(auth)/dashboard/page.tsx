@@ -1,8 +1,10 @@
 import type { DashboardView } from '@/features/dashboard/DashboardToolbar';
 import type { LineSeries, ValueFormat } from '@/features/dashboard/LineChart';
+import type { SpendBreakdownRow } from '@/features/dashboard/SpendBreakdown';
 import type { ChartMetric } from '@/libs/dashboardMetrics';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
+import { buttonVariants } from '@/components/ui/buttonVariants';
 import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
 import {
@@ -13,6 +15,7 @@ import {
 } from '@/features/dashboard/DashboardToolbar';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { LineChart } from '@/features/dashboard/LineChart';
+import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
 import {
   chartSeries,
   deltaPct,
@@ -22,6 +25,7 @@ import {
   formatMs,
   moneyDeltaPct,
 } from '@/libs/dashboardMetrics';
+import { Link } from '@/libs/I18nNavigation';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -67,7 +71,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   const t = await getTranslations({ locale, namespace: 'DashboardIndexPage' });
 
   const api = InferonApi.fromEnv();
-  const [summary, previous, series, previousSeries, byModel, byPrompt, waste] = await Promise.all([
+  const [summary, previous, series, previousSeries, byModel, byPrompt, waste, keys, byProvider, prevByProvider, byKey, prevByKey] = await Promise.all([
     api.summary(view.days, 0, session.cookie),
     view.compare ? api.summary(view.days, view.days, session.cookie) : null,
     api.timeseries(view.days, 0, session.cookie),
@@ -75,7 +79,41 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     api.byModel(view.days, session.cookie),
     api.byPrompt(view.days, 10, session.cookie),
     api.waste(view.days, session.cookie),
+    api.keys(session.cookie),
+    api.byProvider(view.days, 0, session.cookie),
+    view.compare ? api.byProvider(view.days, view.days, session.cookie) : null,
+    api.byKey(view.days, 0, session.cookie),
+    view.compare ? api.byKey(view.days, view.days, session.cookie) : null,
   ]);
+  const canEdit = keys.role === 'owner';
+
+  // ITEM-047: match the current window's rows to the prior period by id (falling
+  // back to the label for the shared/legacy rows) so each row can show a delta
+  // and an inline spike badge (AC3).
+  const prevProviderCost = new Map(
+    (prevByProvider?.providers ?? []).map(p => [p.provider_id ?? p.name, p.cost_usd]),
+  );
+  const providerRows: SpendBreakdownRow[] = byProvider.providers.map(p => ({
+    id: p.provider_id,
+    label: p.name,
+    meta: p.kind === 'shared' ? undefined : p.kind,
+    costUsd: p.cost_usd,
+    previousCostUsd: prevProviderCost.get(p.provider_id ?? p.name) ?? null,
+    requests: p.requests,
+    tokens: p.prompt_tokens + p.completion_tokens,
+    limitCents: p.spend_limit_cents,
+  }));
+
+  const prevKeyCost = new Map((prevByKey?.keys ?? []).map(k => [k.key_id ?? k.label, k.cost_usd]));
+  const keyRows: SpendBreakdownRow[] = byKey.keys.map(k => ({
+    id: k.key_id,
+    label: k.label,
+    costUsd: k.cost_usd,
+    previousCostUsd: prevKeyCost.get(k.key_id ?? k.label) ?? null,
+    requests: k.requests,
+    tokens: k.prompt_tokens + k.completion_tokens,
+    limitCents: k.spend_limit_cents,
+  }));
 
   const tokens = summary.total_prompt_tokens + summary.total_completion_tokens;
   const previousTokens = previous
@@ -149,8 +187,25 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       <>
         {header}
         <div className="mt-6">
-          <Card title={t('usage_over_time')}>
-            <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+          <Card title={t('empty_title')}>
+            <p className="text-sm text-muted-foreground">{t('empty_body')}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link href="/dashboard/onboarding" className={buttonVariants()}>
+                {t('empty_connect')}
+              </Link>
+              <Link
+                href="/dashboard/providers"
+                className={buttonVariants({ variant: 'outline' })}
+              >
+                {t('empty_provider')}
+              </Link>
+              <Link
+                href="/dashboard/models"
+                className={buttonVariants({ variant: 'outline' })}
+              >
+                {t('empty_models')}
+              </Link>
+            </div>
           </Card>
         </div>
       </>
@@ -317,6 +372,30 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                   ))}
                 </ul>
               )}
+        </Card>
+      </div>
+
+      <div className="
+        mt-4 grid grid-cols-1 gap-4
+        lg:grid-cols-2
+      "
+      >
+        <Card title={t('by_provider')}>
+          <SpendBreakdown
+            kind="provider"
+            rows={providerRows}
+            canEdit={canEdit}
+            emptyLabel={t('no_data')}
+          />
+        </Card>
+
+        <Card title={t('by_key')}>
+          <SpendBreakdown
+            kind="key"
+            rows={keyRows}
+            canEdit={canEdit}
+            emptyLabel={t('no_data')}
+          />
         </Card>
       </div>
 

@@ -40,6 +40,10 @@ pub struct TraceMessage {
     pub guard_event: Option<Value>,
     /// ITEM-045: set when a fallback chain changed the serving model.
     pub routing_event: Option<Value>,
+    /// ITEM-047: the provider that served the request (`None` = shared key).
+    pub provider_id: Option<Uuid>,
+    /// ITEM-047: the API key that authenticated the request (`None` = legacy).
+    pub api_key_id: Option<Uuid>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -84,8 +88,9 @@ impl TraceSink for PostgresTraceSink {
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
                     total_duration_ms, status_code, raw_prompt, raw_completion,
-                    upstream_cost_usd, waste_detected, truncated, guard_event, routing_event
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
+                    upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
+                    provider_id, api_key_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -103,6 +108,8 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.truncated)
             .bind(msg.guard_event.as_ref().map(Json))
             .bind(msg.routing_event.as_ref().map(Json))
+            .bind(msg.provider_id)
+            .bind(msg.api_key_id)
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {

@@ -130,6 +130,16 @@ pub const REFIRE_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
 /// Alert class identifiers persisted in `alerts.class`.
 pub const SPEND_VELOCITY: &str = "spend_velocity";
 pub const WASTE_SPIKE: &str = "waste_spike";
+/// ITEM-047: per-entity monthly-limit classes; the episode class is
+/// `key_spend_limit:<uuid>` / `provider_spend_limit:<uuid>` so each entity has
+/// its own lifecycle.
+pub const KEY_SPEND_LIMIT: &str = "key_spend_limit";
+pub const PROVIDER_SPEND_LIMIT: &str = "provider_spend_limit";
+
+/// The per-entity episode class (kept long — `alerts.class` is TEXT).
+pub fn limit_class(kind: &str, id: uuid::Uuid) -> String {
+    format!("{kind}:{id}")
+}
 
 /// Evaluation window sizes (SQL interval text, kept with the class constants
 /// so the DB layer and this module cannot drift).
@@ -409,7 +419,125 @@ pub async fn evaluate_tenant(
             FireAction::KeepSilent | FireAction::Idle => {}
         }
     }
+    evaluate_limits(pool, tenant_id, now_ms, &thresholds, &mut deliveries).await?;
     Ok(deliveries)
+}
+
+/// ITEM-047: entities over their monthly cap (month-to-date spend >= limit).
+struct LimitBreach {
+    class: String,
+    detail: serde_json::Value,
+}
+
+async fn limit_breaches(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+) -> Result<Vec<LimitBreach>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut breaches = Vec::new();
+
+    let keys: Vec<(uuid::Uuid, String, i64, i64)> = sqlx::query_as(
+        "SELECT k.id, k.label, k.spend_limit_cents,
+                COALESCE(ROUND(SUM(t.upstream_cost_usd) * 100)::bigint, 0)
+         FROM api_keys k
+         LEFT JOIN traces t ON t.api_key_id = k.id
+              AND t.created_at >= date_trunc('month', NOW())
+         WHERE k.tenant_id = $1 AND k.spend_limit_cents > 0
+         GROUP BY k.id, k.label, k.spend_limit_cents
+         HAVING COALESCE(ROUND(SUM(t.upstream_cost_usd) * 100)::bigint, 0) >= k.spend_limit_cents",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    for (id, label, limit_cents, spent_cents) in keys {
+        breaches.push(LimitBreach {
+            class: limit_class(KEY_SPEND_LIMIT, id),
+            detail: serde_json::json!({
+                "api_key_id": id.to_string(),
+                "label": label,
+                "spent_cents": spent_cents,
+                "limit_cents": limit_cents,
+            }),
+        });
+    }
+
+    let providers: Vec<(uuid::Uuid, String, i64, i64)> = sqlx::query_as(
+        "SELECT p.id, p.name, p.spend_limit_cents,
+                COALESCE(ROUND(SUM(t.upstream_cost_usd) * 100)::bigint, 0)
+         FROM providers p
+         LEFT JOIN traces t ON t.provider_id = p.id
+              AND t.created_at >= date_trunc('month', NOW())
+         WHERE p.tenant_id = $1 AND p.spend_limit_cents > 0
+         GROUP BY p.id, p.name, p.spend_limit_cents
+         HAVING COALESCE(ROUND(SUM(t.upstream_cost_usd) * 100)::bigint, 0) >= p.spend_limit_cents",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    for (id, name, limit_cents, spent_cents) in providers {
+        breaches.push(LimitBreach {
+            class: limit_class(PROVIDER_SPEND_LIMIT, id),
+            detail: serde_json::json!({
+                "provider_id": id.to_string(),
+                "name": name,
+                "spent_cents": spent_cents,
+                "limit_cents": limit_cents,
+            }),
+        });
+    }
+
+    Ok(breaches)
+}
+
+/// Fire/re-fire an episode per breaching key/provider and clear episodes whose
+/// entity is back under its cap (ITEM-047 AC2).
+async fn evaluate_limits(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+    now_ms: i64,
+    thresholds: &AlertThresholds,
+    deliveries: &mut Vec<(String, i64)>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let breaches = limit_breaches(pool, tenant_id).await?;
+    let active: std::collections::HashSet<String> =
+        breaches.iter().map(|b| b.class.clone()).collect();
+
+    for breach in &breaches {
+        let open = find_open(pool, tenant_id, &breach.class).await?;
+        match decide_fire(
+            open.is_some(),
+            open.as_ref().map(|r| r.last_fired_at_ms),
+            now_ms,
+            true,
+            REFIRE_AFTER_MS,
+        ) {
+            FireAction::Start => {
+                insert_episode(pool, tenant_id, &breach.class, now_ms, &breach.detail, thresholds)
+                    .await?;
+                deliveries.push((breach.class.clone(), now_ms));
+            }
+            FireAction::ReFire => {
+                touch_episode(pool, tenant_id, &breach.class, now_ms).await?;
+                deliveries.push((breach.class.clone(), now_ms));
+            }
+            FireAction::Clear | FireAction::KeepSilent | FireAction::Idle => {}
+        }
+    }
+
+    // Clear any open limit episode whose entity is back under its cap.
+    let open: Vec<(String,)> = sqlx::query_as(
+        "SELECT class FROM alerts
+         WHERE tenant_id = $1 AND status = 'firing'
+           AND (class LIKE 'key_spend_limit:%' OR class LIKE 'provider_spend_limit:%')",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    for (class,) in open {
+        if !active.contains(&class) {
+            clear_episode(pool, tenant_id, &class, now_ms).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn find_open(
@@ -512,6 +640,16 @@ mod tests {
             spend_floor_cents: floor,
             waste_daily_threshold: waste,
         }
+    }
+
+    #[test]
+    fn limit_classes_are_entity_scoped() {
+        let id = uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        assert_eq!(limit_class(KEY_SPEND_LIMIT, id), format!("key_spend_limit:{id}"));
+        assert_ne!(
+            limit_class(KEY_SPEND_LIMIT, id),
+            limit_class(PROVIDER_SPEND_LIMIT, id)
+        );
     }
 
     #[test]

@@ -64,6 +64,28 @@ export const trend = (delta: number | null): Trend => {
 export const errorRatePct = (requests: number, errors: number): number | null =>
   requests <= 0 ? null : (errors / requests) * 100;
 
+/**
+ * ITEM-047 AC3: a row is a spike when the current window is at least `factor`×
+ * the prior window and the prior window was non-trivial (>1 cent) — small
+ * fluctuations never flag.
+ */
+export const spiked = (
+  current: string,
+  previous: string | null | undefined,
+  factor = 2,
+): boolean => {
+  const now = Number(current);
+  const before = Number(previous ?? 0);
+  return before > 0.01 && now >= before * factor;
+};
+
+/** Exact cents → integer-safe decimal string (`formatUsd` adds the symbol). */
+export const centsToUsd = (cents: number): string => {
+  const sign = cents < 0 ? '-' : '';
+  const abs = Math.abs(Math.round(cents));
+  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+};
+
 const compact = (value: number): string => {
   const abs = Math.abs(value);
   const [scale, suffix]

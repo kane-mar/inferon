@@ -97,6 +97,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/config", get(dashboard::tenant_config).post(dashboard::tenant_config_set))
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
+        .route("/v1/dashboard/api/by-provider", get(dashboard::by_provider))
+        .route("/v1/dashboard/api/by-key", get(dashboard::by_key))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
         .route("/v1/dashboard/api/timeseries", get(dashboard::timeseries))
         .route("/v1/dashboard/api/guard", get(dashboard::guard))
@@ -121,6 +123,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/keys/:key_id/revoke",
             post(dashboard::tenant_key_revoke),
+        )
+        .route(
+            "/v1/dashboard/api/keys/:key_id/limit",
+            post(dashboard::tenant_key_limit),
         )
         .route(
             "/v1/dashboard/api/members",
@@ -148,6 +154,8 @@ struct Route {
     key: String,
     /// Extra upstream headers from the tenant's provider (ITEM-043 AC1).
     metadata: providers::ProviderMetadata,
+    /// ITEM-047: the provider row that served the request (`None` = shared key).
+    provider_id: Option<Uuid>,
 }
 
 /// `<base>/chat/completions` — the OpenAI-compatible chat endpoint.
@@ -176,12 +184,14 @@ async fn resolve_route(state: &Arc<AppState>, tenant: &Tenant) -> Result<Route, 
             url: chat_completions_url(&provider.base_url),
             key: provider.api_key,
             metadata: provider.metadata,
+            provider_id: Some(provider.id),
         }),
         Ok(None) => match tenant.upstream_openai_key.as_deref() {
             Some(key) => Ok(Route {
                 url: state.upstream_url.clone(),
                 key: key.to_string(),
                 metadata: providers::ProviderMetadata::default(),
+                provider_id: None,
             }),
             None => Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -261,11 +271,14 @@ async fn proxy_chat_completions(
         system_prompt_hash: system_prompt_hash(&payload),
         raw_prompt: payload,
         routing_event: None,
+        provider_id: None,
+        api_key_id: tenant.api_key_id,
     };
     let route = match resolve_route(&state, &tenant).await {
         Ok(route) => route,
         Err(resp) => return resp,
     };
+    meta.provider_id = route.provider_id;
 
     let started = Instant::now();
 
@@ -511,6 +524,9 @@ struct RequestMeta {
     raw_prompt: Value,
     /// ITEM-045: set when a fallback chain changed the serving model.
     routing_event: Option<Value>,
+    /// ITEM-047: provider + API key attribution for the trace.
+    provider_id: Option<Uuid>,
+    api_key_id: Option<Uuid>,
 }
 
 fn build_trace(
@@ -541,6 +557,8 @@ fn build_trace(
         truncated,
         guard_event: None,
         routing_event: meta.routing_event.clone(),
+        provider_id: meta.provider_id,
+        api_key_id: meta.api_key_id,
     }
 }
 
@@ -1032,6 +1050,7 @@ mod tests {
             Tenant {
                 id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 upstream_openai_key: Some(MASTER_KEY.to_string()),
+                api_key_id: None,
             },
         );
         InMemoryTenantStore::new(by_hash)
@@ -1089,6 +1108,15 @@ mod tests {
             &self,
             _tenant_id: Uuid,
             _key_id: Uuid,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            Err("tenant store unavailable".into())
+        }
+
+        async fn set_key_spend_limit(
+            &self,
+            _tenant_id: Uuid,
+            _key_id: Uuid,
+            _limit_cents: i64,
         ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
             Err("tenant store unavailable".into())
         }
@@ -1424,6 +1452,7 @@ mod tests {
         Tenant {
             id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
             upstream_openai_key: Some(MASTER_KEY.to_string()),
+            api_key_id: None,
         }
     }
 
@@ -1452,6 +1481,7 @@ mod tests {
         let route = resolve_route(&state, &tenant).await.expect("route");
         assert_eq!(route.url, "https://my-provider.test/v1/chat/completions");
         assert_eq!(route.key, "sk-my-provider", "the tenant's own key wins");
+        assert!(route.provider_id.is_some(), "ITEM-047: provider is attributed");
     }
 
     #[tokio::test]
@@ -1463,6 +1493,7 @@ mod tests {
         let route = resolve_route(&state, &tenant).await.expect("route");
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
+        assert!(route.provider_id.is_none(), "shared key = no provider");
     }
 
     #[tokio::test]
@@ -1568,6 +1599,8 @@ mod tests {
             truncated: false,
             guard_event: None,
             routing_event: None,
+            provider_id: None,
+            api_key_id: None,
         }
     }
 
@@ -1705,6 +1738,21 @@ mod tests {
             .await
             .unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_traced_request_is_attributed_to_its_api_key() {
+        // ITEM-047: the authenticated key id lands on the trace so the dashboard
+        // can break spend down per key.
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        assert!(msg.api_key_id.is_some(), "trace is attributed to the api key");
+        assert!(msg.provider_id.is_none(), "shared key means no provider");
     }
 
     #[tokio::test]

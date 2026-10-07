@@ -36,6 +36,8 @@ pub struct Provider {
     /// Masked hint for display, e.g. `…ab12`.
     pub key_hint: String,
     pub metadata: ProviderMetadata,
+    /// ITEM-047: monthly spend cap in cents; 0 = no limit.
+    pub spend_limit_cents: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -48,6 +50,7 @@ pub struct NewProvider {
     pub base_url: String,
     pub key: String,
     pub metadata: ProviderMetadata,
+    pub spend_limit_cents: i64,
 }
 
 /// A partial provider update (ITEM-043 AC5 rotation). `None` leaves a field
@@ -58,11 +61,15 @@ pub struct ProviderUpdate {
     pub base_url: Option<String>,
     pub key: Option<String>,
     pub metadata: Option<ProviderMetadata>,
+    /// ITEM-047: `Some(cents)` sets the monthly cap (0 clears it).
+    pub spend_limit_cents: Option<i64>,
 }
 
 /// The decrypted credential the proxy uses for a request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedProvider {
+    /// The provider row id (ITEM-047: attributed on the trace).
+    pub id: Uuid,
     pub base_url: String,
     pub api_key: String,
     pub metadata: ProviderMetadata,
@@ -148,12 +155,13 @@ impl ProviderStore for PostgresProviderStore {
                 String,
                 String,
                 sqlx::types::Json<ProviderMetadata>,
+                i64,
                 String,
                 String,
             ),
         >(
             "SELECT id, tenant_id, kind, name, base_url, key_hint, metadata,
-                    created_at::text, updated_at::text
+                    spend_limit_cents, created_at::text, updated_at::text
              FROM providers WHERE tenant_id = $1 ORDER BY created_at",
         )
         .bind(tenant_id)
@@ -162,7 +170,7 @@ impl ProviderStore for PostgresProviderStore {
         Ok(rows
             .into_iter()
             .map(
-                |(id, tenant_id, kind, name, base_url, key_hint, metadata, created_at, updated_at)| {
+                |(id, tenant_id, kind, name, base_url, key_hint, metadata, spend_limit_cents, created_at, updated_at)| {
                     Provider {
                         id,
                         tenant_id,
@@ -171,6 +179,7 @@ impl ProviderStore for PostgresProviderStore {
                         base_url,
                         key_hint,
                         metadata: metadata.0,
+                        spend_limit_cents,
                         created_at,
                         updated_at,
                     }
@@ -185,8 +194,8 @@ impl ProviderStore for PostgresProviderStore {
             .encrypt(&new.key)
             .ok_or("provider key encryption failed")?;
         let row: (Uuid,) = sqlx::query_as(
-            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata, spend_limit_cents)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
         )
         .bind(tenant_id)
         .bind(&new.kind)
@@ -195,6 +204,7 @@ impl ProviderStore for PostgresProviderStore {
         .bind(&ciphertext)
         .bind(key_hint(&new.key))
         .bind(sqlx::types::Json(&new.metadata))
+        .bind(new.spend_limit_cents.max(0))
         .fetch_one(&self.pool)
         .await?;
         Ok(row.0)
@@ -225,6 +235,7 @@ impl ProviderStore for PostgresProviderStore {
                 key_ciphertext = COALESCE($5, key_ciphertext),
                 key_hint = COALESCE($6, key_hint),
                 metadata = COALESCE($7, metadata),
+                spend_limit_cents = COALESCE($8, spend_limit_cents),
                 updated_at = NOW()
              WHERE id = $1 AND tenant_id = $2",
         )
@@ -235,6 +246,7 @@ impl ProviderStore for PostgresProviderStore {
         .bind(ciphertext)
         .bind(hint)
         .bind(update.metadata.clone().map(sqlx::types::Json))
+        .bind(update.spend_limit_cents.map(|c| c.max(0)))
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
@@ -253,18 +265,19 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
-            "SELECT base_url, key_ciphertext, metadata FROM providers
+        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
+            "SELECT id, base_url, key_ciphertext, metadata FROM providers
              WHERE tenant_id = $1 ORDER BY created_at LIMIT 1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((base_url, ciphertext, metadata)) = row else {
+        let Some((id, base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         match secrets.decrypt(&ciphertext) {
             Some(api_key) => Ok(Some(ResolvedProvider {
+                id,
                 base_url,
                 api_key,
                 metadata: metadata.0,
@@ -286,19 +299,20 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
-            "SELECT base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
+        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
+            "SELECT id, base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
         )
         .bind(id)
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((base_url, ciphertext, metadata)) = row else {
+        let Some((id, base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         Ok(secrets
             .decrypt(&ciphertext)
             .map(|api_key| ResolvedProvider {
+                id,
                 base_url,
                 api_key,
                 metadata: metadata.0,
@@ -331,6 +345,7 @@ impl InMemoryProviderStore {
                 base_url: base_url.to_string(),
                 key_hint: key_hint(api_key),
                 metadata: ProviderMetadata::default(),
+                spend_limit_cents: 0,
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -364,6 +379,7 @@ impl ProviderStore for InMemoryProviderStore {
                 base_url: new.base_url.clone(),
                 key_hint: key_hint(&new.key),
                 metadata: new.metadata.clone(),
+                spend_limit_cents: new.spend_limit_cents.max(0),
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -398,6 +414,9 @@ impl ProviderStore for InMemoryProviderStore {
         if let Some(metadata) = &update.metadata {
             row.provider.metadata = metadata.clone();
         }
+        if let Some(limit) = update.spend_limit_cents {
+            row.provider.spend_limit_cents = limit.max(0);
+        }
         row.provider.updated_at = "1".to_string();
         Ok(true)
     }
@@ -417,6 +436,7 @@ impl ProviderStore for InMemoryProviderStore {
             .iter()
             .find(|row| row.provider.tenant_id == tenant_id)
             .map(|row| ResolvedProvider {
+                id: row.provider.id,
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
                 metadata: row.provider.metadata.clone(),
@@ -435,6 +455,7 @@ impl ProviderStore for InMemoryProviderStore {
             .iter()
             .find(|row| row.provider.tenant_id == tenant_id && row.provider.id == id)
             .map(|row| ResolvedProvider {
+                id: row.provider.id,
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
                 metadata: row.provider.metadata.clone(),
@@ -477,6 +498,7 @@ mod tests {
                         org: Some("org-1".to_string()),
                         headers: [("X-Trace".to_string(), "on".to_string())].into(),
                     },
+                    spend_limit_cents: 0,
                 },
             )
             .await
@@ -512,6 +534,7 @@ mod tests {
                     base_url: "https://api.openai.com/v1".to_string(),
                     key: "sk-old-1111".to_string(),
                     metadata: ProviderMetadata::default(),
+                    spend_limit_cents: 0,
                 },
             )
             .await
@@ -529,6 +552,7 @@ mod tests {
                         org: Some("org-2".to_string()),
                         headers: BTreeMap::new(),
                     }),
+                    spend_limit_cents: Some(2500),
                 },
             )
             .await
@@ -541,6 +565,7 @@ mod tests {
         assert_eq!(listed[0].name, "Renamed");
         assert_eq!(listed[0].key_hint, "\u{2026}2222");
         assert_eq!(listed[0].metadata.org.as_deref(), Some("org-2"));
+        assert_eq!(listed[0].spend_limit_cents, 2500, "ITEM-047 limit is stored");
         let resolved = store.resolve(tenant).await.expect("resolve").expect("configured");
         assert_eq!(resolved.api_key, "sk-new-2222", "the rotated key is used");
 

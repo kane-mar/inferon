@@ -2,6 +2,7 @@ import type { TimeseriesPoint } from './InferonApi';
 import { describe, expect, it } from 'vitest';
 import {
   avgTtftMs,
+  centsToUsd,
   chartSeries,
   chartValue,
   deltaPct,
@@ -11,6 +12,7 @@ import {
   formatMs,
   moneyDeltaPct,
   seriesTotals,
+  spiked,
   trend,
 } from './dashboardMetrics';
 
@@ -122,5 +124,27 @@ describe('seriesTotals / avgTtftMs', () => {
 
     expect(avg).toBeCloseTo(175);
     expect(avgTtftMs([point({ requests: 0, avg_ttft_ms: null })])).toBeNull();
+  });
+});
+
+describe('spiked', () => {
+  it('flags a doubling or more against a non-trivial baseline', () => {
+    expect(spiked('10', '4')).toBe(true);
+    expect(spiked('8', '5')).toBe(false);
+  });
+
+  it('never flags when the baseline is absent or trivial', () => {
+    expect(spiked('10', null)).toBe(false);
+    expect(spiked('10', '0')).toBe(false);
+    expect(spiked('0.005', '0.001')).toBe(false);
+  });
+});
+
+describe('centsToUsd', () => {
+  it('renders exact cents without float drift', () => {
+    expect(centsToUsd(0)).toBe('0.00');
+    expect(centsToUsd(250)).toBe('2.50');
+    expect(centsToUsd(5)).toBe('0.05');
+    expect(centsToUsd(-125)).toBe('-1.25');
   });
 });
