@@ -38,6 +38,9 @@ pub struct Provider {
     pub metadata: ProviderMetadata,
     /// ITEM-047: monthly spend cap in cents; 0 = no limit.
     pub spend_limit_cents: i64,
+    /// The tenant's default provider — the one the proxy uses for a model no
+    /// provider kind owns. Exactly one per tenant (when any exist).
+    pub is_default: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -111,6 +114,9 @@ pub trait ProviderStore: Send + Sync {
         update: &ProviderUpdate,
     ) -> StoreResult<bool>;
     async fn remove(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
+    /// Make `id` the tenant's default provider (clearing any previous default).
+    /// False when the provider is not owned by `tenant_id`.
+    async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
     /// The credential for the request path: the provider that owns `model` (by
     /// catalog kind), else the tenant's first provider. `None` when the tenant
     /// has no provider (shared platform key).
@@ -162,13 +168,15 @@ impl ProviderStore for PostgresProviderStore {
                 String,
                 sqlx::types::Json<ProviderMetadata>,
                 i64,
+                bool,
                 String,
                 String,
             ),
         >(
             "SELECT id, tenant_id, kind, name, base_url, key_hint, metadata,
-                    spend_limit_cents, created_at::text, updated_at::text
-             FROM providers WHERE tenant_id = $1 ORDER BY created_at",
+                    spend_limit_cents, is_default, created_at::text, updated_at::text
+             FROM providers WHERE tenant_id = $1
+             ORDER BY is_default DESC, created_at",
         )
         .bind(tenant_id)
         .fetch_all(&self.pool)
@@ -176,7 +184,7 @@ impl ProviderStore for PostgresProviderStore {
         Ok(rows
             .into_iter()
             .map(
-                |(id, tenant_id, kind, name, base_url, key_hint, metadata, spend_limit_cents, created_at, updated_at)| {
+                |(id, tenant_id, kind, name, base_url, key_hint, metadata, spend_limit_cents, is_default, created_at, updated_at)| {
                     Provider {
                         id,
                         tenant_id,
@@ -186,6 +194,7 @@ impl ProviderStore for PostgresProviderStore {
                         key_hint,
                         metadata: metadata.0,
                         spend_limit_cents,
+                        is_default,
                         created_at,
                         updated_at,
                     }
@@ -200,8 +209,10 @@ impl ProviderStore for PostgresProviderStore {
             .encrypt(&new.key)
             .ok_or("provider key encryption failed")?;
         let row: (Uuid,) = sqlx::query_as(
-            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata, spend_limit_cents)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+            "INSERT INTO providers (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata, spend_limit_cents, is_default)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                     NOT EXISTS (SELECT 1 FROM providers WHERE tenant_id = $1))
+             RETURNING id",
         )
         .bind(tenant_id)
         .bind(&new.kind)
@@ -264,7 +275,47 @@ impl ProviderStore for PostgresProviderStore {
             .bind(tenant_id)
             .execute(&self.pool)
             .await?;
-        Ok(result.rows_affected() > 0)
+        if result.rows_affected() == 0 {
+            return Ok(false);
+        }
+        // Promote the oldest remaining provider when the default was removed.
+        sqlx::query(
+            "UPDATE providers SET is_default = TRUE
+             WHERE id = (SELECT id FROM providers WHERE tenant_id = $1 ORDER BY created_at LIMIT 1)
+               AND NOT EXISTS (SELECT 1 FROM providers WHERE tenant_id = $1 AND is_default)",
+        )
+        .bind(tenant_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(true)
+    }
+
+    async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        let exists: Option<(Uuid,)> =
+            sqlx::query_as("SELECT id FROM providers WHERE id = $1 AND tenant_id = $2")
+                .bind(id)
+                .bind(tenant_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if exists.is_none() {
+            return Ok(false);
+        }
+        sqlx::query(
+            "UPDATE providers SET is_default = FALSE
+             WHERE tenant_id = $1 AND id <> $2 AND is_default",
+        )
+        .bind(tenant_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE providers SET is_default = TRUE WHERE id = $1 AND tenant_id = $2")
+            .bind(id)
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     async fn resolve_for(
@@ -278,13 +329,13 @@ impl ProviderStore for PostgresProviderStore {
         let rows: Vec<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> =
             sqlx::query_as(
                 "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
-                 WHERE tenant_id = $1 ORDER BY created_at",
+                 WHERE tenant_id = $1 ORDER BY is_default DESC, created_at",
             )
             .bind(tenant_id)
             .fetch_all(&self.pool)
             .await?;
         // Prefer the provider whose catalog kind owns the requested model; fall
-        // back to the first provider (the pre-existing single-provider default).
+        // back to the tenant's default provider, then the oldest.
         let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
         let chosen = rows
             .iter()
@@ -364,6 +415,7 @@ impl InMemoryProviderStore {
                 key_hint: key_hint(api_key),
                 metadata: ProviderMetadata::default(),
                 spend_limit_cents: 0,
+                is_default: true,
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -376,19 +428,24 @@ impl InMemoryProviderStore {
 #[async_trait::async_trait]
 impl ProviderStore for InMemoryProviderStore {
     async fn list(&self, tenant_id: Uuid) -> StoreResult<Vec<Provider>> {
-        Ok(self
+        let mut providers: Vec<Provider> = self
             .rows
             .lock()
             .unwrap()
             .iter()
             .filter(|row| row.provider.tenant_id == tenant_id)
             .map(|row| row.provider.clone())
-            .collect())
+            .collect();
+        // Default first, then oldest — matches the Postgres ordering.
+        providers.sort_by_key(|provider| (!provider.is_default, provider.created_at.clone()));
+        Ok(providers)
     }
 
     async fn insert(&self, tenant_id: Uuid, new: &NewProvider) -> StoreResult<Uuid> {
         let id = Uuid::new_v4();
-        self.rows.lock().unwrap().push(InMemoryRow {
+        let mut rows = self.rows.lock().unwrap();
+        let is_default = !rows.iter().any(|row| row.provider.tenant_id == tenant_id);
+        rows.push(InMemoryRow {
             provider: Provider {
                 id,
                 tenant_id,
@@ -398,6 +455,7 @@ impl ProviderStore for InMemoryProviderStore {
                 key_hint: key_hint(&new.key),
                 metadata: new.metadata.clone(),
                 spend_limit_cents: new.spend_limit_cents.max(0),
+                is_default,
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -443,7 +501,37 @@ impl ProviderStore for InMemoryProviderStore {
         let mut rows = self.rows.lock().unwrap();
         let before = rows.len();
         rows.retain(|row| !(row.provider.id == id && row.provider.tenant_id == tenant_id));
-        Ok(rows.len() < before)
+        if rows.len() == before {
+            return Ok(false);
+        }
+        // Promote the oldest remaining provider when the default was removed.
+        let has_default = rows
+            .iter()
+            .any(|row| row.provider.tenant_id == tenant_id && row.provider.is_default);
+        if !has_default {
+            if let Some(row) = rows
+                .iter_mut()
+                .filter(|row| row.provider.tenant_id == tenant_id)
+                .min_by_key(|row| row.provider.created_at.clone())
+            {
+                row.provider.is_default = true;
+            }
+        }
+        Ok(true)
+    }
+
+    async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool> {
+        let mut rows = self.rows.lock().unwrap();
+        if !rows
+            .iter()
+            .any(|row| row.provider.id == id && row.provider.tenant_id == tenant_id)
+        {
+            return Ok(false);
+        }
+        for row in rows.iter_mut().filter(|row| row.provider.tenant_id == tenant_id) {
+            row.provider.is_default = row.provider.id == id;
+        }
+        Ok(true)
     }
 
     async fn resolve_for(
@@ -453,11 +541,16 @@ impl ProviderStore for InMemoryProviderStore {
     ) -> StoreResult<Option<ResolvedProvider>> {
         let rows = self.rows.lock().unwrap();
         let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
-        let chosen = rows
+        let mut candidates: Vec<&InMemoryRow> = rows
             .iter()
             .filter(|row| row.provider.tenant_id == tenant_id)
+            .collect();
+        candidates.sort_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()));
+        let chosen = candidates
+            .iter()
             .find(|row| wanted_kind == Some(row.provider.kind.as_str()))
-            .or_else(|| rows.iter().find(|row| row.provider.tenant_id == tenant_id));
+            .copied()
+            .or_else(|| candidates.first().copied());
         Ok(chosen.map(|row| ResolvedProvider {
             id: row.provider.id,
             base_url: row.provider.base_url.clone(),
@@ -597,6 +690,79 @@ mod tests {
             .update(Uuid::new_v4(), id, &ProviderUpdate { key: Some("sk-thief".to_string()), ..Default::default() })
             .await
             .expect("update"));
+    }
+
+    #[tokio::test]
+    async fn the_first_provider_is_default_and_set_default_switches() {
+        let tenant = Uuid::new_v4();
+        let store = InMemoryProviderStore::default();
+        let new = |kind: &str, base_url: &str, key: &str| NewProvider {
+            kind: kind.to_string(),
+            name: kind.to_string(),
+            base_url: base_url.to_string(),
+            key: key.to_string(),
+            metadata: ProviderMetadata::default(),
+            spend_limit_cents: 0,
+        };
+        let a = store
+            .insert(tenant, &new("deepseek", "https://a.test/v1", "sk-a"))
+            .await
+            .unwrap();
+        let b = store
+            .insert(tenant, &new("openai", "https://b.test/v1", "sk-b"))
+            .await
+            .unwrap();
+
+        let is_default = |providers: &[Provider], id| {
+            providers.iter().find(|p| p.id == id).unwrap().is_default
+        };
+        let listed = store.list(tenant).await.unwrap();
+        assert!(is_default(&listed, a), "the first provider is the default");
+        assert!(!is_default(&listed, b));
+
+        assert!(store.set_default(tenant, b).await.unwrap());
+        let listed = store.list(tenant).await.unwrap();
+        assert!(is_default(&listed, b), "set_default switches the default");
+        assert!(!is_default(&listed, a));
+        // Another tenant cannot set it, and the ordering is default-first.
+        assert!(!store.set_default(Uuid::new_v4(), a).await.unwrap());
+        assert_eq!(store.list(tenant).await.unwrap()[0].id, b, "default sorts first");
+
+        // Removing the default promotes the oldest remaining provider.
+        assert!(store.remove(tenant, b).await.unwrap());
+        let listed = store.list(tenant).await.unwrap();
+        assert!(is_default(&listed, a), "a new default is promoted on removal");
+    }
+
+    #[tokio::test]
+    async fn resolve_for_falls_back_to_the_default_for_unowned_models() {
+        let tenant = Uuid::new_v4();
+        let store = InMemoryProviderStore::default();
+        let new = |kind: &str, base_url: &str, key: &str| NewProvider {
+            kind: kind.to_string(),
+            name: kind.to_string(),
+            base_url: base_url.to_string(),
+            key: key.to_string(),
+            metadata: ProviderMetadata::default(),
+            spend_limit_cents: 0,
+        };
+        store
+            .insert(tenant, &new("deepseek", "https://deep.test/v1", "sk-deep"))
+            .await
+            .unwrap();
+        let catch_all = store
+            .insert(tenant, &new("openai-compatible", "https://catch.test/v1", "sk-catch"))
+            .await
+            .unwrap();
+        // Make the catalog-less catch-all the default.
+        assert!(store.set_default(tenant, catch_all).await.unwrap());
+        // A known model still routes to its kind's provider...
+        let owned = store.resolve_for(tenant, Some("deepseek-chat")).await.unwrap().unwrap();
+        assert_eq!(owned.base_url, "https://deep.test/v1");
+        // ...but an unowned model falls back to the default provider.
+        let free = store.resolve_for(tenant, Some("my-custom-model")).await.unwrap().unwrap();
+        assert_eq!(free.id, catch_all);
+        assert_eq!(free.base_url, "https://catch.test/v1");
     }
 
     #[tokio::test]

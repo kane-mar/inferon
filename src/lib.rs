@@ -94,6 +94,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             post(dashboard::tenant_provider_test),
         )
         .route(
+            "/v1/dashboard/api/providers/:provider_id/default",
+            post(dashboard::tenant_provider_default),
+        )
+        .route(
             "/v1/dashboard/api/providers/:provider_id/models/:model_id",
             post(dashboard::tenant_provider_model_update),
         )

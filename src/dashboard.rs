@@ -1114,6 +1114,7 @@ fn provider_json(provider: &crate::providers::Provider, settings: &[crate::model
         "key_hint": provider.key_hint,
         "metadata": provider.metadata,
         "spend_limit_cents": provider.spend_limit_cents,
+        "is_default": provider.is_default,
         "created_at": provider.created_at,
         "updated_at": provider.updated_at,
         "models": models,
@@ -1272,6 +1273,30 @@ pub async fn tenant_provider_update(
         Ok(false) => {
             crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
         }
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/providers/:provider_id/default (owner-only) — make a
+/// provider the tenant's default (the fallback for models no kind owns).
+pub async fn tenant_provider_default(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(provider_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    match state.provider_store.set_default(tenant_id, provider_id).await {
+        Ok(true) => json_ok(json!({
+            "provider_id": provider_id.to_string(),
+            "is_default": true,
+        })),
+        Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider"),
         Err(e) => internal(&e.to_string()),
     }
 }
@@ -2715,6 +2740,94 @@ mod tests {
                 &format!("/v1/dashboard/api/providers/{provider_id}/models/gpt-4o"),
                 &member_token,
                 r#"{"enabled":true}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn owner_sets_the_default_provider_and_members_cannot() {
+        let (state, token) = tenant_role_session("owner").await;
+        let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        let new = |kind: &str, name: &str| crate::providers::NewProvider {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            base_url: "https://api.test/v1".to_string(),
+            key: "sk-test-ab12".to_string(),
+            metadata: Default::default(),
+            spend_limit_cents: 0,
+        };
+        let first = crate::providers::ProviderStore::insert(
+            &*state.provider_store,
+            tenant_id,
+            &new("deepseek", "First"),
+        )
+        .await
+        .unwrap();
+        let second = crate::providers::ProviderStore::insert(
+            &*state.provider_store,
+            tenant_id,
+            &new("openai", "Second"),
+        )
+        .await
+        .unwrap();
+        let router = crate::build_router(state);
+
+        let default_id = |json: &Value| {
+            json["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["is_default"] == true)
+                .unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        assert_eq!(default_id(&json), first.to_string(), "first insert is the default");
+
+        let set = router
+            .clone()
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{second}/default"),
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(set.status(), axum::http::StatusCode::OK);
+        let listed = router
+            .clone()
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        assert_eq!(default_id(&json), second.to_string());
+
+        // Unknown provider -> 404; a member cannot set the default.
+        let missing = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers/99999999-9999-9999-9999-999999999999/default",
+                &token,
+                "",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
+        let (member_state, member_token) = tenant_role_session("member").await;
+        let member = crate::build_router(member_state)
+            .oneshot(post_with_cookie(
+                &format!("/v1/dashboard/api/providers/{second}/default"),
+                &member_token,
+                "",
             ))
             .await
             .unwrap();

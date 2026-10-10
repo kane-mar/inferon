@@ -161,6 +161,8 @@ export type ProviderRow = {
   metadata: ProviderMetadata;
   /** ITEM-047: monthly cap in cents; 0 = no limit. */
   spend_limit_cents: number;
+  /** The tenant's default provider (fallback for models no kind owns). */
+  is_default: boolean;
   /** The provider's catalog models with this provider's selection flags. */
   models: ProviderModel[];
   created_at: string;
@@ -409,6 +411,13 @@ export class InferonApi {
 
   testProvider(providerId: string, cookie?: string): Promise<ProviderTest> {
     return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
+  }
+
+  setDefaultProvider(
+    providerId: string,
+    cookie?: string,
+  ): Promise<{ provider_id: string; is_default: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/providers/${providerId}/default`, {}, { cookie });
   }
 
   updateProviderModel(

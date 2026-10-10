@@ -106,6 +106,19 @@ export const ProvidersPanel = (props: {
     }
   };
 
+  const setDefault = async (providerId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await InferonApi.sameOrigin().setDefaultProvider(providerId);
+      router.refresh();
+    } catch (cause) {
+      setError(errorMessage(cause, t('error')));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const startEdit = (provider: ProviderRow) => {
     setEditing(provider.id);
     setDraft({
@@ -308,6 +321,15 @@ export const ProvidersPanel = (props: {
                       >
                         {provider.kind}
                       </span>
+                      {provider.is_default && (
+                        <span className="
+                          rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs
+                          text-accent-foreground
+                        "
+                        >
+                          {t('default')}
+                        </span>
+                      )}
                       <span className="font-mono text-xs text-muted-foreground">
                         {provider.key_hint}
                       </span>
@@ -345,6 +367,16 @@ export const ProvidersPanel = (props: {
                           onClick={() => test(provider.id)}
                         >
                           {result === 'pending' ? t('testing') : t('test')}
+                        </Button>
+                      )}
+                      {canEdit && !provider.is_default && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => setDefault(provider.id)}
+                        >
+                          {t('make_default')}
                         </Button>
                       )}
                       {canEdit && (
