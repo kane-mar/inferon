@@ -221,9 +221,12 @@ async fn list_models(State(state): State<Arc<AppState>>, req: Request) -> Respon
     // host's models (the global upstream).
     if ids.is_empty() {
         if let Ok(Some(provider)) = state.provider_store.resolve_for(tenant.id, None).await {
-            if let Ok(fetched) = dashboard::fetch_provider_models(&state, &provider).await {
-                let _ = state.provider_store.record_models(provider.id, &fetched).await;
-                ids.extend(fetched);
+            match dashboard::fetch_provider_models(&state, &provider).await {
+                Ok(fetched) => {
+                    let _ = state.provider_store.record_models(provider.id, &fetched).await;
+                    ids.extend(fetched);
+                }
+                Err(e) => tracing::warn!("model discovery failed for provider {}: {e}", provider.id),
             }
         } else if let Some(key) = tenant.upstream_openai_key.as_deref() {
             let shared = crate::providers::ResolvedProvider {
@@ -232,8 +235,9 @@ async fn list_models(State(state): State<Arc<AppState>>, req: Request) -> Respon
                 api_key: key.to_string(),
                 metadata: crate::providers::ProviderMetadata::default(),
             };
-            if let Ok(fetched) = dashboard::fetch_provider_models(&state, &shared).await {
-                ids.extend(fetched);
+            match dashboard::fetch_provider_models(&state, &shared).await {
+                Ok(fetched) => ids.extend(fetched),
+                Err(e) => tracing::warn!("model discovery failed for the shared upstream: {e}"),
             }
         }
     }

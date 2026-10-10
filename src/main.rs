@@ -81,7 +81,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let http_client = Client::builder().pool_max_idle_per_host(100).build()?;
+    // A connect timeout keeps an unreachable provider (e.g. a LAN model the
+    // cloud host cannot route to) from hanging a request indefinitely; it
+    // covers DNS + TCP + TLS. No overall timeout — streaming responses can be
+    // long-lived.
+    let http_client = Client::builder()
+        .pool_max_idle_per_host(100)
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()?;
     // Human accounts (ITEM-035): `None` when GitHub OAuth is unconfigured —
     // /auth/login answers 503 then (fail closed on the login screen).
     let accounts = inferon::auth::Accounts::from_env(
