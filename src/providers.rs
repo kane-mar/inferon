@@ -117,9 +117,16 @@ pub trait ProviderStore: Send + Sync {
     /// Make `id` the tenant's default provider (clearing any previous default).
     /// False when the provider is not owned by `tenant_id`.
     async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
-    /// The credential for the request path: the provider that owns `model` (by
-    /// catalog kind), else the tenant's first provider. `None` when the tenant
-    /// has no provider (shared platform key).
+    /// Replace the provider's advertised model set (from its `/models`).
+    async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()>;
+    /// The models currently cached for a provider (what it last advertised).
+    async fn advertised_models(&self, provider_id: Uuid) -> StoreResult<Vec<String>>;
+    /// The tenant's provider that advertises `model`, preferring its default
+    /// provider. `None` when no provider advertises it.
+    async fn provider_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Option<Uuid>>;
+    /// The credential for the request path: the provider that advertises
+    /// `model`, else the tenant's default provider. `None` when the tenant has
+    /// no provider (shared platform key).
     async fn resolve_for(
         &self,
         tenant_id: Uuid,
@@ -318,6 +325,52 @@ impl ProviderStore for PostgresProviderStore {
         Ok(true)
     }
 
+    async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM provider_models WHERE provider_id = $1")
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await?;
+        if !model_ids.is_empty() {
+            sqlx::query(
+                "INSERT INTO provider_models (provider_id, model_id)
+                 SELECT $1, UNNEST($2::text[])
+                 ON CONFLICT (provider_id, model_id) DO UPDATE SET discovered_at = NOW()",
+            )
+            .bind(provider_id)
+            .bind(model_ids)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn advertised_models(&self, provider_id: Uuid) -> StoreResult<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT model_id FROM provider_models WHERE provider_id = $1 ORDER BY model_id",
+        )
+        .bind(provider_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    async fn provider_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Option<Uuid>> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT p.id FROM providers p
+             JOIN provider_models pm ON pm.provider_id = p.id
+             WHERE p.tenant_id = $1 AND pm.model_id = $2
+             ORDER BY p.is_default DESC, p.created_at
+             LIMIT 1",
+        )
+        .bind(tenant_id)
+        .bind(model)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(id,)| id))
+    }
+
     async fn resolve_for(
         &self,
         tenant_id: Uuid,
@@ -326,30 +379,40 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let rows: Vec<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> =
-            sqlx::query_as(
-                "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
-                 WHERE tenant_id = $1 ORDER BY is_default DESC, created_at",
-            )
-            .bind(tenant_id)
-            .fetch_all(&self.pool)
-            .await?;
-        // Prefer the provider whose catalog kind owns the requested model; fall
-        // back to the tenant's default provider, then the oldest.
-        let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
-        let chosen = rows
-            .iter()
-            .find(|(_, kind, ..)| wanted_kind == Some(kind.as_str()))
-            .or_else(|| rows.first());
-        let Some((id, _, base_url, ciphertext, metadata)) = chosen else {
+        // Prefer the provider that advertises the requested model; else the
+        // tenant's default provider, then the oldest.
+        let chosen_id = match model {
+            Some(model) => self.provider_for_model(tenant_id, model).await?,
+            None => None,
+        };
+        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> =
+            if let Some(id) = chosen_id {
+                sqlx::query_as(
+                    "SELECT id, base_url, key_ciphertext, metadata FROM providers
+                     WHERE id = $1 AND tenant_id = $2",
+                )
+                .bind(id)
+                .bind(tenant_id)
+                .fetch_optional(&self.pool)
+                .await?
+            } else {
+                sqlx::query_as(
+                    "SELECT id, base_url, key_ciphertext, metadata FROM providers
+                     WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
+                )
+                .bind(tenant_id)
+                .fetch_optional(&self.pool)
+                .await?
+            };
+        let Some((id, base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
-        match secrets.decrypt(ciphertext) {
+        match secrets.decrypt(&ciphertext) {
             Some(api_key) => Ok(Some(ResolvedProvider {
-                id: *id,
-                base_url: base_url.clone(),
+                id,
+                base_url,
                 api_key,
-                metadata: metadata.0.clone(),
+                metadata: metadata.0,
             })),
             None => {
                 tracing::error!(
@@ -399,6 +462,8 @@ struct InMemoryRow {
 #[derive(Default)]
 pub struct InMemoryProviderStore {
     rows: Mutex<Vec<InMemoryRow>>,
+    /// provider id -> advertised model ids (the `/models` cache).
+    models: Mutex<std::collections::HashMap<Uuid, Vec<String>>>,
 }
 
 impl InMemoryProviderStore {
@@ -504,6 +569,7 @@ impl ProviderStore for InMemoryProviderStore {
         if rows.len() == before {
             return Ok(false);
         }
+        self.models.lock().unwrap().remove(&id);
         // Promote the oldest remaining provider when the default was removed.
         let has_default = rows
             .iter()
@@ -534,23 +600,56 @@ impl ProviderStore for InMemoryProviderStore {
         Ok(true)
     }
 
+    async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {
+        self.models
+            .lock()
+            .unwrap()
+            .insert(provider_id, model_ids.to_vec());
+        Ok(())
+    }
+
+    async fn advertised_models(&self, provider_id: Uuid) -> StoreResult<Vec<String>> {
+        Ok(self
+            .models
+            .lock()
+            .unwrap()
+            .get(&provider_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn provider_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Option<Uuid>> {
+        let rows = self.rows.lock().unwrap();
+        let models = self.models.lock().unwrap();
+        Ok(rows
+            .iter()
+            .filter(|row| {
+                row.provider.tenant_id == tenant_id
+                    && models
+                        .get(&row.provider.id)
+                        .is_some_and(|ids| ids.iter().any(|id| id == model))
+            })
+            .min_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()))
+            .map(|row| row.provider.id))
+    }
+
     async fn resolve_for(
         &self,
         tenant_id: Uuid,
         model: Option<&str>,
     ) -> StoreResult<Option<ResolvedProvider>> {
+        let chosen_id = match model {
+            Some(model) => self.provider_for_model(tenant_id, model).await?,
+            None => None,
+        };
         let rows = self.rows.lock().unwrap();
-        let wanted_kind = model.and_then(crate::models::find).map(|m| m.kind);
-        let mut candidates: Vec<&InMemoryRow> = rows
-            .iter()
-            .filter(|row| row.provider.tenant_id == tenant_id)
-            .collect();
-        candidates.sort_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()));
-        let chosen = candidates
-            .iter()
-            .find(|row| wanted_kind == Some(row.provider.kind.as_str()))
-            .copied()
-            .or_else(|| candidates.first().copied());
+        let chosen = if let Some(id) = chosen_id {
+            rows.iter().find(|row| row.provider.id == id)
+        } else {
+            rows.iter()
+                .filter(|row| row.provider.tenant_id == tenant_id)
+                .min_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()))
+        };
         Ok(chosen.map(|row| ResolvedProvider {
             id: row.provider.id,
             base_url: row.provider.base_url.clone(),
@@ -735,7 +834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_for_falls_back_to_the_default_for_unowned_models() {
+    async fn resolve_for_falls_back_to_the_default_for_unadvertised_models() {
         let tenant = Uuid::new_v4();
         let store = InMemoryProviderStore::default();
         let new = |kind: &str, base_url: &str, key: &str| NewProvider {
@@ -746,7 +845,7 @@ mod tests {
             metadata: ProviderMetadata::default(),
             spend_limit_cents: 0,
         };
-        store
+        let deep = store
             .insert(tenant, &new("deepseek", "https://deep.test/v1", "sk-deep"))
             .await
             .unwrap();
@@ -754,19 +853,33 @@ mod tests {
             .insert(tenant, &new("openai-compatible", "https://catch.test/v1", "sk-catch"))
             .await
             .unwrap();
-        // Make the catalog-less catch-all the default.
+        store
+            .record_models(deep, &["deepseek-chat".to_string()])
+            .await
+            .unwrap();
+        store
+            .record_models(catch_all, &["my-custom-model".to_string()])
+            .await
+            .unwrap();
+        // Make the catch-all the default.
         assert!(store.set_default(tenant, catch_all).await.unwrap());
-        // A known model still routes to its kind's provider...
+        // A model the deepseek provider advertises routes there...
         let owned = store.resolve_for(tenant, Some("deepseek-chat")).await.unwrap().unwrap();
-        assert_eq!(owned.base_url, "https://deep.test/v1");
-        // ...but an unowned model falls back to the default provider.
+        assert_eq!(owned.id, deep);
+        // ...an advertised custom model routes to its provider...
         let free = store.resolve_for(tenant, Some("my-custom-model")).await.unwrap().unwrap();
         assert_eq!(free.id, catch_all);
-        assert_eq!(free.base_url, "https://catch.test/v1");
+        // ...and a model nobody advertises falls back to the default.
+        let unknown = store
+            .resolve_for(tenant, Some("nobody-advertises-this"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(unknown.id, catch_all);
     }
 
     #[tokio::test]
-    async fn resolve_for_picks_the_provider_that_owns_the_model() {
+    async fn resolve_for_picks_the_provider_that_advertises_the_model() {
         let tenant = Uuid::new_v4();
         let store = InMemoryProviderStore::default();
         let new = |kind: &str, base_url: &str, key: &str| NewProvider {
@@ -782,20 +895,31 @@ mod tests {
             .await
             .unwrap();
         let open = store
-            .insert(tenant, &new("openai", "https://openai.test/v1", "sk-open"))
+            .insert(tenant, &new("openai-compatible", "https://open.test/v1", "sk-open"))
+            .await
+            .unwrap();
+        store
+            .record_models(deep, &["deepseek-chat".to_string()])
+            .await
+            .unwrap();
+        store
+            .record_models(open, &["gpt-4o".to_string()])
             .await
             .unwrap();
 
         let route = store.resolve_for(tenant, Some("gpt-4o")).await.unwrap().unwrap();
-        assert_eq!(route.id, open, "gpt-4o belongs to the openai provider");
-        assert_eq!(route.base_url, "https://openai.test/v1");
+        assert_eq!(route.id, open, "gpt-4o is advertised by the second provider");
         let route = store.resolve_for(tenant, Some("deepseek-chat")).await.unwrap().unwrap();
-        assert_eq!(route.id, deep, "deepseek-chat belongs to the deepseek provider");
-        // An unknown model (or no hint) falls back to the first provider.
+        assert_eq!(route.id, deep);
+        // An unadvertised model (or no hint) falls back to the default (first).
         let route = store.resolve_for(tenant, Some("mystery")).await.unwrap().unwrap();
         assert_eq!(route.id, deep);
         let route = store.resolve_for(tenant, None).await.unwrap().unwrap();
         assert_eq!(route.id, deep);
+        assert_eq!(
+            store.advertised_models(open).await.unwrap(),
+            vec!["gpt-4o".to_string()]
+        );
     }
 
     #[tokio::test]

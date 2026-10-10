@@ -34,9 +34,9 @@ use axum::{
     body::Body,
     extract::{Request, State},
     http::{header::{AUTHORIZATION, CONTENT_TYPE}, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use futures_util::{Stream, StreamExt};
 use reqwest::Client;
@@ -79,6 +79,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
+        .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
         .route(
@@ -97,9 +98,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/providers/:provider_id/default",
             post(dashboard::tenant_provider_default),
         )
+        .route("/v1/dashboard/api/models", get(dashboard::tenant_models))
         .route(
             "/v1/dashboard/api/providers/:provider_id/models/:model_id",
             post(dashboard::tenant_provider_model_update),
+        )
+        .route(
+            "/v1/dashboard/api/providers/:provider_id/models",
+            get(dashboard::tenant_provider_models),
         )
         .route("/v1/dashboard/api/routing", get(dashboard::tenant_routing).post(dashboard::tenant_routing_set))
         .route("/v1/dashboard/api/config", get(dashboard::tenant_config).post(dashboard::tenant_config_set))
@@ -153,6 +159,77 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// GET /v1/models — the tenant's available models in the OpenAI list shape, so
+/// SDKs can discover them. It's the union of the providers' advertised models
+/// (cached), minus disabled ones; a tenant with nothing cached yet discovers
+/// its default provider's list once.
+async fn list_models(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    let tenant = match authenticate(&state, req.headers()).await {
+        Ok(Some(tenant)) => tenant,
+        Ok(None) => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_api_key",
+                "missing or invalid Authorization header",
+            )
+        }
+        Err(e) => {
+            tracing::error!("tenant lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "tenant_store_error",
+                "tenant lookup failed",
+            );
+        }
+    };
+    let providers = match state.provider_store.list(tenant.id).await {
+        Ok(providers) => providers,
+        Err(e) => {
+            tracing::error!("provider list failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "provider_error",
+                "could not resolve your providers",
+            );
+        }
+    };
+    let mut ids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for provider in &providers {
+        let advertised = state
+            .provider_store
+            .advertised_models(provider.id)
+            .await
+            .unwrap_or_default();
+        let settings = state
+            .model_store
+            .settings(provider.id)
+            .await
+            .unwrap_or_default();
+        for id in advertised {
+            if !settings
+                .iter()
+                .any(|setting| setting.model_id == id && !setting.enabled)
+            {
+                ids.insert(id);
+            }
+        }
+    }
+    // A freshly added provider has nothing cached yet — discover once.
+    if ids.is_empty() {
+        if let Ok(Some(provider)) = state.provider_store.resolve_for(tenant.id, None).await {
+            if let Ok(fetched) = dashboard::fetch_provider_models(&state, &provider).await {
+                let _ = state.provider_store.record_models(provider.id, &fetched).await;
+                ids.extend(fetched);
+            }
+        }
+    }
+    let data: Vec<Value> = ids
+        .into_iter()
+        .map(|id| json!({ "id": id, "object": "model", "created": 0, "owned_by": "inferon" }))
+        .collect();
+    Json(json!({ "object": "list", "data": data })).into_response()
 }
 
 /// The resolved upstream target for one request (ITEM-043): the tenant's own
@@ -1552,6 +1629,76 @@ mod tests {
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
         assert!(route.provider_id.is_none(), "shared key = no provider");
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_lists_the_tenants_advertised_models() {
+        // ITEM-044 (live): GET /v1/models returns what the providers advertise,
+        // minus disabled ones — no static catalog.
+        let tenant = seeded_tenant();
+        let provider_store = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        let provider_id = crate::providers::ProviderStore::insert(
+            &*provider_store,
+            tenant.id,
+            &crate::providers::NewProvider {
+                kind: "openai-compatible".to_string(),
+                name: "host".to_string(),
+                base_url: "https://host.test/v1".to_string(),
+                key: "sk-host".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        crate::providers::ProviderStore::record_models(
+            &*provider_store,
+            provider_id,
+            &["gpt-4o".to_string(), "llama-3".to_string()],
+        )
+        .await
+        .unwrap();
+        let (tx, _rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store,
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::seed(
+                provider_id,
+                "llama-3",
+                false,
+                false,
+            )),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/models")
+                    .header("authorization", format!("Bearer {CLIENT_KEY}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        let ids: Vec<&str> = json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&"gpt-4o"), "advertised model is listed");
+        assert!(!ids.contains(&"llama-3"), "a disabled model is excluded");
     }
 
     #[tokio::test]

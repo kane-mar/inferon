@@ -27,16 +27,16 @@ export default async function OnboardingPage(props: OnboardingPageProps) {
 
   const t = await getTranslations({ locale, namespace: 'OnboardingPage' });
   const api = InferonApi.fromEnv();
-  const [summary, providers] = await Promise.all([
+  const [summary, models] = await Promise.all([
     api.summary(30, 0, session.cookie),
-    api.providers(session.cookie),
+    api.models(session.cookie),
   ]);
   // AC4: the snippet uses the tenant's enabled/default model so it works for a
   // shared-key tenant and one with their own provider (free-form ids included).
-  const models = providers.providers.flatMap(provider => provider.models);
-  const enabledModels = models.filter(model => model.enabled).map(model => model.id);
+  const available = models.providers.flatMap(provider => provider.models);
+  const enabledModels = available.filter(model => model.enabled).map(model => model.id);
   const defaultModel
-    = models.find(model => model.is_default && model.enabled)?.id
+    = available.find(model => model.is_default && model.enabled)?.id
       ?? enabledModels[0]
       ?? DEFAULT_MODEL;
 

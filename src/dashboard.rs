@@ -1092,28 +1092,7 @@ pub struct ProviderUpdateBody {
     spend_limit_cents: Option<i64>,
 }
 
-fn provider_json(provider: &crate::providers::Provider, settings: &[crate::models::ModelSetting]) -> Value {
-    let models: Vec<Value> = crate::models::by_kind(&provider.kind)
-        .map(|model| {
-            let setting = settings.iter().find(|setting| setting.model_id == model.id);
-            let price = crate::cost::price_for(model.id);
-            json!({
-                "id": model.id,
-                "name": model.name,
-                "context_window": model.context_window,
-                "max_output": model.max_output,
-                "reasoning": model.reasoning,
-                "images": model.images,
-                "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
-                "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
-                "price": {
-                    "input_usd_per_million": price.prompt_miss.to_string(),
-                    "cached_input_usd_per_million": price.prompt_hit.map(|rate| rate.to_string()),
-                    "output_usd_per_million": price.completion.to_string(),
-                },
-            })
-        })
-        .collect();
+fn provider_json(provider: &crate::providers::Provider) -> Value {
     json!({
         "id": provider.id.to_string(),
         "kind": provider.kind,
@@ -1125,8 +1104,76 @@ fn provider_json(provider: &crate::providers::Provider, settings: &[crate::model
         "is_default": provider.is_default,
         "created_at": provider.created_at,
         "updated_at": provider.updated_at,
-        "models": models,
     })
+}
+
+/// One advertised model, merged with the provider's selection flags and the
+/// cost engine's price (unknown ids report `priced: false`).
+fn model_json(model_id: &str, settings: &[crate::models::ModelSetting]) -> Value {
+    let setting = settings.iter().find(|setting| setting.model_id == model_id);
+    let price = crate::cost::price_for(model_id);
+    json!({
+        "id": model_id,
+        "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
+        "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
+        "price": {
+            "input_usd_per_million": price.prompt_miss.to_string(),
+            "output_usd_per_million": price.completion.to_string(),
+            "priced": crate::cost::is_priced(model_id),
+        },
+    })
+}
+
+/// Model ids from an OpenAI-style `{data:[{id}]}`, a `{models:[{id|name}]}`, or a
+/// bare array — sorted and deduped.
+fn parse_model_ids(body: &Value) -> Vec<String> {
+    let array = body
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| body.get("models").and_then(Value::as_array))
+        .or_else(|| body.as_array());
+    let Some(array) = array else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = array
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("id")
+                .and_then(Value::as_str)
+                .or_else(|| entry.get("name").and_then(Value::as_str))
+                .or_else(|| entry.as_str())
+                .map(str::to_string)
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Read a provider's advertised models from `GET <base>/models`.
+pub(crate) async fn fetch_provider_models(
+    state: &Arc<AppState>,
+    provider: &crate::providers::ResolvedProvider,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
+    let mut request = state
+        .http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", provider.api_key))
+        .timeout(std::time::Duration::from_secs(10));
+    if let Some(org) = &provider.metadata.org {
+        request = request.header("OpenAI-Organization", org);
+    }
+    for (header, value) in &provider.metadata.headers {
+        request = request.header(header, value);
+    }
+    let response = request.send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("upstream returned {}", response.status()));
+    }
+    let body: Value = response.json().await.map_err(|e| e.to_string())?;
+    Ok(parse_model_ids(&body))
 }
 
 /// GET /v1/dashboard/api/providers (session-scoped) — masked provider list.
@@ -1137,14 +1184,6 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
     };
     match state.provider_store.list(tenant_id).await {
         Ok(providers) => {
-            let mut out = Vec::with_capacity(providers.len());
-            for provider in &providers {
-                let settings = match state.model_store.settings(provider.id).await {
-                    Ok(settings) => settings,
-                    Err(e) => return internal(&e.to_string()),
-                };
-                out.push(provider_json(provider, &settings));
-            }
             // The shared platform key is the upstream when the tenant has no
             // provider of their own — show it (masked) so the default isn't a
             // mystery. Never the key material.
@@ -1162,7 +1201,7 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
                 "in_use": providers.is_empty(),
             });
             json_ok(json!({
-                "providers": out,
+                "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
                 "platform": platform,
                 "kinds": crate::providers::PROVIDER_KINDS,
                 "role": role,
@@ -1360,10 +1399,23 @@ pub async fn tenant_provider_test(
     }
     let probe = probe.send().await;
     match probe {
-        Ok(response) => json_ok(json!({
-            "ok": response.status().is_success(),
-            "status": response.status().as_u16(),
-        })),
+        Ok(response) => {
+            let status = response.status();
+            // A successful probe is also a model sync: cache what the host
+            // advertises so the dashboard and the proxy can route by model.
+            if status.is_success() {
+                if let Ok(body) = response.json::<Value>().await {
+                    let ids = parse_model_ids(&body);
+                    if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
+                        tracing::warn!("provider model sync failed for {provider_id}: {e}");
+                    }
+                }
+            }
+            json_ok(json!({
+                "ok": status.is_success(),
+                "status": status.as_u16(),
+            }))
+        }
         Err(e) => {
             tracing::warn!("provider probe failed for {provider_id}: {e}");
             json_ok(json!({ "ok": false, "status": null }))
@@ -1371,7 +1423,7 @@ pub async fn tenant_provider_test(
     }
 }
 
-// --- Models (ITEM-044, per provider) ----------------------------------------
+// --- Models (ITEM-044, live from the provider) -------------------------------
 
 #[derive(serde::Deserialize)]
 pub struct ModelUpdateBody {
@@ -1379,8 +1431,82 @@ pub struct ModelUpdateBody {
     is_default: Option<bool>,
 }
 
+/// GET /v1/dashboard/api/providers/:provider_id/models — discover the provider's
+/// current model list from `GET <base>/models` (live), cache it, and return it
+/// with this provider's selection flags. Never a static catalog.
+pub async fn tenant_provider_models(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(provider_id): Path<uuid::Uuid>,
+) -> Response {
+    let (tenant_id, _role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let provider = match state.provider_store.resolve_provider(tenant_id, provider_id).await {
+        Ok(Some(provider)) => provider,
+        Ok(None) => {
+            return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
+        }
+        Err(e) => return internal(&e.to_string()),
+    };
+    let ids = match fetch_provider_models(&state, &provider).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::warn!("provider model discovery failed for {provider_id}: {e}");
+            return crate::json_error(
+                StatusCode::BAD_GATEWAY,
+                "provider_models_failed",
+                "could not read the model list from the provider",
+            );
+        }
+    };
+    if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
+        return internal(&e.to_string());
+    }
+    let settings = match state.model_store.settings(provider_id).await {
+        Ok(settings) => settings,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings)).collect();
+    json_ok(json!({ "models": models }))
+}
+
+/// GET /v1/dashboard/api/models — every provider's cached advertised models
+/// (no live call), grouped by provider, with selection flags + prices.
+pub async fn tenant_models(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    let providers = match state.provider_store.list(tenant_id).await {
+        Ok(providers) => providers,
+        Err(e) => return internal(&e.to_string()),
+    };
+    let mut out = Vec::with_capacity(providers.len());
+    for provider in &providers {
+        let ids = match state.provider_store.advertised_models(provider.id).await {
+            Ok(ids) => ids,
+            Err(e) => return internal(&e.to_string()),
+        };
+        let settings = match state.model_store.settings(provider.id).await {
+            Ok(settings) => settings,
+            Err(e) => return internal(&e.to_string()),
+        };
+        let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings)).collect();
+        out.push(json!({
+            "id": provider.id.to_string(),
+            "name": provider.name,
+            "kind": provider.kind,
+            "is_default": provider.is_default,
+            "models": models,
+        }));
+    }
+    json_ok(json!({ "providers": out, "role": role }))
+}
+
 /// POST /v1/dashboard/api/providers/:provider_id/models/:model_id (owner-only)
-/// — enable/disable one of the provider's catalog models and/or make it that
+/// — enable/disable a model the provider advertises and/or make it that
 /// provider's default.
 pub async fn tenant_provider_model_update(
     State(state): State<Arc<AppState>>,
@@ -1395,21 +1521,24 @@ pub async fn tenant_provider_model_update(
     if let Err(resp) = owner_only(&role) {
         return resp;
     }
-    let provider = match state.provider_store.list(tenant_id).await {
-        Ok(providers) => providers.into_iter().find(|provider| provider.id == provider_id),
+    // Ownership check (the id must be one of this tenant's providers).
+    let owned = match state.provider_store.list(tenant_id).await {
+        Ok(providers) => providers.into_iter().any(|provider| provider.id == provider_id),
         Err(e) => return internal(&e.to_string()),
     };
-    let Some(provider) = provider else {
+    if !owned {
         return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider");
+    }
+    // Only a model the provider actually advertises can be configured.
+    let advertised = match state.provider_store.advertised_models(provider_id).await {
+        Ok(ids) => ids,
+        Err(e) => return internal(&e.to_string()),
     };
-    let Some(model) = crate::models::find(&model_id) else {
-        return crate::json_error(StatusCode::BAD_REQUEST, "unknown_model", "no such catalog model");
-    };
-    if model.kind != provider.kind {
+    if !advertised.iter().any(|id| id == &model_id) {
         return crate::json_error(
             StatusCode::BAD_REQUEST,
-            "model_not_in_provider",
-            "that model is not served by this provider's kind",
+            "unknown_model",
+            "the provider does not advertise that model",
         );
     }
     if let Some(enabled) = body.enabled {
@@ -2698,6 +2827,19 @@ mod tests {
         assert_eq!(upstream_base_url("https://api.test/v1/"), "https://api.test/v1");
     }
 
+    #[test]
+    fn parse_model_ids_accepts_openai_and_lenient_shapes() {
+        assert_eq!(parse_model_ids(&json!({"data":[{"id":"a"},{"id":"b"}]})), vec!["a", "b"]);
+        assert_eq!(parse_model_ids(&json!({"models":[{"name":"m"}]})), vec!["m"]);
+        assert_eq!(parse_model_ids(&json!(["x", "y"])), vec!["x", "y"]);
+        assert_eq!(
+            parse_model_ids(&json!({"data":[{"id":"b"},{"id":"a"},{"id":"a"}]})),
+            vec!["a", "b"],
+            "sorted and deduped"
+        );
+        assert!(parse_model_ids(&json!({})).is_empty());
+    }
+
     #[tokio::test]
     async fn the_platform_key_is_shown_masked_when_no_provider_is_configured() {
         // The shared platform key is the upstream when the tenant has no
@@ -2718,22 +2860,29 @@ mod tests {
 
     #[tokio::test]
     async fn owner_toggles_a_providers_model_and_members_cannot() {
-        // ITEM-044 rework: models live under their provider; the providers
-        // response carries each provider's catalog + flags, and the update
-        // endpoint is owner-only and kind-checked.
+        // Models come from the host (`/models`), cached per provider; selection
+        // is owner-only and only for advertised models.
         let (state, token) = tenant_role_session("owner").await;
         let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
         let provider_id = crate::providers::ProviderStore::insert(
             &*state.provider_store,
             tenant_id,
             &crate::providers::NewProvider {
-                kind: "openai".to_string(),
-                name: "OpenAI".to_string(),
-                base_url: "https://api.openai.com/v1".to_string(),
-                key: "sk-openai-ab12".to_string(),
+                kind: "openai-compatible".to_string(),
+                name: "My host".to_string(),
+                base_url: "https://my-host.test/v1".to_string(),
+                key: "sk-host-ab12".to_string(),
                 metadata: Default::default(),
                 spend_limit_cents: 0,
             },
+        )
+        .await
+        .unwrap();
+        // What the host advertises (as a `/models` fetch would record).
+        crate::providers::ProviderStore::record_models(
+            &*state.provider_store,
+            provider_id,
+            &["gpt-4o".to_string(), "llama-3-70b".to_string()],
         )
         .await
         .unwrap();
@@ -2741,12 +2890,12 @@ mod tests {
 
         let listed = router
             .clone()
-            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .oneshot(request_with_cookie("/v1/dashboard/api/models", &token))
             .await
             .unwrap();
         let json: Value = body_json(listed).await;
         let models = json["providers"][0]["models"].as_array().expect("models array");
-        assert_eq!(models.len(), 2, "the openai catalog: gpt-4o + gpt-4o-mini");
+        assert_eq!(models.len(), 2, "the host advertises two models");
         assert_eq!(models[0]["id"], "gpt-4o");
         assert_eq!(models[0]["enabled"], true);
 
@@ -2765,7 +2914,7 @@ mod tests {
         assert_eq!(disabled.status(), axum::http::StatusCode::OK);
         let listed = router
             .clone()
-            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .oneshot(request_with_cookie("/v1/dashboard/api/models", &token))
             .await
             .unwrap();
         let json: Value = body_json(listed).await;
@@ -2777,13 +2926,13 @@ mod tests {
             .unwrap();
         assert_eq!(gpt4o["enabled"], false);
 
-        // A deepseek model is not served by an openai provider -> 400.
-        let wrong = router
+        // A model the provider does not advertise -> 400.
+        let unknown = router
             .clone()
-            .oneshot(update("deepseek-chat", r#"{"enabled":false}"#))
+            .oneshot(update("not-a-model", r#"{"enabled":false}"#))
             .await
             .unwrap();
-        assert_eq!(wrong.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(unknown.status(), axum::http::StatusCode::BAD_REQUEST);
 
         // A member cannot change model selection.
         let (member_state, member_token) = tenant_role_session("member").await;
@@ -2796,6 +2945,62 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn provider_models_are_fetched_live_from_the_host() {
+        // A tiny mock host exposing GET /v1/models in OpenAI shape.
+        let host = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(|| async {
+                axum::Json(json!({"data":[{"id":"llama-3-70b"},{"id":"mixtral"}]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, host).await.unwrap() });
+
+        let (state, token) = tenant_role_session("owner").await;
+        let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+        let provider_id = crate::providers::ProviderStore::insert(
+            &*state.provider_store,
+            tenant_id,
+            &crate::providers::NewProvider {
+                kind: "openai-compatible".to_string(),
+                name: "host".to_string(),
+                base_url: format!("http://{addr}/v1"),
+                key: "sk-host".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        let router = crate::build_router(state);
+        let response = router
+            .clone()
+            .oneshot(request_with_cookie(
+                &format!("/v1/dashboard/api/providers/{provider_id}/models"),
+                &token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json: Value = body_json(response).await;
+        let ids: Vec<&str> = json["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["llama-3-70b", "mixtral"]);
+        // The discovery is cached, so the tenant-wide list now has them.
+        let listed = router
+            .oneshot(request_with_cookie("/v1/dashboard/api/models", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        assert_eq!(json["providers"][0]["models"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

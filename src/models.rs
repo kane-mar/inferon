@@ -1,90 +1,14 @@
-//! Model catalog + per-provider selection (ITEM-044).
+//! Per-provider model selection (ITEM-044).
 //!
-//! `CATALOG` is the static list of models Inferon can serve, keyed by provider
-//! kind, with the metadata a tenant needs to choose. **Prices come from
-//! [`crate::cost::price_for`]** so the catalog and the cost engine can never
-//! disagree — the `deepseek-flash` default-row overcharge (2026-10-05) is why.
-//!
-//! [`ModelStore`] holds enable/disable + default flags **per provider**: a
-//! provider owns its models, and the curated catalog for the provider's kind is
-//! what it can serve. Models that are not in the catalog (e.g. an
-//! `openai-compatible` provider's own ids) are unrestricted — no rows needed.
+//! There is no static catalog: the available models are whatever each provider
+//! advertises at `GET <base>/models` (discovered and cached in `provider_models`).
+//! [`ModelStore`] only holds the per-provider enable/disable + default flags —
+//! a model with no row is unrestricted (enabled). Prices are applied by the cost
+//! engine ([`crate::cost::price_for`]) when a request is billed.
 
 use uuid::Uuid;
 
 pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ModelInfo {
-    pub id: &'static str,
-    pub kind: &'static str,
-    pub name: &'static str,
-    pub context_window: u32,
-    pub max_output: u32,
-    pub reasoning: bool,
-    pub images: bool,
-}
-
-pub const CATALOG: &[ModelInfo] = &[
-    ModelInfo {
-        id: "deepseek-chat",
-        kind: "deepseek",
-        name: "DeepSeek Chat",
-        context_window: 1_000_000,
-        max_output: 384_000,
-        reasoning: false,
-        images: false,
-    },
-    ModelInfo {
-        id: "deepseek-flash",
-        kind: "deepseek",
-        name: "DeepSeek V4.1 Flash",
-        context_window: 1_000_000,
-        max_output: 384_000,
-        reasoning: true,
-        images: false,
-    },
-    ModelInfo {
-        id: "deepseek-v4-pro",
-        kind: "deepseek",
-        name: "DeepSeek V4 Pro",
-        context_window: 1_000_000,
-        max_output: 384_000,
-        reasoning: true,
-        images: false,
-    },
-    ModelInfo {
-        id: "gpt-4o",
-        kind: "openai",
-        name: "GPT-4o",
-        context_window: 128_000,
-        max_output: 16_384,
-        reasoning: false,
-        images: true,
-    },
-    ModelInfo {
-        id: "gpt-4o-mini",
-        kind: "openai",
-        name: "GPT-4o mini",
-        context_window: 128_000,
-        max_output: 16_384,
-        reasoning: false,
-        images: true,
-    },
-];
-
-pub fn find(id: &str) -> Option<&'static ModelInfo> {
-    CATALOG.iter().find(|model| model.id == id)
-}
-
-/// Models of one provider kind (empty for `openai-compatible`).
-pub fn by_kind(kind: &str) -> impl Iterator<Item = &'static ModelInfo> + '_ {
-    CATALOG.iter().filter(move |model| model.kind == kind)
-}
-
-pub fn ids_of_kind(kind: &str) -> Vec<&'static str> {
-    by_kind(kind).map(|model| model.id).collect()
-}
 
 /// One model's flags for a provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -284,23 +208,6 @@ impl ModelStore for InMemoryModelStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn catalog_prices_come_from_the_cost_engine() {
-        // The catalog has no price fields of its own — the single source is
-        // cost::price_for, so the two can never disagree.
-        let price = crate::cost::price_for("deepseek-flash");
-        assert_eq!(price.prompt_miss.to_string(), "0.22");
-        assert!(find("deepseek-flash").is_some());
-    }
-
-    #[test]
-    fn catalog_lookup_helpers() {
-        assert_eq!(find("gpt-4o").map(|m| m.kind), Some("openai"));
-        assert!(find("no-such-model").is_none());
-        assert_eq!(ids_of_kind("deepseek"), vec!["deepseek-chat", "deepseek-flash", "deepseek-v4-pro"]);
-        assert_eq!(by_kind("openai-compatible").count(), 0);
-    }
 
     #[tokio::test]
     async fn settings_are_provider_scoped_and_defaulting_clears_the_provider() {

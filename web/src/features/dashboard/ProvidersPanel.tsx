@@ -436,13 +436,12 @@ export const ProvidersPanel = (props: {
                       >
                         {modelsOpen[provider.id]
                           ? t('hide_models')
-                          : t('models_count', { count: provider.models.length })}
+                          : t('show_models')}
                       </Button>
                     </div>
                     {modelsOpen[provider.id] && (
                       <ProviderModels
                         providerId={provider.id}
-                        models={provider.models}
                         canEdit={canEdit}
                       />
                     )}

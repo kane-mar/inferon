@@ -163,8 +163,6 @@ export type ProviderRow = {
   spend_limit_cents: number;
   /** The tenant's default provider (fallback for models no kind owns). */
   is_default: boolean;
-  /** The provider's catalog models with this provider's selection flags. */
-  models: ProviderModel[];
   created_at: string;
   updated_at: string;
 };
@@ -206,24 +204,31 @@ export type UpdateProvider = {
 
 export type ProviderTest = { ok: boolean; status: number | null };
 
-export type ModelPrice = {
-  input_usd_per_million: string;
-  cached_input_usd_per_million: string | null;
-  output_usd_per_million: string;
-};
-
-/** A model of one provider, merged with that provider's selection flags. */
+/** A model a provider advertises, with that provider's flags + price. */
 export type ProviderModel = {
   id: string;
-  name: string;
-  context_window: number;
-  max_output: number;
-  reasoning: boolean;
-  images: boolean;
   enabled: boolean;
   is_default: boolean;
-  price: ModelPrice;
+  price: {
+    input_usd_per_million: string;
+    output_usd_per_million: string;
+    /** False when the cost engine has no price row for this id. */
+    priced: boolean;
+  };
 };
+
+export type ProviderModelsResponse = { models: ProviderModel[] };
+
+/** A provider with its cached advertised models (the tenant-wide list). */
+export type ProviderModelsGroup = {
+  id: string;
+  name: string;
+  kind: string;
+  is_default: boolean;
+  models: ProviderModel[];
+};
+
+export type ModelsResponse = { providers: ProviderModelsGroup[]; role: Role };
 
 export type RoutingResponse = { fallbacks: string[]; role: Role };
 
@@ -426,6 +431,19 @@ export class InferonApi {
 
   testProvider(providerId: string, cookie?: string): Promise<ProviderTest> {
     return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
+  }
+
+  models(cookie?: string): Promise<ModelsResponse> {
+    return this.request<ModelsResponse>('GET', '/v1/dashboard/api/models', undefined, { cookie });
+  }
+
+  providerModels(providerId: string, cookie?: string): Promise<ProviderModelsResponse> {
+    return this.request<ProviderModelsResponse>(
+      'GET',
+      `/v1/dashboard/api/providers/${providerId}/models`,
+      undefined,
+      { cookie },
+    );
   }
 
   setDefaultProvider(
