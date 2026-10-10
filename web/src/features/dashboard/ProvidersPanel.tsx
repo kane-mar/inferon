@@ -180,6 +180,32 @@ export const ProvidersPanel = (props: {
     <div className="space-y-6">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{t('platform_title')}</span>
+              {props.data.platform.in_use && (
+                <span className="
+                  rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs
+                  text-accent-foreground
+                "
+                >
+                  {t('platform_in_use')}
+                </span>
+              )}
+            </div>
+            <div className="truncate font-mono text-xs text-muted-foreground">
+              {props.data.platform.base_url}
+            </div>
+          </div>
+          <span className="font-mono text-xs text-muted-foreground">
+            {props.data.platform.key_hint ?? t('platform_no_key')}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">{t('platform_help')}</p>
+      </div>
+
       <ul className="overflow-hidden rounded-lg border bg-card">
         {props.data.providers.length === 0
           ? (

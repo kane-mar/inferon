@@ -232,7 +232,11 @@
     "enable": "Enable",
     "disable": "Disable",
     "make_default": "Make default",
-    "context": "ctx"
+    "context": "ctx",
+    "platform_title": "Shared platform key",
+    "platform_in_use": "In use",
+    "platform_no_key": "No key configured",
+    "platform_help": "Used for requests while you have no provider of your own. Shown masked — it is never editable."
   },
   "RoutingPage": {
     "title_bar": "Routing",

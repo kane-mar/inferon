@@ -1059,6 +1059,14 @@ fn owner_only(role: &str) -> Result<(), Response> {
     }
 }
 
+/// The upstream base URL for display: the configured `UPSTREAM_URL` without the
+/// `/chat/completions` suffix.
+fn upstream_base_url(url: &str) -> String {
+    url.trim_end_matches('/')
+        .trim_end_matches("/chat/completions")
+        .to_string()
+}
+
 // --- Providers (ITEM-043) ----------------------------------------------------
 
 #[derive(serde::Deserialize)]
@@ -1137,8 +1145,25 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
                 };
                 out.push(provider_json(provider, &settings));
             }
+            // The shared platform key is the upstream when the tenant has no
+            // provider of their own — show it (masked) so the default isn't a
+            // mystery. Never the key material.
+            let tenant = match state.tenant_store.tenant_by_id(tenant_id).await {
+                Ok(tenant) => tenant,
+                Err(e) => return internal(&e.to_string()),
+            };
+            let platform_key = tenant
+                .as_ref()
+                .and_then(|tenant| tenant.upstream_openai_key.as_deref());
+            let platform = json!({
+                "base_url": upstream_base_url(&state.upstream_url),
+                "key_hint": platform_key.map(crate::providers::key_hint),
+                "key_configured": platform_key.is_some(),
+                "in_use": providers.is_empty(),
+            });
             json_ok(json!({
                 "providers": out,
+                "platform": platform,
                 "kinds": crate::providers::PROVIDER_KINDS,
                 "role": role,
             }))
@@ -2662,6 +2687,33 @@ mod tests {
         );
         assert!(normalize_base_url("ftp://api.test").is_err());
         assert!(normalize_base_url("api.test").is_err());
+    }
+
+    #[test]
+    fn upstream_base_url_strips_the_chat_completions_suffix() {
+        assert_eq!(
+            upstream_base_url("https://api.deepseek.com/v1/chat/completions"),
+            "https://api.deepseek.com/v1"
+        );
+        assert_eq!(upstream_base_url("https://api.test/v1/"), "https://api.test/v1");
+    }
+
+    #[tokio::test]
+    async fn the_platform_key_is_shown_masked_when_no_provider_is_configured() {
+        // The shared platform key is the upstream when the tenant has no
+        // provider; it must be visible (masked) but never the key itself.
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state);
+        let listed = router
+            .oneshot(request_with_cookie("/v1/dashboard/api/providers", &token))
+            .await
+            .unwrap();
+        let json: Value = body_json(listed).await;
+        let platform = &json["platform"];
+        assert_eq!(platform["in_use"], true, "no provider -> the platform key serves traffic");
+        assert_eq!(platform["key_configured"], true);
+        assert_eq!(platform["key_hint"], "\u{2026}ster", "masked tail only");
+        assert!(!json.to_string().contains("sk-master"), "never the raw key");
     }
 
     #[tokio::test]

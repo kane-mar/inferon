@@ -169,7 +169,22 @@ export type ProviderRow = {
   updated_at: string;
 };
 
-export type ProvidersResponse = { providers: ProviderRow[]; kinds: string[]; role: Role };
+export type PlatformKey = {
+  /** The upstream base URL the shared key points at. */
+  base_url: string;
+  /** Masked hint, e.g. `…ab12`; null when no platform key is configured. */
+  key_hint: string | null;
+  key_configured: boolean;
+  /** True when the tenant has no provider, so the proxy uses this key. */
+  in_use: boolean;
+};
+
+export type ProvidersResponse = {
+  providers: ProviderRow[];
+  platform: PlatformKey;
+  kinds: string[];
+  role: Role;
+};
 
 export type NewProvider = {
   kind: string;
