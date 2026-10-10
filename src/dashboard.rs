@@ -1061,7 +1061,7 @@ fn owner_only(role: &str) -> Result<(), Response> {
 
 /// The upstream base URL for display: the configured `UPSTREAM_URL` without the
 /// `/chat/completions` suffix.
-fn upstream_base_url(url: &str) -> String {
+pub(crate) fn upstream_base_url(url: &str) -> String {
     url.trim_end_matches('/')
         .trim_end_matches("/chat/completions")
         .to_string()

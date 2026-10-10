@@ -216,11 +216,23 @@ async fn list_models(State(state): State<Arc<AppState>>, req: Request) -> Respon
             }
         }
     }
-    // A freshly added provider has nothing cached yet — discover once.
+    // A freshly added provider has nothing cached yet — discover once. With no
+    // provider at all, the shared platform key serves traffic, so list its
+    // host's models (the global upstream).
     if ids.is_empty() {
         if let Ok(Some(provider)) = state.provider_store.resolve_for(tenant.id, None).await {
             if let Ok(fetched) = dashboard::fetch_provider_models(&state, &provider).await {
                 let _ = state.provider_store.record_models(provider.id, &fetched).await;
+                ids.extend(fetched);
+            }
+        } else if let Some(key) = tenant.upstream_openai_key.as_deref() {
+            let shared = crate::providers::ResolvedProvider {
+                id: Uuid::nil(),
+                base_url: dashboard::upstream_base_url(&state.upstream_url),
+                api_key: key.to_string(),
+                metadata: crate::providers::ProviderMetadata::default(),
+            };
+            if let Ok(fetched) = dashboard::fetch_provider_models(&state, &shared).await {
                 ids.extend(fetched);
             }
         }
@@ -1261,8 +1273,15 @@ mod tests {
     }
 
     async fn mock_upstream() -> String {
-        let app = axum::Router::new().route(
-            "/v1/chat/completions",
+        let app = axum::Router::new()
+            .route(
+                "/v1/models",
+                axum::routing::get(|| async {
+                    axum::Json(json!({"data":[{"id":"mock-model"}]}))
+                }),
+            )
+            .route(
+                "/v1/chat/completions",
             axum::routing::post(
                 |headers: axum::http::HeaderMap, payload: axum::Json<serde_json::Value>| async move {
                     match payload["model"].as_str() {
@@ -1471,7 +1490,6 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         format!("http://{addr}/v1/chat/completions")
     }
-
     fn state_with_store(
         upstream_url: &str,
         tenant_store: std::sync::Arc<dyn TenantStore>,
@@ -1699,6 +1717,26 @@ mod tests {
             .collect();
         assert!(ids.contains(&"gpt-4o"), "advertised model is listed");
         assert!(!ids.contains(&"llama-3"), "a disabled model is excluded");
+    }
+
+    #[tokio::test]
+    async fn models_endpoint_falls_back_to_the_shared_upstream() {
+        // No provider configured: the shared platform key serves traffic, so
+        // /v1/models lists the shared upstream's models.
+        let response = build_router(test_state(&mock_upstream().await))
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/models")
+                    .header("authorization", format!("Bearer {CLIENT_KEY}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["data"][0]["id"], "mock-model");
     }
 
     #[tokio::test]
