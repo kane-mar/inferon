@@ -20,12 +20,13 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
 | ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
+| ITEM-051 | Edge connector — reach customer-hosted (on-prem) LLMs | feature | **new** — outbound WSS connector so the hosted proxy can serve a model on a customer LAN; first slice = "bring your own endpoint" guide + connectivity check. See `wiki/llm-inference/local-llm-hosting-and-edge-connector.md` |
 | ITEM-018 | First real developer onboarding | improvement | **PO call** — hand the staged key to a real developer; now sits *after* the control plane (043–048) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-07 (models moved under the provider; login/operator fixes)_ —
-remaining: ITEM-050 (native Anthropic adapter), ITEM-018 (PO handoff), and the
-staged OmniRouting cluster (029–032).
+_Last updated: 2026-10-11 (local-LLM connectivity captured as ITEM-051)_ —
+remaining: ITEM-050 (native Anthropic adapter), ITEM-051 (edge connector),
+ITEM-018 (PO handoff), and the staged OmniRouting cluster (029–032).

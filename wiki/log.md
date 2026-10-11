@@ -48,3 +48,8 @@
 - Disposition: Update
 - Raw: raw/llm-inference/2026-08-30-inferon-toolchain-scope-clarification.md
 - Updated: inferon-project-direction.md
+
+## [2026-10-11] ingest | Local LLM Hosting & the Edge Connector
+- Disposition: New
+- Raw: raw/llm-inference/2026-10-11-local-llm-hosting-conversation.md
+- Created: local-llm-hosting-and-edge-connector.md

@@ -13,3 +13,4 @@ LLM inference optimization: proxy architecture, budget-constrained routing, dist
 | [Budget-Constrained Routing](llm-inference/budget-constrained-routing.md) | OmniRouter: bi-encoder complexity classifier, quality-gap scoring, Lagrangian budget/latency solver, tenant knobs | 2026-08-30 |
 | [Passive LoRA Distillation Pipeline](llm-inference/passive-lora-distillation.md) | Trace capture, curation (MinHash LSH, k-means, synthetic augmentation), QLoRA training, eval gates, canary hot-swap | 2026-08-30 |
 | [Multi-LoRA Serving Cluster](llm-inference/multi-lora-serving.md) | vLLM/SGLang multi-LoRA pool, pinned base weights, paged adapters, LRU eviction, 4x L4 MVP node | 2026-08-30 |
+| [Local LLM Hosting & the Edge Connector](llm-inference/local-llm-hosting-and-edge-connector.md) | Hosted proxy → customer on-prem models: options (public endpoint, outbound WSS edge connector, hybrid data plane), recommendation, connector design, bandwidth economics | 2026-10-11 |
