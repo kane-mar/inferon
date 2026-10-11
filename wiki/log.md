@@ -53,3 +53,8 @@
 - Disposition: New
 - Raw: raw/llm-inference/2026-10-11-local-llm-hosting-conversation.md
 - Created: local-llm-hosting-and-edge-connector.md
+
+## [2026-10-11] ingest | Customer-Hosted Connectivity Decision (A + C)
+- Disposition: Update
+- Raw: raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md
+- Updated: customer-hosted-llms.md (renamed from local-llm-hosting-and-edge-connector.md; B deferred for latency)

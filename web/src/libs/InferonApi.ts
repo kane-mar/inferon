@@ -163,6 +163,9 @@ export type ProviderRow = {
   spend_limit_cents: number;
   /** The tenant's default provider (fallback for models no kind owns). */
   is_default: boolean;
+  /** ITEM-051: last Test-connection result (null = never checked). */
+  last_check_at: string | null;
+  last_check_ok: boolean | null;
   created_at: string;
   updated_at: string;
 };

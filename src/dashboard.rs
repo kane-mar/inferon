@@ -1102,6 +1102,8 @@ fn provider_json(provider: &crate::providers::Provider) -> Value {
         "metadata": provider.metadata,
         "spend_limit_cents": provider.spend_limit_cents,
         "is_default": provider.is_default,
+        "last_check_at": provider.last_check_at,
+        "last_check_ok": provider.last_check_ok,
         "created_at": provider.created_at,
         "updated_at": provider.updated_at,
     })
@@ -1411,6 +1413,10 @@ pub async fn tenant_provider_test(
                     }
                 }
             }
+            let _ = state
+                .provider_store
+                .record_check(tenant_id, provider_id, status.is_success())
+                .await;
             json_ok(json!({
                 "ok": status.is_success(),
                 "status": status.as_u16(),
@@ -1418,6 +1424,10 @@ pub async fn tenant_provider_test(
         }
         Err(e) => {
             tracing::warn!("provider probe failed for {provider_id}: {e}");
+            let _ = state
+                .provider_store
+                .record_check(tenant_id, provider_id, false)
+                .await;
             json_ok(json!({ "ok": false, "status": null }))
         }
     }

@@ -41,6 +41,9 @@ pub struct Provider {
     /// The tenant's default provider — the one the proxy uses for a model no
     /// provider kind owns. Exactly one per tenant (when any exist).
     pub is_default: bool,
+    /// ITEM-051: the last Test-connection result (None = never checked).
+    pub last_check_at: Option<String>,
+    pub last_check_ok: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -117,6 +120,8 @@ pub trait ProviderStore: Send + Sync {
     /// Make `id` the tenant's default provider (clearing any previous default).
     /// False when the provider is not owned by `tenant_id`.
     async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
+    /// Record the last connectivity check (ITEM-051). False when not owned.
+    async fn record_check(&self, tenant_id: Uuid, id: Uuid, ok: bool) -> StoreResult<bool>;
     /// Replace the provider's advertised model set (from its `/models`).
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()>;
     /// The models currently cached for a provider (what it last advertised).
@@ -176,12 +181,15 @@ impl ProviderStore for PostgresProviderStore {
                 sqlx::types::Json<ProviderMetadata>,
                 i64,
                 bool,
+                Option<String>,
+                Option<bool>,
                 String,
                 String,
             ),
         >(
             "SELECT id, tenant_id, kind, name, base_url, key_hint, metadata,
-                    spend_limit_cents, is_default, created_at::text, updated_at::text
+                    spend_limit_cents, is_default, last_check_at::text, last_check_ok,
+                    created_at::text, updated_at::text
              FROM providers WHERE tenant_id = $1
              ORDER BY is_default DESC, created_at",
         )
@@ -191,7 +199,7 @@ impl ProviderStore for PostgresProviderStore {
         Ok(rows
             .into_iter()
             .map(
-                |(id, tenant_id, kind, name, base_url, key_hint, metadata, spend_limit_cents, is_default, created_at, updated_at)| {
+                |(id, tenant_id, kind, name, base_url, key_hint, metadata, spend_limit_cents, is_default, last_check_at, last_check_ok, created_at, updated_at)| {
                     Provider {
                         id,
                         tenant_id,
@@ -202,6 +210,8 @@ impl ProviderStore for PostgresProviderStore {
                         metadata: metadata.0,
                         spend_limit_cents,
                         is_default,
+                        last_check_at,
+                        last_check_ok,
                         created_at,
                         updated_at,
                     }
@@ -323,6 +333,19 @@ impl ProviderStore for PostgresProviderStore {
             .await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    async fn record_check(&self, tenant_id: Uuid, id: Uuid, ok: bool) -> StoreResult<bool> {
+        let result = sqlx::query(
+            "UPDATE providers SET last_check_at = NOW(), last_check_ok = $3
+             WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(ok)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {
@@ -481,6 +504,8 @@ impl InMemoryProviderStore {
                 metadata: ProviderMetadata::default(),
                 spend_limit_cents: 0,
                 is_default: true,
+                last_check_at: None,
+                last_check_ok: None,
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -521,6 +546,8 @@ impl ProviderStore for InMemoryProviderStore {
                 metadata: new.metadata.clone(),
                 spend_limit_cents: new.spend_limit_cents.max(0),
                 is_default,
+                last_check_at: None,
+                last_check_ok: None,
                 created_at: "0".to_string(),
                 updated_at: "0".to_string(),
             },
@@ -598,6 +625,21 @@ impl ProviderStore for InMemoryProviderStore {
             row.provider.is_default = row.provider.id == id;
         }
         Ok(true)
+    }
+
+    async fn record_check(&self, tenant_id: Uuid, id: Uuid, ok: bool) -> StoreResult<bool> {
+        let mut rows = self.rows.lock().unwrap();
+        match rows
+            .iter_mut()
+            .find(|row| row.provider.id == id && row.provider.tenant_id == tenant_id)
+        {
+            Some(row) => {
+                row.provider.last_check_at = Some("1".to_string());
+                row.provider.last_check_ok = Some(ok);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {
@@ -920,6 +962,20 @@ mod tests {
             store.advertised_models(open).await.unwrap(),
             vec!["gpt-4o".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn record_check_is_tenant_scoped() {
+        let tenant = Uuid::new_v4();
+        let store = InMemoryProviderStore::with_provider(tenant, "https://x/v1", "sk-x");
+        let id = store.list(tenant).await.unwrap()[0].id;
+        assert!(store.list(tenant).await.unwrap()[0].last_check_ok.is_none());
+        assert!(store.record_check(tenant, id, false).await.unwrap());
+        let row = &store.list(tenant).await.unwrap()[0];
+        assert_eq!(row.last_check_ok, Some(false));
+        assert!(row.last_check_at.is_some());
+        // Another tenant cannot record a check on it.
+        assert!(!store.record_check(Uuid::new_v4(), id, true).await.unwrap());
     }
 
     #[tokio::test]

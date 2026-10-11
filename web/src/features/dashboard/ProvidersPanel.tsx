@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
+import { cn } from '@/utils/Helpers';
 import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
 import { ProviderModels } from './ProviderModels';
 
@@ -364,27 +365,44 @@ export const ProvidersPanel = (props: {
                           {t('updated', { date: formatDate(provider.updated_at) })}
                         </span>
                       )}
-                      {result && result !== 'pending' && (
-                        <span
-                          className={`
-                            font-mono text-xs
-                            ${
-                        result.ok
-                          ? `
-                            text-emerald-600
-                            dark:text-emerald-400
-                          `
-                          : 'text-destructive'
-                        }
-                          `}
-                        >
-                          {result.ok
-                            ? t('connected')
-                            : result.status == null
-                              ? t('unreachable')
-                              : `${t('failed')} (${result.status})`}
-                        </span>
-                      )}
+                      {result && result !== 'pending'
+                        ? (
+                            <span
+                              className={`
+                                font-mono text-xs
+                                ${
+                            result.ok
+                              ? `
+                                text-emerald-600
+                                dark:text-emerald-400
+                              `
+                              : 'text-destructive'
+                            }
+                              `}
+                            >
+                              {result.ok
+                                ? t('connected')
+                                : result.status == null
+                                  ? t('unreachable')
+                                  : `${t('failed')} (${result.status})`}
+                            </span>
+                          )
+                        : provider.last_check_ok != null && (
+                          <span
+                            title={provider.last_check_at ?? undefined}
+                            className={cn(
+                              'font-mono text-xs',
+                              provider.last_check_ok
+                                ? `
+                                  text-emerald-600
+                                  dark:text-emerald-400
+                                `
+                                : 'text-destructive',
+                            )}
+                          >
+                            {provider.last_check_ok ? t('connected') : t('unreachable')}
+                          </span>
+                        )}
                       {canEdit && (
                         <Button
                           variant="ghost"
