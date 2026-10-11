@@ -247,19 +247,19 @@ BODY1=$(oauth_dance) || fail "first OAuth dance failed"
 printf '%s' "$BODY1" | grep -q 'sk-inferon-' && fail "first sign-in leaked key material: $BODY1"
 echo "ok: first sign-in redirects to the frontend (no key in the response)"
 
-# Provisioning rows in Postgres: user, owner membership, tenant with the shared
-# upstream key, and no server-minted key (the frontend mints the first key).
+# Provisioning rows in Postgres: user, owner membership, a **keyless** tenant
+# (the platform key is not a pass-through), and no server-minted key.
 SMOKE_USER_ID=$(psql "SELECT id FROM users WHERE github_login = 'smoke-dev';")
 [ -n "$SMOKE_USER_ID" ] || fail "no user row for the signed-up developer"
 MEMBER_COUNT=$(psql "SELECT count(*) FROM tenant_members WHERE user_id = '$SMOKE_USER_ID' AND role = 'owner';")
 [ "$MEMBER_COUNT" = "1" ] || fail "no owner membership (rows: $MEMBER_COUNT)"
 SIGNUP_TID=$(psql "SELECT tenant_id FROM tenant_members WHERE user_id = '$SMOKE_USER_ID' AND role = 'owner';")
 [ -n "$SIGNUP_TID" ] || fail "no provisioned tenant"
-[ "$(psql "SELECT upstream_openai_key = 'sk-smoke-master' FROM tenants WHERE id = '$SIGNUP_TID';")" = "t" ] \
-    || fail "provisioned tenant lacks the shared upstream key"
+[ "$(psql "SELECT upstream_openai_key IS NULL FROM tenants WHERE id = '$SIGNUP_TID';")" = "t" ] \
+    || fail "self-serve tenant must be keyless (the platform key is not a pass-through)"
 [ "$(psql "SELECT count(*) FROM api_keys WHERE tenant_id = '$SIGNUP_TID';")" = "0" ] \
     || fail "the backend must not mint the first key (the frontend does)"
-echo "ok: tenant + owner membership provisioned, no server-minted key"
+echo "ok: keyless tenant + owner membership provisioned, no server-minted key"
 
 # The session cookie from the dance resolves /auth/me.
 ME=$(curl -sS -b "$DANCE_JAR" "$BASE/auth/me")
@@ -272,6 +272,13 @@ MINTED=$(curl -sS -b "$DANCE_JAR" -X POST "$BASE/v1/dashboard/api/keys" \
     -H 'Content-Type: application/json' -d '{"label":"first"}')
 SIGNUP_KEY=$(printf '%s' "$MINTED" | grep -o '"key":"sk-inferon-[0-9a-f]*"' | cut -d'"' -f4)
 [ -n "$SIGNUP_KEY" ] || fail "session-minted key missing from the response: $MINTED"
+# BYO model: the tenant must point the proxy at its own provider before traffic
+# is served — the mock upstream stands in for it.
+PROV=$(curl -sS -b "$DANCE_JAR" -X POST "$BASE/v1/dashboard/api/providers" \
+    -H 'Content-Type: application/json' \
+    -d '{"kind":"openai-compatible","name":"smoke provider","base_url":"http://mock-upstream:8090/v1","key":"sk-smoke-provider"}')
+printf '%s' "$PROV" | grep -q '"id"' || fail "could not add a provider for the signup tenant: $PROV"
+echo "ok: self-serve tenant added its own provider"
 resp=$(post_and_code "$SIGNUP_KEY" "$GUARDED_BODY")
 code=$(printf '%s' "$resp" | tail -1)
 body=$(printf '%s' "$resp" | sed '$d')

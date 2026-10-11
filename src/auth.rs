@@ -599,11 +599,6 @@ pub struct Accounts {
     /// `OPERATOR_GITHUB_LOGINS`, comma-separated; ITEM-037 AC1). Applied at
     /// sign-in and backfilled to existing users at boot.
     pub operator_logins: std::collections::HashSet<String>,
-    /// Upstream master key given to auto-provisioned tenants (env
-    /// `UPSTREAM_MASTER_KEY`, ITEM-036 AC1): the platform's shared DeepSeek
-    /// key — signup yields immediately-working LLM calls. `None` provisions
-    /// keyless tenants.
-    pub provision_upstream_key: Option<String>,
     pub users: std::sync::Arc<dyn UserStore>,
     pub github: std::sync::Arc<dyn GithubClient>,
 }
@@ -622,9 +617,6 @@ impl Accounts {
         if client_id.is_empty() || client_secret.is_empty() || session_secret.is_empty() {
             return None;
         }
-        let provision_upstream_key = std::env::var("UPSTREAM_MASTER_KEY")
-            .ok()
-            .filter(|k| !k.is_empty());
         let operator_logins = std::env::var("OPERATOR_GITHUB_LOGINS")
             .ok()
             .map(|list| {
@@ -651,7 +643,6 @@ impl Accounts {
             oauth: oauth.clone(),
             session_secret,
             operator_logins,
-            provision_upstream_key,
             users,
             github: std::sync::Arc::new(RealGithub::new(http, oauth)),
         }))
@@ -951,7 +942,7 @@ async fn provision_first_tenant(
 ) -> Result<(), Response> {
     let tenant_id = match state
         .tenant_store
-        .insert_tenant(accounts.provision_upstream_key.as_deref())
+        .insert_tenant(None)
         .await
     {
         Ok(id) => id,
@@ -1055,7 +1046,6 @@ pub(crate) mod test_helpers {
             },
             session_secret: TEST_SESSION_SECRET.to_string(),
             operator_logins: std::collections::HashSet::new(),
-            provision_upstream_key: None,
             users,
             github: std::sync::Arc::new(NeverGithub),
         })
@@ -1327,7 +1317,6 @@ mod tests {
             },
             session_secret: SECRET.to_string(),
             operator_logins: std::collections::HashSet::new(),
-            provision_upstream_key: Some("sk-platform".to_string()),
             users,
             github,
         }))
@@ -1497,7 +1486,10 @@ mod tests {
         let user = users.find_by_id(user_id).await.expect("ok").expect("user present");
         assert_eq!(user.github_login, "octocat");
 
-        // The user owns exactly one auto-provisioned tenant on the shared key.
+        // The user owns exactly one auto-provisioned tenant. It is **keyless**:
+        // the platform's shared key is not a pass-through — tenants add their
+        // own provider (env UPSTREAM_MASTER_KEY is only used by the explicit
+        // operator onboarding path, scripts/seed-tenant.sh).
         let (tenant_id, role) = users
             .tenant_for_user(user.id)
             .await
@@ -1509,7 +1501,7 @@ mod tests {
             .await
             .expect("ok")
             .expect("provisioned tenant");
-        assert_eq!(tenant.upstream_openai_key.as_deref(), Some("sk-platform"));
+        assert_eq!(tenant.upstream_openai_key, None, "self-serve is keyless");
 
         // No key is minted server-side — the frontend's keys page mints it and
         // shows it once. The backend renders no HTML and reveals no key.

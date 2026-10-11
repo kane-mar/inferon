@@ -301,9 +301,9 @@ async fn resolve_route(
                 provider_id: None,
             }),
             None => Err(json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "tenant_misconfigured",
-                "tenant has no upstream key configured",
+                StatusCode::BAD_REQUEST,
+                "no_provider",
+                "no upstream provider configured — add one in Dashboard → Providers",
             )),
         },
         Err(e) => {
@@ -1741,6 +1741,46 @@ mod tests {
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         let json = json_body(response).await;
         assert_eq!(json["data"][0]["id"], "mock-model");
+    }
+
+    #[tokio::test]
+    async fn a_tenant_without_a_provider_gets_a_no_provider_error() {
+        // The platform key is not a pass-through: a keyless tenant (self-serve,
+        // no provider) is told to add one instead of silently using the shared key.
+        let mut by_hash = std::collections::HashMap::new();
+        by_hash.insert(
+            sha256_hex(CLIENT_KEY),
+            Tenant {
+                id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+                upstream_openai_key: None,
+                api_key_id: None,
+            },
+        );
+        let (tx, _rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(InMemoryTenantStore::new(by_hash)),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let json = json_body(response).await;
+        assert_eq!(json["error"]["type"], "no_provider");
     }
 
     #[tokio::test]

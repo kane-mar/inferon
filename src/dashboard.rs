@@ -1198,7 +1198,7 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
                 "base_url": upstream_base_url(&state.upstream_url),
                 "key_hint": platform_key.map(crate::providers::key_hint),
                 "key_configured": platform_key.is_some(),
-                "in_use": providers.is_empty(),
+                "in_use": providers.is_empty() && platform_key.is_some(),
             });
             json_ok(json!({
                 "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),

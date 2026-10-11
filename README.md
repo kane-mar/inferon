@@ -118,11 +118,12 @@ without it you get the data plane only.
 > on behalf of others, and for machines/scripts — not what a developer should
 > use day to day.
 
-Tenant keys are stored **hashed**; the tenant's *upstream master key* (the key the
+Tenant keys are stored **hashed**; a tenant's *upstream master key* (the key the
 proxy uses to call the provider on the tenant's behalf) is stored plaintext in
-`tenants.upstream_openai_key` (DeepSeek is OpenAI-compatible → this column). On the
-self-serve path a new tenant starts on the platform's shared upstream key
-(`UPSTREAM_MASTER_KEY`); a tenant with its own provider key replaces it here.
+`tenants.upstream_openai_key`. That column is for the **platform's own** tenant
+and operator-seeded tenants (`scripts/seed-tenant.sh`); self-serve tenants are
+**keyless** and must add their own provider in the dashboard — the platform key
+is not a pass-through.
 
 ```bash
 ./scripts/seed-tenant.sh "<tenant master upstream key>"
@@ -215,7 +216,7 @@ Repository secrets to set (Settings → Secrets and variables → Actions):
 | `INFERON_HOST` | public hostname (Caddy site address) |
 | `OPERATOR_API_KEY` | operator credential (machine + console access) |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset = 503 on `/auth/login`). Note: GitHub reserves the `GITHUB_` prefix for secret **names**, so the repo secrets are `OAUTH_*`; they are passed to the container as `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET` (what the app reads). |
-| `UPSTREAM_MASTER_KEY` | upstream key given to self-serve tenants (optional) |
+| `UPSTREAM_MASTER_KEY` | platform key for operator-seeded tenants only (`seed-tenant.sh`) — not a self-serve pass-through (optional) |
 | `PROVIDER_ENCRYPTION_KEY` | 32-byte hex key encrypting tenant provider credentials at rest (ITEM-043; unset = provider provisioning disabled) |
 | `OPERATOR_GITHUB_LOGINS` | comma-separated operator GitHub logins (optional) |
 | `ALERT_WEBHOOK_URL` | cost-anomaly webhook (optional) |
