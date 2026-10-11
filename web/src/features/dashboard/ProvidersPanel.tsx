@@ -74,6 +74,7 @@ export const ProvidersPanel = (props: {
   const [key, setKey] = useState('');
   const [org, setOrg] = useState('');
   const [headers, setHeaders] = useState('');
+  const [probe, setProbe] = useState<{ status: 'testing' | 'ok' | 'error'; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tested, setTested] = useState<Record<string, ProviderTest | 'pending'>>({});
@@ -104,6 +105,24 @@ export const ProvidersPanel = (props: {
       setError(errorMessage(cause, t('error')));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const testDraft = async () => {
+    setProbe({ status: 'testing', message: '' });
+    try {
+      const result = await InferonApi.sameOrigin().testProviderDraft({
+        base_url: baseUrl.trim(),
+        key: key.trim(),
+        metadata: metadataFrom(org, headers),
+      });
+      setProbe(
+        result.ok
+          ? { status: 'ok', message: t('probe_ok', { count: result.models.length }) }
+          : { status: 'error', message: result.error ?? t('probe_failed') },
+      );
+    } catch (cause) {
+      setProbe({ status: 'error', message: errorMessage(cause, t('probe_failed')) });
     }
   };
 
@@ -180,32 +199,6 @@ export const ProvidersPanel = (props: {
   return (
     <div className="space-y-6">
       {error && <p className="text-sm text-destructive">{error}</p>}
-
-      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{t('platform_title')}</span>
-              {props.data.platform.in_use && (
-                <span className="
-                  rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs
-                  text-accent-foreground
-                "
-                >
-                  {t('platform_in_use')}
-                </span>
-              )}
-            </div>
-            <div className="truncate font-mono text-xs text-muted-foreground">
-              {props.data.platform.base_url}
-            </div>
-          </div>
-          <span className="font-mono text-xs text-muted-foreground">
-            {props.data.platform.key_hint ?? t('platform_no_key')}
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">{t('platform_help')}</p>
-      </div>
 
       <ul className="overflow-hidden rounded-lg border bg-card">
         {props.data.providers.length === 0
@@ -576,10 +569,37 @@ export const ProvidersPanel = (props: {
                 {t('key_note')}
               </span>
 
-              <div className="sm:col-span-2">
+              <div className="
+                flex flex-wrap items-center gap-3
+                sm:col-span-2
+              "
+              >
                 <Button type="submit" disabled={busy}>
                   {busy ? t('adding') : t('add')}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy || probe?.status === 'testing' || !baseUrl.trim() || !key.trim()}
+                  onClick={testDraft}
+                >
+                  {probe?.status === 'testing' ? t('testing') : t('test_connection')}
+                </Button>
+                {probe && probe.status !== 'testing' && (
+                  <span
+                    className={cn(
+                      'text-sm',
+                      probe.status === 'ok'
+                        ? `
+                          text-emerald-600
+                          dark:text-emerald-400
+                        `
+                        : 'text-destructive',
+                    )}
+                  >
+                    {probe.message}
+                  </span>
+                )}
               </div>
             </form>
           )

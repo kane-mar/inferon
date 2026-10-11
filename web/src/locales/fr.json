@@ -235,10 +235,9 @@
     "enable": "Activer",
     "disable": "Désactiver",
     "make_default": "Définir par défaut",
-    "platform_title": "Clé de plateforme partagée",
-    "platform_in_use": "Utilisée",
-    "platform_no_key": "Aucune clé configurée",
-    "platform_help": "Utilisée pour vos requêtes tant que vous n'avez pas votre propre fournisseur. Affichée masquée — jamais modifiable."
+    "test_connection": "Tester la connexion",
+    "probe_ok": "Connecté — {count} modèles",
+    "probe_failed": "Fournisseur injoignable"
   },
   "RoutingPage": {
     "title_bar": "Routage",

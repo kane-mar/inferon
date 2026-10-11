@@ -235,10 +235,9 @@
     "enable": "Enable",
     "disable": "Disable",
     "make_default": "Make default",
-    "platform_title": "Shared platform key",
-    "platform_in_use": "In use",
-    "platform_no_key": "No key configured",
-    "platform_help": "Used for requests while you have no provider of your own. Shown masked — it is never editable."
+    "test_connection": "Test connection",
+    "probe_ok": "Connected — {count} models",
+    "probe_failed": "Could not reach the provider"
   },
   "RoutingPage": {
     "title_bar": "Routing",

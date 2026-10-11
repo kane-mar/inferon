@@ -52,8 +52,11 @@ ngrok http 1234
 ```
 
 Then: Dashboard → Providers → add (`openai-compatible`, the URL, a key) → **Test
-connection**. The probe (`GET <base>/models`) records reachability and caches the
-model list.
+connection** (before saving) → **Test connection** again on the saved row. The
+probe (`GET <base>/models`) records reachability and caches the model list.
+
+> The platform's own shared upstream connection is **Inferon-private**: it is not
+> shown on the tenant Providers page — tenants always bring their own provider.
 
 ### Posture
 

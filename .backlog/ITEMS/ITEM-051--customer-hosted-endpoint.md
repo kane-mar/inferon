@@ -14,9 +14,11 @@ the hybrid data plane / option C is ITEM-052.)
 1. A **"bring your own endpoint" recipe** documents exposing an on-prem
    OpenAI-compatible server (Ollama, LM Studio, vLLM) behind TLS — Caddy/nginx,
    Cloudflare Tunnel, or ngrok — and registering it as a provider.
-2. The Providers page shows a **persisted reachability** indicator per provider
-   (reachable / unreachable, last checked), set by the Test-connection probe, so
-   a customer can verify an exposed endpoint from the cloud.
+2. The Providers **add** form can test the connection **before** the provider is
+   created (a probe of an unsaved config, `POST /providers/test`); the saved
+   per-provider Test-connection re-checks it. Reachability is persisted per
+   provider (reachable / unreachable, last checked) so a customer can verify an
+   exposed endpoint from the cloud.
 3. The recipe covers scoping (a dedicated provider key, extra headers) and the
    security posture (TLS required for public endpoints; prefer allow-listing).
 4. Model discovery (`GET <base>/models`) works against the exposed endpoint and

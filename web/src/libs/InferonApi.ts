@@ -170,22 +170,14 @@ export type ProviderRow = {
   updated_at: string;
 };
 
-export type PlatformKey = {
-  /** The upstream base URL the shared key points at. */
-  base_url: string;
-  /** Masked hint, e.g. `…ab12`; null when no platform key is configured. */
-  key_hint: string | null;
-  key_configured: boolean;
-  /** True when the tenant has no provider, so the proxy uses this key. */
-  in_use: boolean;
-};
-
 export type ProvidersResponse = {
   providers: ProviderRow[];
-  platform: PlatformKey;
   kinds: string[];
   role: Role;
 };
+
+/** Result of probing an unsaved provider config (ITEM-051). */
+export type ProviderProbeResult = { ok: boolean; models: string[]; error?: string };
 
 export type NewProvider = {
   kind: string;
@@ -434,6 +426,13 @@ export class InferonApi {
 
   testProvider(providerId: string, cookie?: string): Promise<ProviderTest> {
     return this.request<ProviderTest>('POST', `/v1/dashboard/api/providers/${providerId}/test`, {}, { cookie });
+  }
+
+  testProviderDraft(
+    body: { base_url: string; key: string; metadata?: ProviderMetadata },
+    cookie?: string,
+  ): Promise<ProviderProbeResult> {
+    return this.request<ProviderProbeResult>('POST', '/v1/dashboard/api/providers/test', body, { cookie });
   }
 
   models(cookie?: string): Promise<ModelsResponse> {

@@ -1185,30 +1185,11 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
         Err(resp) => return resp,
     };
     match state.provider_store.list(tenant_id).await {
-        Ok(providers) => {
-            // The shared platform key is the upstream when the tenant has no
-            // provider of their own — show it (masked) so the default isn't a
-            // mystery. Never the key material.
-            let tenant = match state.tenant_store.tenant_by_id(tenant_id).await {
-                Ok(tenant) => tenant,
-                Err(e) => return internal(&e.to_string()),
-            };
-            let platform_key = tenant
-                .as_ref()
-                .and_then(|tenant| tenant.upstream_openai_key.as_deref());
-            let platform = json!({
-                "base_url": upstream_base_url(&state.upstream_url),
-                "key_hint": platform_key.map(crate::providers::key_hint),
-                "key_configured": platform_key.is_some(),
-                "in_use": providers.is_empty() && platform_key.is_some(),
-            });
-            json_ok(json!({
-                "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
-                "platform": platform,
-                "kinds": crate::providers::PROVIDER_KINDS,
-                "role": role,
-            }))
-        }
+        Ok(providers) => json_ok(json!({
+            "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
+            "kinds": crate::providers::PROVIDER_KINDS,
+            "role": role,
+        })),
         Err(e) => internal(&e.to_string()),
     }
 }
@@ -1364,6 +1345,53 @@ pub async fn tenant_provider_default(
         })),
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider"),
         Err(e) => internal(&e.to_string()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProviderProbeBody {
+    base_url: String,
+    key: String,
+    #[serde(default)]
+    metadata: crate::providers::ProviderMetadata,
+}
+
+/// POST /v1/dashboard/api/providers/test (owner-only) — probe an **unsaved**
+/// provider config (`GET <base>/models`, the same call Test-connection makes)
+/// so a connection can be verified before it is added. Nothing is persisted;
+/// the key is used for the probe only.
+pub async fn tenant_provider_probe(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ProviderProbeBody>,
+) -> Response {
+    let (_tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let base_url = match normalize_base_url(&body.base_url) {
+        Ok(url) => url,
+        Err(message) => return crate::json_error(StatusCode::BAD_REQUEST, "invalid_base_url", message),
+    };
+    let key = body.key.trim().to_string();
+    if key.is_empty() {
+        return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
+    }
+    let resolved = crate::providers::ResolvedProvider {
+        id: uuid::Uuid::nil(),
+        base_url,
+        api_key: key,
+        metadata: body.metadata,
+    };
+    match fetch_provider_models(&state, &resolved).await {
+        Ok(models) => json_ok(json!({ "ok": true, "models": models })),
+        Err(e) => {
+            tracing::warn!("provider probe failed: {e}");
+            json_ok(json!({ "ok": false, "models": [], "error": e }))
+        }
     }
 }
 
@@ -2851,9 +2879,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_platform_key_is_shown_masked_when_no_provider_is_configured() {
-        // The shared platform key is the upstream when the tenant has no
-        // provider; it must be visible (masked) but never the key itself.
+    async fn the_providers_response_never_exposes_a_platform_key() {
+        // The platform's shared upstream connection is Inferon-private: it is
+        // not surfaced on the tenant Providers page/API.
         let (state, token) = tenant_role_session("owner").await;
         let router = crate::build_router(state);
         let listed = router
@@ -2861,11 +2889,53 @@ mod tests {
             .await
             .unwrap();
         let json: Value = body_json(listed).await;
-        let platform = &json["platform"];
-        assert_eq!(platform["in_use"], true, "no provider -> the platform key serves traffic");
-        assert_eq!(platform["key_configured"], true);
-        assert_eq!(platform["key_hint"], "\u{2026}ster", "masked tail only");
-        assert!(!json.to_string().contains("sk-master"), "never the raw key");
+        assert!(json.get("platform").is_none(), "no platform connection exposed");
+        assert!(!json.to_string().contains("sk-master"), "never the raw platform key");
+    }
+
+    #[tokio::test]
+    async fn owner_can_probe_an_unsaved_provider_and_members_cannot() {
+        // A mock host exposing GET /v1/models.
+        let host = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(|| async {
+                axum::Json(json!({"data":[{"id":"m1"},{"id":"m2"}]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, host).await.unwrap() });
+
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state);
+        let body = format!(r#"{{"base_url":"http://{addr}/v1","key":"sk-x"}}"#);
+        let probed = router
+            .clone()
+            .oneshot(post_with_cookie("/v1/dashboard/api/providers/test", &token, &body))
+            .await
+            .unwrap();
+        assert_eq!(probed.status(), axum::http::StatusCode::OK);
+        let json: Value = body_json(probed).await;
+        assert_eq!(json["ok"], true);
+        let ids: Vec<&str> = json["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["m1", "m2"]);
+
+        // A member cannot probe.
+        let (member_state, member_token) = tenant_role_session("member").await;
+        let member = crate::build_router(member_state)
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers/test",
+                &member_token,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
