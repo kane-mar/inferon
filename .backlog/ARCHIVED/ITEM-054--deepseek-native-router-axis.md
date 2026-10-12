@@ -25,3 +25,17 @@ saving mechanism is **inert for the platform's default provider**.
 - Only downgrade when the request is on the expensive member of a pair.
 
 **Source:** ITEM-018 AC5 finding, 2026-10-12 real traffic.
+
+## Close-out (2026-10-12)
+
+- Router generalised to a `TIER_PAIRS` table (`gpt-4o` → `gpt-4o-mini`,
+  `deepseek-v4-pro` → `deepseek-flash`); `downgrade_target()` +
+  `maybe_downgrade_with()`.
+- `budget::check_budget` returns `ModelOverride { model, reason }`
+  (`heuristic_router` | `budget`); the proxy records the router's downshift on
+  the trace via migration 024 (`traces.router_event`).
+- Tests: a DeepSeek-pair unit test + an integration test that a simple
+  `deepseek-v4-pro` request serves `deepseek-flash` and traces the event.
+- **Live**: a real simple `deepseek-v4-pro` request served `deepseek-flash`,
+  `router_event = {from_model: deepseek-v4-pro, to_model: deepseek-flash,
+  reason: heuristic_router}`.

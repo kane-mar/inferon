@@ -23,13 +23,13 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **done (2026-10-12)** — bring-your-own-endpoint recipe (wiki §A), pre-add Test-connection probe, persisted per-provider reachability, live model discovery. Option A (no cloud relay) |
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
-| ITEM-054 | Router axis for DeepSeek-native tiers | feature | **new** — the ITEM-015 router only handles gpt-4o; generalise to configurable tier pairs (e.g. `deepseek-v4-pro` → `deepseek-flash`) so cost protection applies to real DeepSeek traffic. ITEM-018 finding |
+| ITEM-054 | Router axis for DeepSeek-native tiers | feature | **done (2026-10-12)** — configurable `TIER_PAIRS` (gpt-4o→mini, deepseek-v4-pro→flash); router event traced (`traces.router_event`). ITEM-018 finding |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-053 + ITEM-051 landed; closing open work before new work)_ —
+_Last updated: 2026-10-12 (ITEM-018/051/053/054 closed; open work continues before new work)_ —
 remaining: ITEM-050 (native Anthropic adapter), ITEM-052 (hybrid data plane C),
-ITEM-054 (DeepSeek router axis), and the staged OmniRouting cluster (029–032).
+and the staged OmniRouting cluster (029–032).
