@@ -42,7 +42,9 @@ impl Window {
 }
 
 /// `(requests, cost, errors, prompt_tokens, completion_tokens, avg_ttft,
-/// avg_duration, first_at, last_at)` — the summary aggregate row.
+/// avg_duration, first_at, last_at, cached_tokens, cache_savings)` — the
+/// summary aggregate row. Latency percentiles come from a second query
+/// (`LatencyRow`) because sqlx's tuple `FromRow` tops out at 16 columns.
 type SummaryRow = (
     i64,
     Decimal,
@@ -55,6 +57,16 @@ type SummaryRow = (
     Option<String>,
     i64,
     Decimal,
+);
+
+/// `(ttft_p50, ttft_p95, ttft_p99, duration_p50, duration_p95, duration_p99)`.
+type LatencyRow = (
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
 );
 
 /// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
@@ -313,6 +325,35 @@ async fn query_summary(
         cached_tokens,
         cache_savings,
     ) = row.unwrap_or((0, Decimal::ZERO, 0, 0, 0, None, None, None, None, 0, Decimal::ZERO));
+    // ITEM-056: tail latency percentiles (NULL when there are no samples).
+    let (
+        ttft_p50_ms,
+        ttft_p95_ms,
+        ttft_p99_ms,
+        duration_p50_ms,
+        duration_p95_ms,
+        duration_p99_ms,
+    ): LatencyRow = match sqlx::query_as(
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')",
+    )
+    .bind(tenant)
+    .bind(days)
+    .bind(offset)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
     // Unit economics computed server-side so no float ever touches a cost.
     let avg_cost = if requests > 0 {
         (total_cost / Decimal::from(requests)).round_dp(8)
@@ -337,6 +378,12 @@ async fn query_summary(
         "total_completion_tokens": completion_tokens,
         "avg_ttft_ms": avg_ttft_ms,
         "avg_duration_ms": avg_duration_ms,
+        "ttft_p50_ms": ttft_p50_ms,
+        "ttft_p95_ms": ttft_p95_ms,
+        "ttft_p99_ms": ttft_p99_ms,
+        "duration_p50_ms": duration_p50_ms,
+        "duration_p95_ms": duration_p95_ms,
+        "duration_p99_ms": duration_p99_ms,
         "first_trace_at": first_at,
         "last_trace_at": last_at,
         "cached_prompt_tokens": cached_tokens,

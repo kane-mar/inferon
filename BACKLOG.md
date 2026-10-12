@@ -25,7 +25,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
 | ITEM-054 | Router axis for DeepSeek-native tiers | feature | **done (2026-10-12)** — configurable `TIER_PAIRS` (gpt-4o→mini, deepseek-v4-pro→flash); router event traced (`traces.router_event`). ITEM-018 finding |
 | ITEM-055 | Quality & outcome telemetry | improvement | **new** — per-request `outcome` (ok/empty/refused/error) + optional client quality signal; quality view by model/prompt. The missing input for ITEM-029/030 |
-| ITEM-056 | Latency percentiles & proxy overhead | improvement | **new** — p50/p95/p99 of TTFT/total (not just the mean) + proxy-vs-upstream overhead; p95 alertable |
+| ITEM-056 | Latency percentiles | improvement | **new** — p50/p95/p99 of TTFT/total from Postgres `percentile_cont`; dashboard shows p95 headline. Proxy-overhead split + p95 alerts split to ITEM-066 |
 | ITEM-057 | Error taxonomy & truncation visibility | improvement | **new** — classify failures (upstream_429/5xx, transport, client/inferon 4xx, guard, timeout); surface the already-persisted `truncated`/abort rate |
 | ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **new** — compute what routing/fallback/cache actually saved (counterfactual model + price delta); reconcile actual + savings = unreduced |
 | ITEM-059 | Telemetry integrity counters | improvement | **new** — traces emitted vs persisted vs dropped (by reason); unpriced-model count; alert on drop rate |
@@ -35,6 +35,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-063 | Cache-affinity routing | feature | **new** — route same-prefix requests to the provider/model that has the prefix warm; weigh cache value vs downgrade value; bounded TTL affinity |
 | ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
 | ITEM-065 | Edge node mode & config sync (hybrid data plane — slice 2) | feature | **new** — edge mode against a local provider, revocable edge token + enrollment, versioned config sync, telemetry shipping via ITEM-052, explicit offline behaviour, node health |
+| ITEM-066 | Proxy overhead split & latency regression alerts | improvement | **new** — expose proxy time vs upstream time; alert on a p95 regression. Split from ITEM-056 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |

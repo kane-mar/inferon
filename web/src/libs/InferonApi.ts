@@ -51,6 +51,13 @@ export type Summary = {
   cache_savings_usd: string;
   avg_ttft_ms: number | null;
   avg_duration_ms: number | null;
+  /** ITEM-056: tail latency percentiles (ms), null when no samples. */
+  ttft_p50_ms: number | null;
+  ttft_p95_ms: number | null;
+  ttft_p99_ms: number | null;
+  duration_p50_ms: number | null;
+  duration_p95_ms: number | null;
+  duration_p99_ms: number | null;
   first_trace_at: string | null;
   last_trace_at: string | null;
 };

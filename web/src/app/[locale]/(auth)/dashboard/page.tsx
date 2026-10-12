@@ -133,7 +133,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     : null;
   const tokensDelta = previous ? deltaPct(tokens, previousTokens) : null;
   const errorRateDelta = previous ? deltaPct(errorRate, previousErrorRate) : null;
-  const ttftDelta = previous ? deltaPct(summary.avg_ttft_ms, previous.avg_ttft_ms) : null;
+  const ttftDelta = previous ? deltaPct(summary.ttft_p95_ms, previous.ttft_p95_ms) : null;
 
   const chartSeriesList: LineSeries[] = [
     {
@@ -255,10 +255,11 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={formatUsd(summary.cache_savings_usd)}
         />
         <KpiCard
-          label={t('avg_ttft')}
-          value={formatMs(summary.avg_ttft_ms)}
+          label={t('p95_ttft')}
+          value={formatMs(summary.ttft_p95_ms)}
           delta={ttftDelta}
           goodWhen="down"
+          hint={`${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
         />
       </div>
 

@@ -114,6 +114,7 @@
     "cache_savings": "Économies de cache",
     "cached": "En cache",
     "avg_ttft": "TTFT moyen",
+    "p95_ttft": "TTFT p95",
     "ttft": "TTFT",
     "current": "Période actuelle",
     "previous": "Période précédente"
