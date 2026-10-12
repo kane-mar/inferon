@@ -24,12 +24,27 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
 | ITEM-054 | Router axis for DeepSeek-native tiers | feature | **done (2026-10-12)** — configurable `TIER_PAIRS` (gpt-4o→mini, deepseek-v4-pro→flash); router event traced (`traces.router_event`). ITEM-018 finding |
+| ITEM-055 | Quality & outcome telemetry | improvement | **new** — per-request `outcome` (ok/empty/refused/error) + optional client quality signal; quality view by model/prompt. The missing input for ITEM-029/030 |
+| ITEM-056 | Latency percentiles & proxy overhead | improvement | **new** — p50/p95/p99 of TTFT/total (not just the mean) + proxy-vs-upstream overhead; p95 alertable |
+| ITEM-057 | Error taxonomy & truncation visibility | improvement | **new** — classify failures (upstream_429/5xx, transport, client/inferon 4xx, guard, timeout); surface the already-persisted `truncated`/abort rate |
+| ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **new** — compute what routing/fallback/cache actually saved (counterfactual model + price delta); reconcile actual + savings = unreduced |
+| ITEM-059 | Telemetry integrity counters | improvement | **new** — traces emitted vs persisted vs dropped (by reason); unpriced-model count; alert on drop rate |
+| ITEM-060 | Throughput & capacity metrics | improvement | **new** — requests/min, in-flight gauge, telemetry queue depth, flush lag (operator endpoint) |
+| ITEM-061 | Provider experience metrics | improvement | **new** — per-provider latency (p95) + error rate alongside spend/reachability; alert on degradation |
+| ITEM-062 | Product activation & retention metrics | improvement | **new** — active tenants/keys, requests per developer, first-request funnel; operator-only aggregates |
+| ITEM-063 | Cache-affinity routing | feature | **new** — route same-prefix requests to the provider/model that has the prefix warm; weigh cache value vs downgrade value; bounded TTL affinity |
+| ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-018/051/053/054 closed; open work continues before new work)_ —
-remaining: ITEM-050 (native Anthropic adapter), ITEM-052 (hybrid data plane C),
-and the staged OmniRouting cluster (029–032).
+_Last updated: 2026-10-12 (ITEM-018/051/053/054 closed; metrics review captured as ITEM-055..062)_ —
+work the open set **top-down**: first the pre-existing open work **ITEM-050** (native
+Anthropic adapter) and **ITEM-052** (hybrid data plane C), then the metric items
+**055 → 062**, then the staged OmniRouting cluster **029–032**. ITEM-055 (quality)
+is the input 029/030 consume, so it lands before the OmniRouting unpark.
+ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
+closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
+governance (versioning, bound, kill switch), it does not replace them.
