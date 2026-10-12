@@ -4,7 +4,7 @@
 
 Inferon is live at `https://inferon.agilefederation.com/v1` with true cost numbers and automatic cost protection (Slice 1 + 2 delivered). The next horizon: put it in front of **real external developers**, make the dashboard and alerting trustworthy enough for them to stay, then walk the autonomy roadmap — schema guard, then OmniRouting — with LoRA distillation deliberately parked last.
 
-Delivered: Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007), Slice 2 (heuristic router + budget circuit breaker — ITEM-015/016) plus ITEM-008..014, 017, 019, 020, 023–027, 034–042 — all archived (see `.backlog/ARCHIVED/`). The data plane is real and live; the **tenant-facing control plane is not** — a tenant cannot bring their own provider, choose models, set fallback rules, or configure routing/budget from the UI, and the onboarding flow does not yet back the landing promise. Those gaps are captured as ITEM-043..048 and rank **above** putting the service in front of real external developers.
+Delivered: Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007), Slice 2 (heuristic router + budget circuit breaker — ITEM-015/016) plus ITEM-008..014, 017, 019, 020, 023–027, 034–042 — all archived (see `.backlog/ARCHIVED/`). The data plane is real and live, and the tenant-facing **control plane is delivered** (providers, per-provider models, fallback rules, routing/budget controls, spend breakdowns, SDK onboarding) — archived as ITEM-043–049. Real SDK traffic now flows (ITEM-018, archived 2026-10-12). Customer-hosted connectivity is captured as ITEM-051/052; the remaining vision work is the autonomy roadmap (OmniRouting, then distillation), which the real traffic now unblocks.
 
 Project decisions that shape this backlog (see `wiki/llm-inference/inferon-project-direction.md`): Docker everywhere (deployment unit = image), Postgres for telemetry/control plane, working name **inferon**, default AI **DeepSeek**, toolchain **Rust + bash only** (no Python, no Ruby — SQL migrations unaffected).
 
@@ -22,13 +22,15 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
 | ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **new** — expose an on-prem model behind TLS and register it as a provider; a recipe + persisted reachability. Option A (no cloud relay) |
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
-| ITEM-018 | First real developer onboarding | improvement | **PO call** — hand the staged key to a real developer; now sits *after* the control plane (043–048) |
+| ITEM-053 | Cache-hit telemetry & savings | improvement | **new** — persist cached prompt tokens and show cache hit rate + savings (real traffic is ~90% cached: $14.59 vs ~$141 all-miss). ITEM-018 finding |
+| ITEM-054 | Router axis for DeepSeek-native tiers | feature | **new** — the ITEM-015 router only handles gpt-4o; generalise to configurable tier pairs (e.g. `deepseek-v4-pro` → `deepseek-flash`) so cost protection applies to real DeepSeek traffic. ITEM-018 finding |
+| ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-11 (customer-hosted connectivity: A direct endpoint + C hybrid data plane; B edge connector deferred for latency)_ —
-remaining: ITEM-050 (native Anthropic adapter), ITEM-051 (direct endpoint),
-ITEM-052 (hybrid data plane), ITEM-018 (PO handoff), and the staged OmniRouting
-cluster (029–032).
+_Last updated: 2026-10-12 (ITEM-018 closed with real traffic; findings 053/054 captured)_ —
+remaining: ITEM-050 (native Anthropic adapter), ITEM-051/052 (customer-hosted A/C),
+ITEM-053 (cache savings), ITEM-054 (DeepSeek router axis), and the staged
+OmniRouting cluster (029–032), which the real traffic now unblocks.

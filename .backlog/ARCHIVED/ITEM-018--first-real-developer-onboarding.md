@@ -83,3 +83,34 @@ tenant row is gone); the local file is retired as `*.lost-2026-10-04`. The path
 stays closed — a developer simply self-serves (once the GitHub OAuth app env is
 set on the host). The freshly rebuilt host holds one re-minted tenant
 (`first-real-developer.key`) on the shared upstream key.
+
+## Close-out (2026-10-12) — real traffic verified (dogfooding)
+
+The PO has been using the proxy through their own SDK (the platform tenant
+`3022f2ab`), so the "real developer's first request" gate is met by dogfooding:
+a key → the public base URL → real streaming SDK traffic. Live evidence:
+
+- **1,226+ traces, 2 tenants** (2026-10-04 → 10-12); **1,223 of 1,227** successful
+  requests were **streaming** (SSE 200). README "For developers" section present
+  (AC1). Most traffic carries `tools` (function calling).
+- **Operator view lists both tenants** (3022f2ab: 1,228 reqs / $14.59; 8bcb3ce1:
+  1 req / 1 error). Tenant key → operator endpoint = **403**; tenant key → own
+  summary = **200**; cross-tenant isolation holds (AC4).
+- The tenant-scoped dashboard shows the data (AC3).
+
+**AC5 findings (captured as new items, not worked around):**
+1. **Prompt caching is the dominant cost lever and it is invisible.** 641.5M
+   prompt tokens on `deepseek-flash` cost **$14.59**; at full miss price that is
+   **~$141** — ~90% cache hit, **~$126 saved** — yet `traces` persists no
+   cached-token count, so the dashboard cannot show cache savings. → **ITEM-053**.
+2. **The heuristic router never fires on real traffic.** Usage is 99.7%
+   `deepseek-flash`; the ITEM-015 router only downgrades gpt-4o-tier models, so it
+   is inert for DeepSeek-native traffic. → **ITEM-054** (a DeepSeek-native /
+   configurable router axis).
+- Minor and already handled: 4 truncated traces (client aborts, ITEM-009); 1 × 502
+  from the previously-unreachable LAN provider (replaced by a reachable DeepSeek
+  provider + the 5s connect timeout).
+
+The out-of-band handoff path was already closed (ITEM-040): self-serve sign-in is
+the only human onboarding. Archived with dogfooding traffic as the real-traffic
+evidence; the data now unblocks the data-dependent items (029/030).
