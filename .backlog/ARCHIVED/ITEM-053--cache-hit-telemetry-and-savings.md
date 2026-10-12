@@ -26,3 +26,20 @@ is parsed into the trace but **not persisted**.
 - Reuse `cost::price_for` (miss vs hit rates) and the ITEM-047 breakdown panels.
 
 **Source:** ITEM-018 AC5 finding, 2026-10-12 real traffic.
+
+## Close-out (2026-10-12)
+
+Delivered:
+- migration 023: `traces.cached_prompt_tokens` + `traces.cache_savings_usd`.
+- telemetry worker persists both; `cache_savings = cost(no cache) − cost(cached)`
+  via new `cost::cache_savings` (unit-tested: 1M prompt / 500k cached on
+  deepseek-chat → `$0.1065`; no cache or a miss-only model → 0).
+- `GET /api/summary` exposes `cached_prompt_tokens`, `cache_hit_rate`,
+  `cache_savings_usd`; `GET /api/by-model` exposes cached tokens + savings.
+- Web: a **Cache savings** KPI card and a **Cached %** column on the
+  spend-by-model table.
+
+Live: a real request (943,324 prompt tokens, 943,104 cached) recorded a
+**$0.2009** saving; columns + API fields verified.
+Note: historical rows keep 0 savings (cached tokens were never persisted) — the
+metric accrues from new traffic.

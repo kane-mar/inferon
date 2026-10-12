@@ -22,7 +22,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
 | ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **new** — expose an on-prem model behind TLS and register it as a provider; a recipe + persisted reachability. Option A (no cloud relay) |
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
-| ITEM-053 | Cache-hit telemetry & savings | improvement | **new** — persist cached prompt tokens and show cache hit rate + savings (real traffic is ~90% cached: $14.59 vs ~$141 all-miss). ITEM-018 finding |
+| ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
 | ITEM-054 | Router axis for DeepSeek-native tiers | feature | **new** — the ITEM-015 router only handles gpt-4o; generalise to configurable tier pairs (e.g. `deepseek-v4-pro` → `deepseek-flash`) so cost protection applies to real DeepSeek traffic. ITEM-018 finding |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
@@ -30,7 +30,6 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-018 closed with real traffic; findings 053/054 captured)_ —
+_Last updated: 2026-10-12 (ITEM-053 landed; closing open work before new work)_ —
 remaining: ITEM-050 (native Anthropic adapter), ITEM-051/052 (customer-hosted A/C),
-ITEM-053 (cache savings), ITEM-054 (DeepSeek router axis), and the staged
-OmniRouting cluster (029–032), which the real traffic now unblocks.
+ITEM-054 (DeepSeek router axis), and the staged OmniRouting cluster (029–032).
