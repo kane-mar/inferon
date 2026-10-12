@@ -104,6 +104,7 @@ mod tests {
             truncated: false,
             guard_event: None,
             routing_event: None,
+            router_event: None,
             provider_id: None,
             api_key_id: None,
         }

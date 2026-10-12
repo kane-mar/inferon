@@ -15,6 +15,23 @@ const DOWNGRADE_THRESHOLD: f64 = 0.35;
 const CODE_MARKERS: [&str; 7] = ["```", "def ", "class ", "fn ", "import ", "SELECT ", "FROM "];
 const JSON_SPEC_MARKERS: [&str; 2] = ["\"type\": \"object\"", "\"properties\""];
 
+/// Expensive → cheap model pairs the heuristic router can downshift. Ordered:
+/// the first pair whose expensive member matches (and whose cheap member does
+/// not) wins. DeepSeek-native traffic downshifts `deepseek-v4-pro` →
+/// `deepseek-flash` (ITEM-054).
+pub const TIER_PAIRS: &[(&str, &str)] = &[
+    ("gpt-4o", "gpt-4o-mini"),
+    ("deepseek-v4-pro", "deepseek-flash"),
+];
+
+/// The cheap model to downshift `model` to, if it is the expensive member of a
+/// configured tier pair. `None` for the cheap member itself or an unpaired model.
+pub fn downgrade_target(model: &str) -> Option<&'static str> {
+    TIER_PAIRS.iter().find_map(|&(expensive, cheap)| {
+        (model.starts_with(expensive) && !model.starts_with(cheap)).then_some(cheap)
+    })
+}
+
 /// gpt-4o tier but NOT gpt-4o-mini (a mini request can't be downgraded).
 pub fn is_gpt4o_tier(model: &str) -> bool {
     model.starts_with("gpt-4o") && !model.starts_with("gpt-4o-mini")
@@ -72,15 +89,13 @@ pub fn complexity_score(payload: &Value) -> f64 {
     score.min(1.0)
 }
 
-/// Downgrade a gpt-4o-tier request to gpt-4o-mini when it is simpler than
-/// `threshold`. Returns the model to use; `None` = keep the client's.
+/// Downgrade a request on the expensive member of a configured tier pair to its
+/// cheap model when it is simpler than `threshold`. Returns the model to use;
+/// `None` = keep the client's.
 pub fn maybe_downgrade_with(payload: &Value, threshold: f64) -> Option<String> {
     let model = payload["model"].as_str()?;
-    if is_gpt4o_tier(model) && complexity_score(payload) < threshold {
-        Some("gpt-4o-mini".to_string())
-    } else {
-        None
-    }
+    let target = downgrade_target(model)?;
+    (complexity_score(payload) < threshold).then(|| target.to_string())
 }
 
 /// Downgrade with the default threshold (ITEM-015 behaviour).
@@ -200,5 +215,22 @@ mod tests {
         let simple = payload("gpt-4o", serde_json::json!({}));
         assert_eq!(maybe_downgrade_with(&simple, 0.0), None);
         assert_eq!(maybe_downgrade_with(&simple, 0.35), Some("gpt-4o-mini".to_string()));
+    }
+
+    #[test]
+    fn deepseek_tier_is_downgraded_by_the_same_router() {
+        // ITEM-054: the pair table includes a DeepSeek pair, so the router is no
+        // longer gpt-4o-only.
+        let simple = payload("deepseek-v4-pro", serde_json::json!({}));
+        assert_eq!(maybe_downgrade(&simple).as_deref(), Some("deepseek-flash"));
+        // The cheap member is never downgraded again.
+        assert_eq!(maybe_downgrade(&payload("deepseek-flash", serde_json::json!({}))), None);
+        // `deepseek-chat` is not a pair member.
+        assert_eq!(maybe_downgrade(&payload("deepseek-chat", serde_json::json!({}))), None);
+        // Target mapping.
+        assert_eq!(downgrade_target("deepseek-v4-pro"), Some("deepseek-flash"));
+        assert_eq!(downgrade_target("gpt-4o"), Some("gpt-4o-mini"));
+        assert_eq!(downgrade_target("gpt-4o-mini"), None);
+        assert_eq!(downgrade_target("deepseek-flash"), None);
     }
 }

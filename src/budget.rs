@@ -237,6 +237,17 @@ fn reject_response() -> Response {
     )
 }
 
+/// Why the request model was overridden (ITEM-054: recorded on the trace).
+pub const ROUTER_REASON: &str = "heuristic_router";
+pub const BUDGET_REASON: &str = "budget";
+
+/// A model override chosen on the hot path, with its reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelOverride {
+    pub model: String,
+    pub reason: &'static str,
+}
+
 /// Apply the breaker AND the heuristic router on the hot path, before
 /// forwarding. Returns the model the request should use (`None` = keep the
 /// client's model) or a rejection response when the hard cap is hit.
@@ -244,7 +255,7 @@ pub async fn check_budget(
     state: &Arc<AppState>,
     tenant_id: Uuid,
     payload: &Value,
-) -> Result<Option<String>, Response> {
+) -> Result<Option<ModelOverride>, Response> {
     let budget = match state.budget_store.budget_for(tenant_id).await {
         Ok(budget) => budget,
         Err(e) => {
@@ -260,16 +271,27 @@ pub async fn check_budget(
     // (ITEM-015 behaviour unchanged); an explicit config can turn it off or
     // move the threshold (ITEM-046).
     let Some(budget) = budget else {
-        return Ok(crate::router::maybe_downgrade(payload));
+        return Ok(crate::router::maybe_downgrade(payload).map(|model| ModelOverride {
+            model,
+            reason: ROUTER_REASON,
+        }));
     };
     match enforce_budget(&budget) {
         BudgetVerdict::Allow => Ok(if budget.router_enabled {
-            crate::router::maybe_downgrade_with(payload, budget.router_threshold)
+            crate::router::maybe_downgrade_with(payload, budget.router_threshold).map(|model| {
+                ModelOverride {
+                    model,
+                    reason: ROUTER_REASON,
+                }
+            })
         } else {
             None
         }),
         BudgetVerdict::Reject => Err(reject_response()),
-        BudgetVerdict::DowngradeTo(model) => Ok(Some(model)),
+        BudgetVerdict::DowngradeTo(model) => Ok(Some(ModelOverride {
+            model,
+            reason: BUDGET_REASON,
+        })),
     }
 }
 

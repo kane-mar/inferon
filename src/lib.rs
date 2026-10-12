@@ -382,6 +382,7 @@ async fn proxy_chat_completions(
         system_prompt_hash: system_prompt_hash(&payload),
         raw_prompt: payload,
         routing_event: None,
+        router_event: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -430,21 +431,28 @@ async fn proxy_chat_completions(
     };
     let mut model_override = budget_override;
     // ITEM-044 AC4: routing never selects a model the tenant disabled — drop the
-    // override and serve the (already-allowed) requested model.
-    if let Some(model) = model_override.clone() {
+    // override and serve the (already-allowed) requested model. ITEM-054: when
+    // the heuristic router caused the override, record it on the trace.
+    if let Some(chosen) = model_override.clone() {
         if state
             .model_store
-            .is_disabled(route.provider_id, &model)
+            .is_disabled(route.provider_id, &chosen.model)
             .await
             .unwrap_or(false)
         {
             model_override = None;
+        } else if chosen.reason == budget::ROUTER_REASON {
+            meta.router_event = Some(json!({
+                "from_model": meta.model,
+                "to_model": chosen.model,
+                "reason": chosen.reason,
+            }));
         }
     }
     // ITEM-045: the ordered chain — the primary (after any router/budget override),
     // then the tenant's fallbacks, de-duped and with disabled models dropped
     // (ITEM-044). Loaded once per request; an empty chain changes nothing.
-    let primary = model_override.take().unwrap_or_else(|| meta.model.clone());
+    let primary = model_override.take().map(|chosen| chosen.model).unwrap_or_else(|| meta.model.clone());
     let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
         Ok(models) => models,
         Err(e) => {
@@ -663,6 +671,8 @@ struct RequestMeta {
     raw_prompt: Value,
     /// ITEM-045: set when a fallback chain changed the serving model.
     routing_event: Option<Value>,
+    /// ITEM-054: set when the heuristic router downshifted the model.
+    router_event: Option<Value>,
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
@@ -712,6 +722,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         truncated: outcome.truncated,
         guard_event: None,
         routing_event: meta.routing_event.clone(),
+        router_event: meta.router_event.clone(),
         provider_id: meta.provider_id,
         api_key_id: meta.api_key_id,
     }
@@ -1907,6 +1918,7 @@ mod tests {
             truncated: false,
             guard_event: None,
             routing_event: None,
+            router_event: None,
             provider_id: None,
             api_key_id: None,
         }
@@ -2075,6 +2087,26 @@ mod tests {
         assert_eq!(json["model"], "gpt-4o-mini", "upstream must see the downgraded model");
         let msg = rx.recv().await.unwrap();
         assert_eq!(msg.request_model, "gpt-4o-mini", "trace reflects the actual model");
+    }
+
+    #[tokio::test]
+    async fn simple_deepseek_v4_pro_is_downgraded_and_traced() {
+        // ITEM-054: the router now downshifts DeepSeek-native traffic too, and
+        // the decision is recorded on the trace.
+        let (response, mut rx) = traced_request(
+            r#"{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"write a haiku"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "deepseek-flash", "upstream sees the cheap tier");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.request_model, "deepseek-flash");
+        let event = msg.router_event.expect("router event recorded");
+        assert_eq!(event["from_model"], "deepseek-v4-pro");
+        assert_eq!(event["to_model"], "deepseek-flash");
+        assert_eq!(event["reason"], "heuristic_router");
     }
 
     #[tokio::test]
