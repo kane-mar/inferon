@@ -219,7 +219,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       <div className="
         mt-6 grid grid-cols-2 gap-3
         lg:grid-cols-3
-        xl:grid-cols-6
+        xl:grid-cols-7
       "
       >
         <KpiCard
@@ -249,6 +249,10 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           label={t('tokens')}
           value={formatCompact(tokens)}
           delta={tokensDelta}
+        />
+        <KpiCard
+          label={t('cache_savings')}
+          value={formatUsd(summary.cache_savings_usd)}
         />
         <KpiCard
           label={t('avg_ttft')}
@@ -314,6 +318,13 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                     uppercase
                   "
                   >
+                    {t('cached')}
+                  </th>
+                  <th className="
+                    py-2 text-right font-mono text-xs font-medium tracking-wide
+                    uppercase
+                  "
+                  >
                     {t('cost')}
                   </th>
                 </tr>
@@ -331,6 +342,14 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                     <td className="py-2 text-right tabular-nums">{formatInt(model.requests)}</td>
                     <td className="py-2 text-right tabular-nums">
                       {formatCompact(model.prompt_tokens + model.completion_tokens)}
+                    </td>
+                    <td className="
+                      py-2 text-right text-muted-foreground tabular-nums
+                    "
+                    >
+                      {model.prompt_tokens > 0
+                        ? `${Math.round((model.cached_prompt_tokens / model.prompt_tokens) * 100)}%`
+                        : '—'}
                     </td>
                     <td className="py-2 text-right tabular-nums">{formatUsd(model.cost_usd)}</td>
                   </tr>

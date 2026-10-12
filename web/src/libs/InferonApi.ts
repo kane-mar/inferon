@@ -45,6 +45,10 @@ export type Summary = {
   avg_cost_usd: string;
   total_prompt_tokens: number;
   total_completion_tokens: number;
+  cached_prompt_tokens: number;
+  /** Fraction of prompt tokens served from the provider cache (0..1), or null. */
+  cache_hit_rate: number | null;
+  cache_savings_usd: string;
   avg_ttft_ms: number | null;
   avg_duration_ms: number | null;
   first_trace_at: string | null;
@@ -57,6 +61,8 @@ export type ModelRow = {
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: string;
+  cached_prompt_tokens: number;
+  cache_savings_usd: string;
 };
 
 export type ByModel = { models: ModelRow[] };

@@ -111,6 +111,8 @@
     "avg_cost": "Coût moyen / requête",
     "error_rate": "Taux d'erreur",
     "tokens": "Jetons",
+    "cache_savings": "Économies de cache",
+    "cached": "En cache",
     "avg_ttft": "TTFT moyen",
     "ttft": "TTFT",
     "current": "Période actuelle",

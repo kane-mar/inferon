@@ -111,6 +111,8 @@
     "avg_cost": "Avg cost / request",
     "error_rate": "Error rate",
     "tokens": "Tokens",
+    "cache_savings": "Cache savings",
+    "cached": "Cached",
     "avg_ttft": "Avg TTFT",
     "ttft": "TTFT",
     "current": "Current",

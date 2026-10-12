@@ -53,6 +53,8 @@ type SummaryRow = (
     Option<f64>,
     Option<String>,
     Option<String>,
+    i64,
+    Decimal,
 );
 
 /// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
@@ -280,7 +282,9 @@ async fn query_summary(
                     AVG(time_to_first_token_ms)::float8,
                     AVG(total_duration_ms)::float8,
                     MIN(created_at)::text,
-                    MAX(created_at)::text
+                    MAX(created_at)::text,
+                    COALESCE(SUM(cached_prompt_tokens), 0),
+                    COALESCE(SUM(cache_savings_usd), 0)
              FROM traces
              WHERE ($1::uuid IS NULL OR tenant_id = $1)
                AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -306,12 +310,19 @@ async fn query_summary(
         avg_duration_ms,
         first_at,
         last_at,
-    ) = row.unwrap_or((0, Decimal::ZERO, 0, 0, 0, None, None, None, None));
+        cached_tokens,
+        cache_savings,
+    ) = row.unwrap_or((0, Decimal::ZERO, 0, 0, 0, None, None, None, None, 0, Decimal::ZERO));
     // Unit economics computed server-side so no float ever touches a cost.
     let avg_cost = if requests > 0 {
         (total_cost / Decimal::from(requests)).round_dp(8)
     } else {
         Decimal::ZERO
+    };
+    let cache_hit_rate = if prompt_tokens > 0 {
+        Some(cached_tokens as f64 / prompt_tokens as f64)
+    } else {
+        None
     };
     json_ok(json!({
         "scope": scope_label,
@@ -328,6 +339,9 @@ async fn query_summary(
         "avg_duration_ms": avg_duration_ms,
         "first_trace_at": first_at,
         "last_trace_at": last_at,
+        "cached_prompt_tokens": cached_tokens,
+        "cache_hit_rate": cache_hit_rate,
+        "cache_savings_usd": cache_savings.to_string(),
     }))
 }
 
@@ -336,9 +350,10 @@ async fn query_by_model(
     tenant: Option<uuid::Uuid>,
     window: &Window,
 ) -> Response {
-    let rows: Vec<(String, i64, i64, i64, Decimal)> = match sqlx::query_as(
+    let rows: Vec<(String, i64, i64, i64, Decimal, i64, Decimal)> = match sqlx::query_as(
         "SELECT request_model, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
-                COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0)
+                COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0),
+                COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0)
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
            AND created_at >= NOW() - ($2 * INTERVAL '1 day')
@@ -355,13 +370,15 @@ async fn query_by_model(
 
     let models: Vec<Value> = rows
         .into_iter()
-        .map(|(model, requests, prompt_tokens, completion_tokens, cost)| {
+        .map(|(model, requests, prompt_tokens, completion_tokens, cost, cached_tokens, cache_savings)| {
             json!({
                 "model": model,
                 "requests": requests,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "cost_usd": cost.to_string(),
+                "cached_prompt_tokens": cached_tokens,
+                "cache_savings_usd": cache_savings.to_string(),
             })
         })
         .collect();

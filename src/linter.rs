@@ -100,6 +100,7 @@ mod tests {
             raw_completion: None,
             waste_detected: None,
             upstream_cost_usd: Decimal::ZERO,
+            cache_savings_usd: Decimal::ZERO,
             truncated: false,
             guard_event: None,
             routing_event: None,

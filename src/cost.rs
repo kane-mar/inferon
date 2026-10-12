@@ -101,6 +101,20 @@ pub fn calculate_cost(model: &str, prompt_tokens: i32, completion_tokens: i32, c
         + (Decimal::from(completion_tokens) / per_million) * price.completion
 }
 
+/// ITEM-053: the saving a prompt cache provides — the cost with no cache minus
+/// the cost with the actual cached tokens. Zero when nothing was cached (or the
+/// model has no hit rate).
+pub fn cache_savings(
+    model: &str,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i64,
+) -> Decimal {
+    let uncached = calculate_cost(model, prompt_tokens, completion_tokens, 0);
+    let costed = calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens);
+    (uncached - costed).max(Decimal::ZERO)
+}
+
 /// Estimated saving if a gpt-4o-tier request had run on gpt-4o-mini
 /// (price delta applied to the actual token counts).
 pub fn savings_if_mini(prompt_tokens: i64, completion_tokens: i64) -> Decimal {
@@ -139,6 +153,20 @@ fn dec(s: &str) -> Decimal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_savings_is_uncached_minus_cached() {
+        // deepseek-chat: miss 0.22, hit 0.007 per 1M. 1M prompt, 500k cached:
+        // uncached 0.22; cached 0.5*0.22 + 0.5*0.007 = 0.1135 -> saving 0.1065.
+        assert_eq!(
+            cache_savings("deepseek-chat", 1_000_000, 0, 500_000),
+            dec("0.1065")
+        );
+        // Nothing cached -> no saving.
+        assert_eq!(cache_savings("deepseek-chat", 1_000_000, 0, 0), Decimal::ZERO);
+        // A miss-only model (no hit rate) -> no saving.
+        assert_eq!(cache_savings("gpt-4o", 1_000_000, 0, 500_000), Decimal::ZERO);
+    }
 
     fn mk(miss: &str, completion: &str) -> Price {
         miss_only(miss, completion)

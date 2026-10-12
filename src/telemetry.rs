@@ -31,6 +31,9 @@ pub struct TraceMessage {
     pub raw_completion: Option<Value>,
     pub waste_detected: Option<Value>,
     pub upstream_cost_usd: rust_decimal::Decimal,
+    /// ITEM-053: estimated saving vs a no-cache call (the provider's prompt
+    /// cache served part of the prompt), computed at telemetry time.
+    pub cache_savings_usd: rust_decimal::Decimal,
     /// True when a streaming response ended before the upstream finished
     /// (client abort or mid-stream error) — token counts are then best-effort.
     pub truncated: bool,
@@ -89,8 +92,8 @@ impl TraceSink for PostgresTraceSink {
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
                     total_duration_ms, status_code, raw_prompt, raw_completion,
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
-                    provider_id, api_key_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"#,
+                    provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -110,6 +113,8 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.routing_event.as_ref().map(Json))
             .bind(msg.provider_id)
             .bind(msg.api_key_id)
+            .bind(msg.cached_prompt_tokens.map(|t| t as i32))
+            .bind(msg.cache_savings_usd)
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -188,12 +193,21 @@ pub async fn telemetry_worker(
                     // once instead of silently over/under-charging.
                     cost::warn_if_unpriced(&msg.request_model);
                     msg.waste_detected = linter::lint(&msg, repeat_count);
-                    msg.upstream_cost_usd = cost::calculate_cost(
+                    // ITEM-053: cost with caching, and the saving vs no cache.
+                    let cached = msg.cached_prompt_tokens.unwrap_or(0);
+                    let costed = cost::calculate_cost(
                         &msg.request_model,
                         msg.prompt_tokens,
                         msg.completion_tokens,
-                        msg.cached_prompt_tokens.unwrap_or(0),
+                        cached,
                     );
+                    msg.cache_savings_usd = cost::cache_savings(
+                        &msg.request_model,
+                        msg.prompt_tokens,
+                        msg.completion_tokens,
+                        cached,
+                    );
+                    msg.upstream_cost_usd = costed;
                     buffer.push(msg);
                     if buffer.len() >= batch_size {
                         sink.flush(&mut buffer).await;
