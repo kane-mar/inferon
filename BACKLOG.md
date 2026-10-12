@@ -28,7 +28,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-056 | Latency percentiles | improvement | **done (2026-10-12)** — p50/p95/p99 of TTFT/total from Postgres `percentile_cont`; dashboard shows p95 headline + avg hint. Live: matches direct SQL (p95 4585ms vs avg 1660ms). Overhead split + p95 alerts are ITEM-066 |
 | ITEM-057 | Error taxonomy & truncation visibility | improvement | **new** — classify failures (upstream_429/5xx, transport, client/inferon 4xx, guard, timeout); surface the already-persisted `truncated`/abort rate |
 | ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **new** — compute what routing/fallback/cache actually saved (counterfactual model + price delta); reconcile actual + savings = unreduced |
-| ITEM-059 | Telemetry integrity counters | improvement | **new** — traces emitted vs persisted vs dropped (by reason); unpriced-model count; alert on drop rate |
+| ITEM-059 | Telemetry integrity counters | improvement | **done (2026-10-12)** — in-process counters for traces queued/persisted/dropped(by reason) + unpriced models; operator-only `GET /operator/metrics`. Live: counters move with traffic, `lost:0` |
 | ITEM-060 | Throughput & capacity metrics | improvement | **new** — requests/min, in-flight gauge, telemetry queue depth, flush lag (operator endpoint) |
 | ITEM-061 | Provider experience metrics | improvement | **new** — per-provider latency (p95) + error rate alongside spend/reachability; alert on degradation |
 | ITEM-062 | Product activation & retention metrics | improvement | **new** — active tenants/keys, requests per developer, first-request funnel; operator-only aggregates |
@@ -42,11 +42,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-018/050/051/052/053/054/056 closed; metrics review captured as ITEM-055..064)_ —
-work the open set **top-down**: next the metric items **055, 057–062**, then the
-closed-loop items **063–064**, then **ITEM-065** (edge node mode) and **ITEM-066**
-(overhead/alerts), then the staged OmniRouting cluster **029–032**. ITEM-055
-(quality) is the input 029/030 consume, so it lands before the OmniRouting unpark.
+_Last updated: 2026-10-12 (ITEM-018/050/051/052/053/054/056/059 closed; metrics review captured as ITEM-055..064)_ —
+work the open set **top-down**: next the metric items **055, 057, 058, 060–062**,
+then the closed-loop items **063–064**, then **ITEM-065** (edge node mode) and
+**ITEM-066** (overhead/alerts), then the staged OmniRouting cluster **029–032**.
+ITEM-055 (quality) is the input 029/030 consume, so it lands before the
+OmniRouting unpark.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

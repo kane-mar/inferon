@@ -29,3 +29,16 @@ price fall back to a default price with only a log.
 
 **Source:** 2026-10-12 metrics review — you can't trust numbers you can't
 reconcile.
+
+## Close-out (2026-10-12)
+
+- `src/metrics.rs`: process-global counters for `traces_queued`, `traces_persisted`,
+  `traces_dropped_full` / `traces_dropped_closed` (+ derived `lost`), and
+  `unpriced_models`.
+- Incremented at the send seam (`send_trace` and the edge ingest), in the Postgres
+  sink (once per committed batch), and in `cost::warn_if_unpriced`; exposed on the
+  operator-only `GET /v1/dashboard/api/operator/metrics`.
+- Rust **239 → 240** tests, clippy clean. Commit `5e20df6`, CI `38253622143`
+  (test+web+deploy) green.
+- **Live**: the endpoint returns the counters, unauthenticated → 401, and one real
+  request moved `traces_queued` 1→2 and `traces_persisted` 1→2 with `lost: 0`.
