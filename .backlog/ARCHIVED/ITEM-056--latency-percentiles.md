@@ -23,3 +23,16 @@ The summary reports only the **mean** of `time_to_first_token_ms` and
 
 **Source:** 2026-10-12 metrics review — latency is the PO's decidable constraint
 (A+C chosen over B for it), yet only the mean was visible.
+
+## Close-out (2026-10-12)
+
+- `dashboard::query_summary` now returns `ttft_p50/p95/p99_ms` and
+  `duration_p50/p95/p99_ms` via a Postgres `percentile_cont` query, for both the
+  tenant and operator scopes; the averages are unchanged.
+- The dashboard latency card shows **p95** as the headline with the average as a
+  hint.
+- Rust 239 tests, clippy clean; tsc/eslint/i18n green. Commit `54fddc0`, CI
+  `38251392654` (test+web+deploy) green.
+- **Live**: the summary exposes all six percentiles and matches a direct SQL
+  `percentile_cont` exactly (avg 1660.2, **p50 250.0, p95 4585.2, p99 4927.4**) —
+  the mean alone hid a 4.6s p95.
