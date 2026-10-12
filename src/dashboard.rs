@@ -1179,8 +1179,10 @@ pub(crate) async fn fetch_provider_models(
     let mut request = state
         .http_client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", provider.api_key))
         .timeout(std::time::Duration::from_secs(10));
+    for (header, value) in crate::providers::auth_headers(&provider.kind, &provider.api_key, &provider.metadata) {
+        request = request.header(header, value);
+    }
     if let Some(org) = &provider.metadata.org {
         request = request.header("OpenAI-Organization", org);
     }
@@ -1369,6 +1371,10 @@ pub async fn tenant_provider_default(
 pub struct ProviderProbeBody {
     base_url: String,
     key: String,
+    /// The kind being probed — decides the auth header + model-list surface
+    /// (ITEM-050). Defaults to the OpenAI-compatible shape when absent.
+    #[serde(default)]
+    kind: Option<String>,
     #[serde(default)]
     metadata: crate::providers::ProviderMetadata,
 }
@@ -1399,6 +1405,7 @@ pub async fn tenant_provider_probe(
     }
     let resolved = crate::providers::ResolvedProvider {
         id: uuid::Uuid::nil(),
+        kind: body.kind.unwrap_or_default(),
         base_url,
         api_key: key,
         metadata: body.metadata,
@@ -1436,8 +1443,10 @@ pub async fn tenant_provider_test(
     let mut probe = state
         .http_client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", provider.api_key))
         .timeout(std::time::Duration::from_secs(10));
+    for (header, value) in crate::providers::auth_headers(&provider.kind, &provider.api_key, &provider.metadata) {
+        probe = probe.header(header, value);
+    }
     if let Some(org) = &provider.metadata.org {
         probe = probe.header("OpenAI-Organization", org);
     }

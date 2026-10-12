@@ -237,6 +237,27 @@ fn reject_response() -> Response {
     )
 }
 
+/// ITEM-050: enforce only the hard monthly cap for a non-OpenAI surface. The
+/// heuristic router and the cheap-fallback override are OpenAI-shaped, so an
+/// Anthropic request is served as asked or rejected at the cap — never rewritten.
+pub async fn check_cap(state: &Arc<AppState>, tenant_id: Uuid) -> Result<(), Response> {
+    let budget = match state.budget_store.budget_for(tenant_id).await {
+        Ok(budget) => budget,
+        Err(e) => {
+            tracing::error!("budget lookup failed: {e}");
+            return Err(crate::json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "budget_store_error",
+                "budget lookup failed",
+            ));
+        }
+    };
+    match budget.map(|budget| enforce_budget(&budget)) {
+        Some(BudgetVerdict::Reject) => Err(reject_response()),
+        _ => Ok(()),
+    }
+}
+
 /// Why the request model was overridden (ITEM-054: recorded on the trace).
 pub const ROUTER_REASON: &str = "heuristic_router";
 pub const BUDGET_REASON: &str = "budget";

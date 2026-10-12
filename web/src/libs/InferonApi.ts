@@ -435,7 +435,7 @@ export class InferonApi {
   }
 
   testProviderDraft(
-    body: { base_url: string; key: string; metadata?: ProviderMetadata },
+    body: { kind: string; base_url: string; key: string; metadata?: ProviderMetadata },
     cookie?: string,
   ): Promise<ProviderProbeResult> {
     return this.request<ProviderProbeResult>('POST', '/v1/dashboard/api/providers/test', body, { cookie });

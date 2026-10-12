@@ -38,6 +38,20 @@ fn lookup(model: &str) -> Option<Price> {
         || model.starts_with("deepseek-v4-flash")
     {
         Some(hit("0.22", "0.007", "0.66"))
+    } else if model.starts_with("claude-3-5-sonnet")
+        || model.starts_with("claude-3-7-sonnet")
+        || model.starts_with("claude-sonnet-4")
+    {
+        // Anthropic Messages (ITEM-050): $3 / $15, cache read $0.30.
+        Some(hit("3.00", "0.30", "15.00"))
+    } else if model.starts_with("claude-3-5-haiku") {
+        Some(hit("0.80", "0.08", "4.00"))
+    } else if model.starts_with("claude-haiku-4") {
+        Some(hit("1.00", "0.10", "5.00"))
+    } else if model.starts_with("claude-3-haiku") {
+        Some(hit("0.25", "0.03", "1.25"))
+    } else if model.starts_with("claude-opus-4") || model.starts_with("claude-3-opus") {
+        Some(hit("15.00", "1.50", "75.00"))
     } else if model.starts_with("gpt-4o-mini") {
         Some(miss_only("0.15", "0.60"))
     } else if model.starts_with("gpt-4o") {
@@ -279,6 +293,30 @@ mod tests {
             assert!(!is_priced(unpriced), "{unpriced} should be flagged as unpriced");
             assert_eq!(price_for(unpriced), mk("3.00", "15.00"));
         }
+    }
+
+    #[test]
+    fn anthropic_models_are_priced() {
+        // ITEM-050: Claude rows so Messages traffic isn't defaulted to $3/$15.
+        assert_eq!(
+            price_for("claude-3-5-sonnet-20241022"),
+            mk_hit("3.00", "0.30", "15.00")
+        );
+        assert_eq!(
+            price_for("claude-sonnet-4-5-20250929"),
+            mk_hit("3.00", "0.30", "15.00")
+        );
+        assert_eq!(
+            price_for("claude-3-5-haiku-20241022"),
+            mk_hit("0.80", "0.08", "4.00")
+        );
+        assert_eq!(price_for("claude-3-opus-20240229"), mk_hit("15.00", "1.50", "75.00"));
+        assert!(is_priced("claude-3-5-sonnet-20241022"));
+        // 1M in + 1M out on sonnet = 3 + 15 = 18.
+        assert_eq!(
+            calculate_cost("claude-3-5-sonnet-20241022", 1_000_000, 1_000_000, 0),
+            dec("18.00")
+        );
     }
 
     /// Minimal `MakeWriter` so the warning test can read what was logged.

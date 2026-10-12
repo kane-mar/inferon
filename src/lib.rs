@@ -28,7 +28,10 @@ pub use tenant::{ApiKeyInfo, InMemoryTenantStore, PostgresTenantStore, Tenant, T
 pub use telemetry::{load_system_prompt_counts, telemetry_worker, PostgresTraceSink, TraceMessage, TraceSink};
 pub use usage::{usage_from_sse_bytes, Usage};
 
-use crate::usage::{system_prompt_hash, usage_from_json};
+use crate::usage::{
+    system_prompt_hash, system_prompt_hash_anthropic, usage_from_anthropic_json,
+    usage_from_anthropic_sse_bytes, usage_from_json,
+};
 
 use axum::{
     body::Body,
@@ -79,6 +82,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
+        .route("/v1/messages", post(proxy_messages))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
@@ -235,6 +239,7 @@ async fn list_models(State(state): State<Arc<AppState>>, req: Request) -> Respon
         } else if let Some(key) = tenant.upstream_openai_key.as_deref() {
             let shared = crate::providers::ResolvedProvider {
                 id: Uuid::nil(),
+                kind: "openai".to_string(),
                 base_url: dashboard::upstream_base_url(&state.upstream_url),
                 api_key: key.to_string(),
                 metadata: crate::providers::ProviderMetadata::default(),
@@ -263,11 +268,27 @@ struct Route {
     metadata: providers::ProviderMetadata,
     /// ITEM-047: the provider row that served the request (`None` = shared key).
     provider_id: Option<Uuid>,
+    /// ITEM-050: the provider kind, which decides the upstream auth + surface.
+    kind: String,
 }
 
-/// `<base>/chat/completions` — the OpenAI-compatible chat endpoint.
-fn chat_completions_url(base_url: &str) -> String {
-    format!("{}/chat/completions", base_url.trim_end_matches('/'))
+/// The ingress→upstream surface (ITEM-050): OpenAI is the chat-completions
+/// shape, Anthropic the Messages shape. A request never crosses surfaces.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Surface {
+    OpenAi,
+    Anthropic,
+}
+
+impl Surface {
+    /// `POST <base>/chat/completions` or `POST <base>/messages`.
+    fn endpoint(self, base_url: &str) -> String {
+        let base = base_url.trim_end_matches('/');
+        match self {
+            Surface::OpenAi => format!("{base}/chat/completions"),
+            Surface::Anthropic => format!("{base}/messages"),
+        }
+    }
 }
 
 /// Attach the tenant's optional provider headers (org + custom) to an upstream
@@ -289,27 +310,42 @@ async fn resolve_route(
     state: &Arc<AppState>,
     tenant: &Tenant,
     model: Option<&str>,
+    surface: Surface,
 ) -> Result<Route, Response> {
     match state.provider_store.resolve_for(tenant.id, model).await {
-        Ok(Some(provider)) => Ok(Route {
-            url: chat_completions_url(&provider.base_url),
-            key: provider.api_key,
-            metadata: provider.metadata,
-            provider_id: Some(provider.id),
-        }),
-        Ok(None) => match tenant.upstream_openai_key.as_deref() {
-            Some(key) => Ok(Route {
-                url: state.upstream_url.clone(),
-                key: key.to_string(),
-                metadata: providers::ProviderMetadata::default(),
-                provider_id: None,
-            }),
-            None => Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "no_provider",
-                "no upstream provider configured — add one in Dashboard → Providers",
-            )),
-        },
+        Ok(Some(provider)) => {
+            // ITEM-050 AC5: never cross surfaces — an Anthropic provider serves
+            // only /v1/messages, an OpenAI-shaped one only /v1/chat/completions.
+            if providers::is_anthropic(&provider.kind) != (surface == Surface::Anthropic) {
+                return Err(surface_mismatch(surface));
+            }
+            Ok(Route {
+                url: surface.endpoint(&provider.base_url),
+                key: provider.api_key,
+                metadata: provider.metadata,
+                provider_id: Some(provider.id),
+                kind: provider.kind,
+            })
+        }
+        Ok(None) => {
+            if surface == Surface::Anthropic {
+                return Err(surface_mismatch(surface));
+            }
+            match tenant.upstream_openai_key.as_deref() {
+                Some(key) => Ok(Route {
+                    url: state.upstream_url.clone(),
+                    key: key.to_string(),
+                    metadata: providers::ProviderMetadata::default(),
+                    provider_id: None,
+                    kind: "openai".to_string(),
+                }),
+                None => Err(json_error(
+                    StatusCode::BAD_REQUEST,
+                    "no_provider",
+                    "no upstream provider configured — add one in Dashboard → Providers",
+                )),
+            }
+        }
         Err(e) => {
             tracing::error!("provider resolution failed: {e}");
             Err(json_error(
@@ -319,6 +355,20 @@ async fn resolve_route(
             ))
         }
     }
+}
+
+/// A clear typed error when the resolved provider's kind does not match the
+/// surface the request arrived on (ITEM-050 AC5).
+fn surface_mismatch(surface: Surface) -> Response {
+    let message = match surface {
+        Surface::Anthropic => {
+            "no Anthropic provider configured — add one in Dashboard → Providers"
+        }
+        Surface::OpenAi => {
+            "no OpenAI-compatible provider configured — add one in Dashboard → Providers"
+        }
+    };
+    json_error(StatusCode::BAD_REQUEST, "no_provider", message)
 }
 
 /// Proxy a chat completion request to the configured upstream.
@@ -386,7 +436,7 @@ async fn proxy_chat_completions(
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
-    let route = match resolve_route(&state, &tenant, Some(&meta.model)).await {
+    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::OpenAi).await {
         Ok(route) => route,
         Err(resp) => return resp,
     };
@@ -473,7 +523,7 @@ async fn proxy_chat_completions(
         let model_route = if model == primary {
             route.clone()
         } else {
-            resolve_route(&state, &tenant, Some(&model))
+            resolve_route(&state, &tenant, Some(&model), Surface::OpenAi)
                 .await
                 .unwrap_or_else(|_| route.clone())
         };
@@ -568,7 +618,7 @@ async fn proxy_chat_completions(
     let status = upstream.status();
     if !status.is_success() {
         // Forward the upstream error as-is (keep its content-type); still trace.
-        return forward_buffered(&state, &meta, tenant_id, started, upstream, None).await;
+        return forward_buffered(&state, &meta, tenant_id, started, upstream, None, usage_from_json).await;
     }
     if is_stream {
         // ITEM-023 (guard): requests with a JSON-schema contract served by a
@@ -601,11 +651,187 @@ async fn proxy_chat_completions(
                 tenant_id,
                 status.as_u16(),
                 state.telemetry_tx.clone(),
+                usage_from_sse_bytes,
             )
         }
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));
-        forward_buffered(&state, &meta, tenant_id, started, upstream, json_content_type).await
+        forward_buffered(&state, &meta, tenant_id, started, upstream, json_content_type, usage_from_json).await
+    }
+}
+
+/// Proxy an Anthropic Messages request (ITEM-050).
+///
+/// Authenticates the caller with `x-api-key` (the Anthropic SDK's header; a
+/// Bearer token is tolerated), resolves an `anthropic` provider, and forwards
+/// the Anthropic-shaped body to `<base>/messages` with the provider's key. The
+/// heuristic router and schema guard are OpenAI-shaped and explicitly bypassed;
+/// the hard budget cap still applies. Usage (`input_tokens`/`output_tokens`) is
+/// traced and costed.
+async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    let tenant = match authenticate_anthropic(&state, req.headers()).await {
+        Ok(Some(tenant)) => tenant,
+        Ok(None) => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_api_key",
+                "missing or invalid x-api-key header",
+            )
+        }
+        Err(e) => {
+            tracing::error!("tenant lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "tenant_store_error",
+                "tenant lookup failed",
+            );
+        }
+    };
+    let tenant_id = tenant.id;
+
+    let body_bytes = match axum::body::to_bytes(req.into_body(), MAX_REQUEST_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "request body exceeds 10MB",
+            )
+        }
+    };
+    let payload: Value = match serde_json::from_slice(&body_bytes) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_json",
+                "request body must be valid JSON",
+            )
+        }
+    };
+    let is_stream = payload["stream"].as_bool().unwrap_or(false);
+    let mut meta = RequestMeta {
+        id: Uuid::new_v4(),
+        model: payload["model"].as_str().unwrap_or("unknown").to_string(),
+        system_prompt_hash: system_prompt_hash_anthropic(&payload),
+        raw_prompt: payload,
+        routing_event: None,
+        router_event: None,
+        provider_id: None,
+        api_key_id: tenant.api_key_id,
+    };
+    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic).await {
+        Ok(route) => route,
+        Err(resp) => return resp,
+    };
+    meta.provider_id = route.provider_id;
+    let started = Instant::now();
+
+    match state.model_store.is_disabled(route.provider_id, &meta.model).await {
+        Ok(true) => {
+            let total_ms = started.elapsed().as_millis() as i64;
+            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(400, total_ms));
+            send_trace(&state.telemetry_tx, msg);
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "model_disabled",
+                "this model is disabled for your tenant",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::error!("model selection lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "model_store_error",
+                "could not check model selection",
+            );
+        }
+    }
+
+    // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
+    // and bypassed here; only the hard monthly cap still applies.
+    if let Err(resp) = budget::check_cap(&state, tenant_id).await {
+        let total_ms = started.elapsed().as_millis() as i64;
+        let msg = build_trace(&meta, tenant_id, TraceOutcome::error(429, total_ms));
+        send_trace(&state.telemetry_tx, msg);
+        return resp;
+    }
+
+    let mut request = state
+        .http_client
+        .post(&route.url)
+        .header("Content-Type", "application/json");
+    for (header, value) in providers::auth_headers(&route.kind, &route.key, &route.metadata) {
+        request = request.header(header, value);
+    }
+    let request = apply_provider_headers(request, &route.metadata);
+    let upstream = match request.body(body_bytes).send().await {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!("anthropic upstream request failed: {e}");
+            let total_ms = started.elapsed().as_millis() as i64;
+            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(502, total_ms));
+            send_trace(&state.telemetry_tx, msg);
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "upstream_error",
+                "upstream request failed",
+            );
+        }
+    };
+
+    let status = upstream.status();
+    if !status.is_success() {
+        return forward_buffered(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            upstream,
+            None,
+            usage_from_anthropic_json,
+        )
+        .await;
+    }
+    if is_stream {
+        stream_response(
+            upstream,
+            started,
+            meta,
+            tenant_id,
+            status.as_u16(),
+            state.telemetry_tx.clone(),
+            usage_from_anthropic_sse_bytes,
+        )
+    } else {
+        let json_content_type = Some(HeaderValue::from_static("application/json"));
+        forward_buffered(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            upstream,
+            json_content_type,
+            usage_from_anthropic_json,
+        )
+        .await
+    }
+}
+
+/// Resolve the caller's tenant from `x-api-key` (Anthropic), tolerating a
+/// Bearer token for OpenAI-compatible Anthropic gateways.
+async fn authenticate_anthropic(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+    let key = headers
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok())
+        .filter(|key| !key.is_empty());
+    match key {
+        Some(key) => state.tenant_store.tenant_by_api_key_hash(&sha256_hex(key)).await,
+        None => authenticate(state, headers).await,
     }
 }
 
@@ -621,6 +847,7 @@ async fn forward_buffered(
     started: Instant,
     upstream: reqwest::Response,
     content_type: Option<HeaderValue>,
+    parse_usage: fn(&Option<Value>) -> Usage,
 ) -> Response {
     let status = upstream.status();
     let upstream_content_type = upstream.headers().get(CONTENT_TYPE).cloned();
@@ -636,7 +863,7 @@ async fn forward_buffered(
         }
     };
     let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
-    let usage = usage_from_json(&response_json);
+    let usage = parse_usage(&response_json);
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
@@ -802,9 +1029,10 @@ fn stream_response(
     tenant_id: Uuid,
     status: u16,
     tx: mpsc::Sender<TraceMessage>,
+    parse_usage: fn(&[u8]) -> Option<Usage>,
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
-    let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx);
+    let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx, parse_usage);
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     response
@@ -1136,6 +1364,7 @@ fn stream_with_trace(
     tenant_id: Uuid,
     status: u16,
     tx: mpsc::Sender<TraceMessage>,
+    parse_usage: fn(&[u8]) -> Option<Usage>,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> {
     async_stream::stream! {
         let emit = StreamEmit::new(tx, meta, tenant_id, status, started);
@@ -1159,7 +1388,7 @@ fn stream_with_trace(
                 }
             }
         }
-        let usage = usage_from_sse_bytes(&accumulated).unwrap_or_default();
+        let usage = parse_usage(&accumulated).unwrap_or_default();
         emit.emit(usage, errored);
     }
 }
@@ -1510,6 +1739,116 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         format!("http://{addr}/v1/chat/completions")
     }
+
+    /// A mock Anthropic Messages host echoing the `x-api-key` it saw, with both
+    /// a non-streaming JSON body and an Anthropic-shaped SSE body.
+    async fn mock_anthropic_upstream() -> String {
+        let app = axum::Router::new().route(
+            "/v1/messages",
+            axum::routing::post(
+                |headers: axum::http::HeaderMap, payload: axum::Json<Value>| async move {
+                    let key = headers
+                        .get("x-api-key")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    let version = headers
+                        .get("anthropic-version")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    let model = payload["model"].as_str().unwrap_or("");
+                    if payload["stream"].as_bool().unwrap_or(false) {
+                        let body = format!(
+                            "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"model\":\"{model}\",\"usage\":{{\"input_tokens\":12,\"output_tokens\":1,\"cache_read_input_tokens\":10}}}}}}\n\n\
+event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"delta\":{{\"type\":\"text_delta\",\"text\":\"hi\"}}}}\n\n\
+event: message_delta\ndata: {{\"type\":\"message_delta\",\"usage\":{{\"output_tokens\":7}}}}\n\n\
+event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
+                        );
+                        axum::response::Response::builder()
+                            .header("content-type", "text/event-stream")
+                            .body(Body::from(body))
+                            .unwrap()
+                    } else {
+                        let body = format!(
+                            r#"{{"id":"msg_1","type":"message","model":"{model}","content":[{{"type":"text","text":"hi"}}],"usage":{{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":10}},"echoed_key":"{key}","echoed_version":"{version}"}}"#
+                        );
+                        axum::response::Response::builder()
+                            .header("content-type", "application/json")
+                            .body(Body::from(body))
+                            .unwrap()
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/v1")
+    }
+
+    async fn anthropic_state_with_budget(
+        base_url: String,
+        budget_store: std::sync::Arc<dyn budget::BudgetStore>,
+    ) -> (std::sync::Arc<AppState>, mpsc::Receiver<TraceMessage>) {
+        let (tx, rx) = mpsc::channel(64);
+        use crate::providers::ProviderStore as _;
+        let provider_store = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        // Seed an Anthropic provider that owns the Claude model.
+        let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let id = provider_store
+            .insert(
+                tenant,
+                &crate::providers::NewProvider {
+                    kind: "anthropic".to_string(),
+                    name: "Anthropic".to_string(),
+                    base_url,
+                    key: "sk-ant-upstream".to_string(),
+                    metadata: crate::providers::ProviderMetadata::default(),
+                    spend_limit_cents: 0,
+                },
+            )
+            .await
+            .unwrap();
+        provider_store
+            .record_models(id, &["claude-3-5-sonnet-20241022".to_string()])
+            .await
+            .unwrap();
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: "https://shared.test/v1/chat/completions".to_string(),
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store,
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store,
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        (state, rx)
+    }
+
+    async fn anthropic_state(
+        base_url: String,
+    ) -> (std::sync::Arc<AppState>, mpsc::Receiver<TraceMessage>) {
+        anthropic_state_with_budget(
+            base_url,
+            std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+        )
+        .await
+    }
+
+    fn messages_request(body: &str, key: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("content-type", "application/json");
+        if let Some(key) = key {
+            builder = builder.header("x-api-key", key);
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
     fn state_with_store(
         upstream_url: &str,
         tenant_store: std::sync::Arc<dyn TenantStore>,
@@ -1630,15 +1969,124 @@ mod tests {
     }
 
     #[test]
-    fn chat_completions_url_joins_the_base() {
+    fn surface_endpoints_join_the_base() {
         assert_eq!(
-            chat_completions_url("https://api.deepseek.com/v1"),
+            Surface::OpenAi.endpoint("https://api.deepseek.com/v1"),
             "https://api.deepseek.com/v1/chat/completions"
         );
         assert_eq!(
-            chat_completions_url("https://api.deepseek.com/v1/"),
+            Surface::OpenAi.endpoint("https://api.deepseek.com/v1/"),
             "https://api.deepseek.com/v1/chat/completions"
         );
+        assert_eq!(
+            Surface::Anthropic.endpoint("https://api.anthropic.com/v1"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_are_proxied_with_the_provider_key_and_usage() {
+        let base = mock_anthropic_upstream().await;
+        let (state, mut rx) = anthropic_state(base).await;
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":100,"system":"Be terse.","messages":[{"role":"user","content":"hi"}]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "claude-3-5-sonnet-20241022");
+        assert_eq!(json["usage"]["input_tokens"], 12);
+        assert_eq!(
+            json["echoed_key"], "sk-ant-upstream",
+            "the provider key is swapped into x-api-key"
+        );
+        assert_eq!(json["echoed_version"], "2023-06-01");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.request_model, "claude-3-5-sonnet-20241022");
+        assert_eq!(msg.prompt_tokens, 12);
+        assert_eq!(msg.completion_tokens, 3);
+        assert_eq!(msg.cached_prompt_tokens, Some(10));
+        assert!(
+            msg.system_prompt_hash.is_some(),
+            "the Anthropic `system` field is hashed"
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_streaming_traces_usage_from_the_sse_frames() {
+        let base = mock_anthropic_upstream().await;
+        let (state, mut rx) = anthropic_state(base).await;
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"hi"}]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("message_stop"), "SSE passed through unchanged");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.prompt_tokens, 12);
+        assert_eq!(msg.completion_tokens, 7, "final output total from message_delta");
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_without_a_key_are_401() {
+        let base = mock_anthropic_upstream().await;
+        let (state, _rx) = anthropic_state(base).await;
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, None))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_without_a_provider_are_refused() {
+        // A tenant with no Anthropic provider must not be hopped to the shared
+        // OpenAI upstream (ITEM-050 AC5).
+        let state = test_state(&mock_upstream().await);
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = json_body(response).await;
+        assert_eq!(json["error"]["type"], "no_provider");
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_respect_the_hard_budget_cap() {
+        let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let over_cap = budget::TenantBudget {
+            limit_cents: 100,
+            spent_cents: 100,
+            cheap_fallback_model: None,
+            guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
+        };
+        let store = std::sync::Arc::new(budget::InMemoryBudgetStore::new(
+            [(
+                tenant,
+                over_cap,
+            )]
+            .into_iter()
+            .collect(),
+        ));
+        let base = mock_anthropic_upstream().await;
+        let (state, mut rx) = anthropic_state_with_budget(base, store).await;
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.status_code, 429);
     }
 
     #[tokio::test]
@@ -1651,7 +2099,7 @@ mod tests {
                 "sk-my-provider",
             ),
         ));
-        let route = resolve_route(&state, &tenant, None).await.expect("route");
+        let route = resolve_route(&state, &tenant, None, Surface::OpenAi).await.expect("route");
         assert_eq!(route.url, "https://my-provider.test/v1/chat/completions");
         assert_eq!(route.key, "sk-my-provider", "the tenant's own key wins");
         assert!(route.provider_id.is_some(), "ITEM-047: provider is attributed");
@@ -1663,7 +2111,7 @@ mod tests {
         let state = route_state(std::sync::Arc::new(
             crate::providers::InMemoryProviderStore::default(),
         ));
-        let route = resolve_route(&state, &tenant, None).await.expect("route");
+        let route = resolve_route(&state, &tenant, None, Surface::OpenAi).await.expect("route");
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
         assert!(route.provider_id.is_none(), "shared key = no provider");

@@ -16,6 +16,7 @@ const DEFAULT_BASE: Record<string, string> = {
   'deepseek': 'https://api.deepseek.com/v1',
   'openai': 'https://api.openai.com/v1',
   'openai-compatible': '',
+  'anthropic': 'https://api.anthropic.com/v1',
 };
 
 /** `Name: Value` per line → metadata headers; blank/malformed lines ignored. */
@@ -112,6 +113,7 @@ export const ProvidersPanel = (props: {
     setProbe({ status: 'testing', message: '' });
     try {
       const result = await InferonApi.sameOrigin().testProviderDraft({
+        kind,
         base_url: baseUrl.trim(),
         key: key.trim(),
         metadata: metadataFrom(org, headers),

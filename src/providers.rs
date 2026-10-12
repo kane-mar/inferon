@@ -76,13 +76,25 @@ pub struct ProviderUpdate {
 pub struct ResolvedProvider {
     /// The provider row id (ITEM-047: attributed on the trace).
     pub id: Uuid,
+    /// The provider kind — decides the upstream surface (ITEM-050).
+    pub kind: String,
     pub base_url: String,
     pub api_key: String,
     pub metadata: ProviderMetadata,
 }
 
-/// Supported provider kinds. Anthropic is not OpenAI-shaped and is not wired.
-pub const PROVIDER_KINDS: [&str; 3] = ["deepseek", "openai", "openai-compatible"];
+/// Supported provider kinds. `anthropic` is served on its own Messages surface
+/// (`/v1/messages`, ITEM-050); the others are OpenAI-shaped
+/// (`/v1/chat/completions`).
+pub const PROVIDER_KINDS: [&str; 4] = ["deepseek", "openai", "openai-compatible", "anthropic"];
+
+/// The native Anthropic Messages provider kind (ITEM-050).
+pub const ANTHROPIC: &str = "anthropic";
+
+/// True for the Anthropic Messages surface (not OpenAI-shaped).
+pub fn is_anthropic(kind: &str) -> bool {
+    kind == ANTHROPIC
+}
 
 pub fn is_supported_kind(kind: &str) -> bool {
     PROVIDER_KINDS.contains(&kind)
@@ -93,7 +105,31 @@ pub fn default_name(kind: &str) -> String {
     match kind {
         "deepseek" => "DeepSeek".to_string(),
         "openai" => "OpenAI".to_string(),
+        ANTHROPIC => "Anthropic".to_string(),
         _ => "Custom provider".to_string(),
+    }
+}
+
+/// The auth header(s) for an upstream provider credential. Anthropic uses
+/// `x-api-key` + `anthropic-version` (unless the tenant set its own version
+/// header); every other kind uses a bearer token.
+pub fn auth_headers(
+    kind: &str,
+    key: &str,
+    metadata: &ProviderMetadata,
+) -> Vec<(&'static str, String)> {
+    if is_anthropic(kind) {
+        let mut headers = vec![("x-api-key", key.to_string())];
+        let has_version = metadata
+            .headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("anthropic-version"));
+        if !has_version {
+            headers.push(("anthropic-version", "2023-06-01".to_string()));
+        }
+        headers
+    } else {
+        vec![("Authorization", format!("Bearer {key}"))]
     }
 }
 
@@ -408,10 +444,10 @@ impl ProviderStore for PostgresProviderStore {
             Some(model) => self.provider_for_model(tenant_id, model).await?,
             None => None,
         };
-        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> =
+        let row: Option<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> =
             if let Some(id) = chosen_id {
                 sqlx::query_as(
-                    "SELECT id, base_url, key_ciphertext, metadata FROM providers
+                    "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
                      WHERE id = $1 AND tenant_id = $2",
                 )
                 .bind(id)
@@ -420,19 +456,20 @@ impl ProviderStore for PostgresProviderStore {
                 .await?
             } else {
                 sqlx::query_as(
-                    "SELECT id, base_url, key_ciphertext, metadata FROM providers
+                    "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
                      WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
                 )
                 .bind(tenant_id)
                 .fetch_optional(&self.pool)
                 .await?
             };
-        let Some((id, base_url, ciphertext, metadata)) = row else {
+        let Some((id, kind, base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         match secrets.decrypt(&ciphertext) {
             Some(api_key) => Ok(Some(ResolvedProvider {
                 id,
+                kind,
                 base_url,
                 api_key,
                 metadata: metadata.0,
@@ -454,20 +491,21 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(Uuid, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
-            "SELECT id, base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
+        let row: Option<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
+            "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
         )
         .bind(id)
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((id, base_url, ciphertext, metadata)) = row else {
+        let Some((id, kind, base_url, ciphertext, metadata)) = row else {
             return Ok(None);
         };
         Ok(secrets
             .decrypt(&ciphertext)
             .map(|api_key| ResolvedProvider {
                 id,
+                kind,
                 base_url,
                 api_key,
                 metadata: metadata.0,
@@ -694,6 +732,7 @@ impl ProviderStore for InMemoryProviderStore {
         };
         Ok(chosen.map(|row| ResolvedProvider {
             id: row.provider.id,
+            kind: row.provider.kind.clone(),
             base_url: row.provider.base_url.clone(),
             api_key: row.api_key.clone(),
             metadata: row.provider.metadata.clone(),
@@ -713,6 +752,7 @@ impl ProviderStore for InMemoryProviderStore {
             .find(|row| row.provider.tenant_id == tenant_id && row.provider.id == id)
             .map(|row| ResolvedProvider {
                 id: row.provider.id,
+                kind: row.provider.kind.clone(),
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
                 metadata: row.provider.metadata.clone(),
@@ -735,8 +775,15 @@ mod tests {
     fn kinds_are_allowlisted() {
         assert!(is_supported_kind("deepseek"));
         assert!(is_supported_kind("openai-compatible"));
-        assert!(!is_supported_kind("anthropic"));
+        assert!(is_supported_kind("anthropic"));
         assert!(!is_supported_kind("garbage"));
+    }
+
+    #[test]
+    fn anthropic_is_the_only_non_openai_kind() {
+        assert!(is_anthropic("anthropic"));
+        assert!(!is_anthropic("openai-compatible"));
+        assert_eq!(default_name("anthropic"), "Anthropic");
     }
 
     #[tokio::test]
