@@ -44,3 +44,27 @@ Inferon as usable from "your existing OpenAI or Anthropic SDK".
 - `x-api-key` replaces the `Authorization` swap; never log key material.
 
 **Source:** ITEM-043 AC1 re-scope (PO 2026-10-06) — native Anthropic SDK support.
+
+## Close-out (2026-10-12)
+
+- `anthropic` provider kind + `POST /v1/messages` ingress; a `Surface` guard
+  refuses to cross surfaces (typed 400).
+- `x-api-key` + `anthropic-version` auth (overridable via provider metadata); the
+  request body is forwarded unchanged; usage is parsed from both JSON and SSE
+  (`message_start` input / `message_delta` output, `cache_read_input_tokens`);
+  `system` (string or text blocks) is hashed like an OpenAI system prompt.
+- The heuristic router and schema guard are OpenAI-shaped and **explicitly
+  bypassed**; the hard budget cap still applies (`budget::check_cap`).
+- Claude price rows added (sonnet/haiku/opus) — no default-row overcharge.
+- The Providers page offers the kind with a default base URL; the pre-add probe
+  and model discovery are kind-aware.
+- Tests: Rust **226 → 236**, clippy clean; tsc/eslint/i18n green. Commit `659caf8`,
+  CI run `38246243129` (test+web+deploy) green.
+- **Live**: `kinds` includes `anthropic`; a draft probe reaches the real Anthropic
+  API and relays its 401; `/v1/messages` with no Anthropic provider → typed 400
+  `no_provider`; add/remove of the kind works; and a temporary Anthropic provider
+  pointed at the real API forwarded `POST /v1/messages` end to end, relaying
+  Anthropic's `401 authentication_error` verbatim with a trace
+  (`claude-3-5-sonnet-20241022`, 401, provider attributed).
+- **PO gate**: a real Anthropic key is needed to exercise the 2xx/usage path live
+  (same shape as the GitHub OAuth gate); the mock integration tests cover it.

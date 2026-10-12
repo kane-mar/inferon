@@ -19,7 +19,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **done (2026-10-06)** — `/dashboard/onboarding`: mint key → base URL → snippets (tenant model) → first-request detection; links to providers (models live there now) |
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
-| ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
+| ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **done (2026-10-12)** — `anthropic` kind + `POST /v1/messages`; `x-api-key`/`anthropic-version`, Anthropic JSON+SSE usage, system hashing, Claude prices; router/guard bypassed, hard cap kept. Live: forwarded to the real API (401 relayed + traced) |
 | ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **done (2026-10-12)** — bring-your-own-endpoint recipe (wiki §A), pre-add Test-connection probe, persisted per-provider reachability, live model discovery. Option A (no cloud relay) |
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
@@ -40,11 +40,11 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-018/051/053/054 closed; metrics review captured as ITEM-055..062)_ —
-work the open set **top-down**: first the pre-existing open work **ITEM-050** (native
-Anthropic adapter) and **ITEM-052** (hybrid data plane C), then the metric items
-**055 → 062**, then the staged OmniRouting cluster **029–032**. ITEM-055 (quality)
-is the input 029/030 consume, so it lands before the OmniRouting unpark.
+_Last updated: 2026-10-12 (ITEM-018/050/051/053/054 closed; metrics review captured as ITEM-055..062)_ —
+work the open set **top-down**: next **ITEM-052** (hybrid data plane C), then the
+metric items **055 → 062**, then the closed-loop items **063–064**, then the
+staged OmniRouting cluster **029–032**. ITEM-055 (quality) is the input 029/030
+consume, so it lands before the OmniRouting unpark.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
