@@ -20,7 +20,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
 | ITEM-050 | Native Anthropic SDK support (provider adapter) | feature | **new** — `/v1/messages` ingress + Anthropic adapter (`x-api-key`, different envelope/usage); the proxy/router/guard/cost are OpenAI-shaped (re-scoped out of ITEM-043) |
-| ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **new** — expose an on-prem model behind TLS and register it as a provider; a recipe + persisted reachability. Option A (no cloud relay) |
+| ITEM-051 | Customer-hosted endpoint (direct / BYO endpoint) | feature | **done (2026-10-12)** — bring-your-own-endpoint recipe (wiki §A), pre-add Test-connection probe, persisted per-provider reachability, live model discovery. Option A (no cloud relay) |
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **new** — run the proxy on-prem against the local model; cloud = control plane + telemetry ingest. Option C (latency-optimal; inference never leaves the network); first slice = edge telemetry ingest |
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
 | ITEM-054 | Router axis for DeepSeek-native tiers | feature | **new** — the ITEM-015 router only handles gpt-4o; generalise to configurable tier pairs (e.g. `deepseek-v4-pro` → `deepseek-flash`) so cost protection applies to real DeepSeek traffic. ITEM-018 finding |
@@ -30,6 +30,6 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-053 landed; closing open work before new work)_ —
-remaining: ITEM-050 (native Anthropic adapter), ITEM-051/052 (customer-hosted A/C),
+_Last updated: 2026-10-12 (ITEM-053 + ITEM-051 landed; closing open work before new work)_ —
+remaining: ITEM-050 (native Anthropic adapter), ITEM-052 (hybrid data plane C),
 ITEM-054 (DeepSeek router axis), and the staged OmniRouting cluster (029–032).

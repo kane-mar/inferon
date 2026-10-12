@@ -36,3 +36,21 @@ the hybrid data plane / option C is ITEM-052.)
 **Source:** 2026-10-11 customer-hosted connectivity decision — see
 [raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md](../../raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md)
 and [wiki/llm-inference/customer-hosted-llms.md](../../wiki/llm-inference/customer-hosted-llms.md).
+
+## Close-out (2026-10-12)
+
+- **Recipe (AC1/AC3)**: `wiki/llm-inference/customer-hosted-llms.md` §A documents
+  exposing an on-prem OpenAI-compatible server behind TLS (Caddy, Cloudflare
+  Tunnel, ngrok) and registering it as a provider, incl. the security posture
+  (TLS for public endpoints, a dedicated key, prefer allow-listing).
+- **Pre-add probe + reachability (AC2)**: `POST /api/providers/test` probes an
+  **unsaved** config (owner-only, nothing persisted); the Providers add form has
+  the "Test connection" button. Migration 022 + `record_check` persist the saved
+  per-provider result (`providers.last_check_at/last_check_ok`), shown as a
+  reachable/unreachable badge.
+- **Discovery (AC4)**: `GET <base>/models` feeds `provider_models` and
+  `GET /v1/models`.
+
+Live-verified: a reachable DeepSeek config → `{ok:true, models}`; the LAN config
+→ `{ok:false}` in 5s. (The recipe currently lives in the wiki knowledge base; it
+should surface in customer-facing docs when that surface exists.)
