@@ -822,6 +822,17 @@ pub async fn operator_tenants(
     json_ok(json!({"tenants": tenants, "window_days": window.days()}))
 }
 
+/// GET /v1/dashboard/api/operator/metrics — telemetry pipeline health (ITEM-059).
+pub async fn operator_metrics(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    json_ok(crate::metrics::snapshot())
+}
+
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.
 pub async fn operator_summary(
     State(state): State<Arc<AppState>>,

@@ -136,8 +136,18 @@ pub async fn ingest(
     let mut dropped = 0usize;
     for trace in batch.traces {
         match state.telemetry_tx.try_send(trace.into_message(tenant.id)) {
-            Ok(()) => accepted += 1,
-            Err(_) => dropped += 1,
+            Ok(()) => {
+                crate::metrics::count_queued();
+                accepted += 1;
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                crate::metrics::count_dropped(true);
+                dropped += 1;
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                crate::metrics::count_dropped(false);
+                dropped += 1;
+            }
         }
     }
     (

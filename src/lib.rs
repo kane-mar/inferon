@@ -15,6 +15,7 @@ pub mod dashboard;
 pub mod edge;
 pub mod embed;
 pub mod linter;
+pub mod metrics;
 pub mod models;
 pub mod providers;
 pub mod router;
@@ -132,6 +133,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/operator/by-prompt", get(dashboard::operator_by_prompt))
         .route("/v1/dashboard/api/operator/alerts", get(dashboard::operator_alerts))
         .route("/v1/dashboard/api/operator/guard", get(dashboard::operator_guard))
+        .route("/v1/dashboard/api/operator/metrics", get(dashboard::operator_metrics))
         .route(
             "/v1/dashboard/api/operator/keys",
             get(dashboard::operator_keys).post(dashboard::operator_keys_create),
@@ -961,11 +963,13 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
 /// drops the trace with an error log; a closed channel logs at debug level.
 fn send_trace(tx: &mpsc::Sender<TraceMessage>, msg: TraceMessage) {
     match tx.try_send(msg) {
-        Ok(()) => {}
+        Ok(()) => crate::metrics::count_queued(),
         Err(mpsc::error::TrySendError::Full(_)) => {
+            crate::metrics::count_dropped(true);
             tracing::error!("telemetry channel full; trace dropped");
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
+            crate::metrics::count_dropped(false);
             tracing::debug!("telemetry channel closed; trace dropped");
         }
     }

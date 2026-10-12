@@ -79,6 +79,7 @@ impl PostgresTraceSink {
 #[async_trait::async_trait]
 impl TraceSink for PostgresTraceSink {
     async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
+        let total = batch.len();
         let mut tx = match self.pool.begin().await {
             Ok(tx) => tx,
             Err(e) => {
@@ -160,6 +161,8 @@ impl TraceSink for PostgresTraceSink {
         }
         if let Err(e) = tx.commit().await {
             tracing::error!("telemetry: commit failed: {e}");
+        } else {
+            crate::metrics::count_persisted(total);
         }
     }
 }
