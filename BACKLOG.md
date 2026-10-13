@@ -29,7 +29,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-057 | Error taxonomy & truncation visibility | improvement | **done (2026-10-13)** — `ErrorClass` (upstream_429/5xx, client_4xx, inferon_4xx/5xx, transport, timeout, guard, client_abort) on `traces.error_class` (migration 026); summary/quality expose `errors_by_class` + `truncated_rate`; by-provider shows error rate. Live: upstream 400 → `client_4xx`. Alerting split to ITEM-068 |
 | ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **done (2026-10-13)** — `traces.savings_usd`/`savings_kind` (migration 027); summary exposes router/fallback/total savings + unreduced cost (reconciles); by-model frontier cost. Live: downgrade saved $0.000082 on a $0.000041 call |
 | ITEM-059 | Telemetry integrity counters | improvement | **done (2026-10-12)** — in-process counters for traces queued/persisted/dropped(by reason) + unpriced models; operator-only `GET /operator/metrics`. Live: counters move with traffic, `lost:0` |
-| ITEM-060 | Throughput & capacity metrics | improvement | **new** — requests/min, in-flight gauge, telemetry queue depth, flush lag (operator endpoint) |
+| ITEM-060 | Throughput & capacity metrics | improvement | **done (2026-10-13)** — `requests_total`/`per_minute`/`in_flight`/`requests_by_provider` + telemetry queue depth/capacity + `last_flush_age_ms` on the operator metrics endpoint. Live: rate 1→2 on a request, flush age refreshed |
 | ITEM-061 | Provider experience metrics | improvement | **new** — per-provider latency (p95) + error rate alongside spend/reachability; alert on degradation |
 | ITEM-062 | Product activation & retention metrics | improvement | **new** — active tenants/keys, requests per developer, first-request funnel; operator-only aggregates |
 | ITEM-063 | Cache-affinity routing | feature | **new** — route same-prefix requests to the provider/model that has the prefix warm; weigh cache value vs downgrade value; bounded TTL affinity |
@@ -44,8 +44,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/057/058/059 closed; items captured through ITEM-068)_ —
-work the open set **top-down**: next the metric items **060–062**, then the
+_Last updated: 2026-10-14 (ITEM-018/050/051/052/053/054/055/056/057/058/059/060 closed; items captured through ITEM-068)_ —
+work the open set **top-down**: next the metric items **061–062**, then the
 closed-loop items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
 (overhead/alerts), **ITEM-067** (structured-output normalization), **ITEM-068**
 (error-rate alerting), then the staged OmniRouting cluster **029–032**.
