@@ -123,6 +123,7 @@ pub async fn ingest(
     headers: HeaderMap,
     Json(batch): Json<EdgeBatch>,
 ) -> Response {
+    let _in_flight = crate::metrics::request_started();
     let tenant = match authenticate(&state, &headers).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {

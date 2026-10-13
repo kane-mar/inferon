@@ -1092,7 +1092,15 @@ pub async fn operator_metrics(
     if let Err(resp) = operator_or(&state, &headers).await {
         return resp;
     }
-    json_ok(crate::metrics::snapshot())
+    let mut value = crate::metrics::snapshot();
+    // ITEM-060: telemetry queue depth, read from the live channel.
+    let capacity = state.telemetry_tx.max_capacity();
+    if let Some(object) = value.as_object_mut() {
+        let depth = capacity.saturating_sub(state.telemetry_tx.capacity());
+        object.insert("telemetry_queue_depth".to_string(), json!(depth));
+        object.insert("telemetry_queue_capacity".to_string(), json!(capacity));
+    }
+    json_ok(value)
 }
 
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.

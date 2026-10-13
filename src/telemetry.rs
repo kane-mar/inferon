@@ -178,6 +178,7 @@ impl TraceSink for PostgresTraceSink {
             tracing::error!("telemetry: commit failed: {e}");
         } else {
             crate::metrics::count_persisted(total);
+            crate::metrics::record_flush();
         }
     }
 }

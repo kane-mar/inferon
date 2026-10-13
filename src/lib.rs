@@ -457,6 +457,7 @@ async fn proxy_chat_completions(
     State(state): State<Arc<AppState>>,
     req: Request,
 ) -> Response {
+    let _in_flight = crate::metrics::request_started();
     let tenant = match authenticate(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -499,6 +500,7 @@ async fn proxy_chat_completions(
         Err(resp) => return resp,
     };
     meta.provider_id = route.provider_id;
+    crate::metrics::request_routed(route.provider_id);
 
     let started = Instant::now();
 
@@ -685,6 +687,7 @@ async fn proxy_chat_completions(
 /// the hard budget cap still applies. Usage (`input_tokens`/`output_tokens`) is
 /// traced and costed.
 async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    let _in_flight = crate::metrics::request_started();
     let tenant = match authenticate_anthropic(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -725,6 +728,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         Err(resp) => return resp,
     };
     meta.provider_id = route.provider_id;
+    crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
 
     if let Err(resp) =
