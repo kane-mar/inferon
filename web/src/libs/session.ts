@@ -3,10 +3,10 @@ import { cookies } from 'next/headers';
 import { cache } from 'react';
 import { InferonApi, InferonApiError } from './InferonApi';
 
-export const SESSION_COOKIE = 'inferon_session';
+const SESSION_COOKIE = 'inferon_session';
 
 /** Returns a `Cookie` request-header value for the session, if present. */
-export const sessionCookie = async (): Promise<string | undefined> => {
+const sessionCookie = async (): Promise<string | undefined> => {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return token ? `${SESSION_COOKIE}=${token}` : undefined;
 };

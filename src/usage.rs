@@ -4,24 +4,7 @@
 use serde_json::Value;
 
 use crate::sha256_hex;
-
-fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
-    while let Some((&first, rest)) = bytes.split_first() {
-        if first.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    while let Some((&last, rest)) = bytes.split_last() {
-        if last.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    bytes
-}
+use crate::sse::data_frames;
 
 /// Token accounting parsed from an upstream response (usage object).
 /// `Default` = no usage reached us (transport error / provider sent none).
@@ -38,16 +21,7 @@ pub struct Usage {
 /// whole regardless of TCP fragmentation.
 pub fn usage_from_sse_bytes(bytes: &[u8]) -> Option<Usage> {
     let mut last = None;
-    for line in bytes.split(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(data) = line.strip_prefix(b"data:") else { continue };
-        let data = trim_ascii_ws(data);
-        if data == b"[DONE]" {
-            continue;
-        }
-        let Ok(frame) = serde_json::from_slice::<Value>(data) else {
-            continue;
-        };
+    for frame in data_frames(bytes) {
         if let (Some(p), Some(c)) = (
             frame["usage"]["prompt_tokens"].as_i64(),
             frame["usage"]["completion_tokens"].as_i64(),
@@ -105,13 +79,7 @@ pub fn usage_from_anthropic_sse_bytes(bytes: &[u8]) -> Option<Usage> {
     let mut prompt = None;
     let mut completion = None;
     let mut cached = None;
-    for line in bytes.split(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(data) = line.strip_prefix(b"data:") else { continue };
-        let data = trim_ascii_ws(data);
-        let Ok(frame) = serde_json::from_slice::<Value>(data) else {
-            continue;
-        };
+    for frame in data_frames(bytes) {
         match frame["type"].as_str() {
             Some("message_start") => {
                 let usage = &frame["message"]["usage"];

@@ -12,6 +12,8 @@
 
 use serde_json::Value;
 
+use crate::sse::data_frames;
+
 /// What happened to a request, from the caller's point of view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -77,12 +79,7 @@ pub fn outcome_for_sse(status: u16, bytes: &[u8]) -> Outcome {
     }
     let mut saw_content = false;
     let mut refused = false;
-    for line in bytes.split(|&b| b == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(data) = line.strip_prefix(b"data:") else { continue };
-        let Ok(frame) = serde_json::from_slice::<Value>(trim_ascii_ws(data)) else {
-            continue;
-        };
+    for frame in data_frames(bytes) {
         refused |= frame_is_refusal(&frame);
         saw_content |= frame_has_content(&frame);
     }
@@ -93,24 +90,6 @@ pub fn outcome_for_sse(status: u16, bytes: &[u8]) -> Outcome {
     } else {
         Outcome::Empty
     }
-}
-
-fn trim_ascii_ws(mut bytes: &[u8]) -> &[u8] {
-    while let Some((&first, rest)) = bytes.split_first() {
-        if first.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    while let Some((&last, rest)) = bytes.split_last() {
-        if last.is_ascii_whitespace() {
-            bytes = rest;
-        } else {
-            break;
-        }
-    }
-    bytes
 }
 
 /// A model refusal / content-filter stop, in either envelope.

@@ -23,6 +23,7 @@ pub mod router;
 pub mod routing;
 pub mod secret;
 pub mod session;
+pub mod sse;
 pub mod tenant;
 pub mod telemetry;
 pub mod usage;
@@ -379,6 +380,69 @@ fn surface_mismatch(surface: Surface) -> Response {
     json_error(StatusCode::BAD_REQUEST, "no_provider", message)
 }
 
+/// Read and parse a JSON request body, or the typed error response.
+/// Returns the raw bytes too — the Anthropic surface forwards them unchanged.
+async fn read_json_body(req: Request) -> Result<(axum::body::Bytes, Value), Response> {
+    let body_bytes = axum::body::to_bytes(req.into_body(), MAX_REQUEST_BYTES)
+        .await
+        .map_err(|_| {
+            json_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "request body exceeds 10MB",
+            )
+        })?;
+    let payload = serde_json::from_slice(&body_bytes).map_err(|_| {
+        json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be valid JSON",
+        )
+    })?;
+    Ok((body_bytes, payload))
+}
+
+/// The ordered, de-duplicated `(model, route)` chain to attempt: the primary
+/// (after any router/budget override), then the tenant's fallbacks, dropping
+/// models the tenant disabled (ITEM-044). Each entry carries the provider that
+/// owns it, so a fallback to another provider's model hits the right upstream.
+/// Always contains at least the primary.
+async fn build_model_chain(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    route: &Route,
+    primary: String,
+    fallbacks: Vec<String>,
+) -> Vec<(String, Route)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut chain = Vec::new();
+    for model in std::iter::once(primary.clone()).chain(fallbacks) {
+        if !seen.insert(model.clone()) {
+            continue;
+        }
+        let model_route = if model == primary {
+            route.clone()
+        } else {
+            resolve_route(state, tenant, Some(&model), Surface::OpenAi)
+                .await
+                .unwrap_or_else(|_| route.clone())
+        };
+        if state
+            .model_store
+            .is_disabled(model_route.provider_id, &model)
+            .await
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        chain.push((model, model_route));
+    }
+    if chain.is_empty() {
+        chain.push((primary, route.clone()));
+    }
+    chain
+}
+
 /// Proxy a chat completion request to the configured upstream.
 ///
 /// Authenticates the caller via `Authorization: Bearer <key>` (SHA-256 lookup
@@ -411,25 +475,9 @@ async fn proxy_chat_completions(
     };
     let tenant_id = tenant.id;
 
-    let body_bytes = match axum::body::to_bytes(req.into_body(), MAX_REQUEST_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return json_error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "payload_too_large",
-                "request body exceeds 10MB",
-            )
-        }
-    };
-    let payload: Value = match serde_json::from_slice(&body_bytes) {
-        Ok(payload) => payload,
-        Err(_) => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_json",
-                "request body must be valid JSON",
-            )
-        }
+    let (_, payload) = match read_json_body(req).await {
+        Ok(parsed) => parsed,
+        Err(resp) => return resp,
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     // The router/budget override is decided per request (ITEM-045/046) — see
@@ -454,26 +502,11 @@ async fn proxy_chat_completions(
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
     // error (and traced), not a raw upstream 4xx.
-    match state.model_store.is_disabled(route.provider_id, &meta.model).await {
-        Ok(true) => {
-            let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(400, total_ms));
-            send_trace(&state.telemetry_tx, msg);
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "model_disabled",
-                "this model is disabled for your tenant",
-            );
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::error!("model selection lookup failed: {e}");
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "model_store_error",
-                "could not check model selection",
-            );
-        }
+    if let Err(resp) =
+        ensure_model_enabled(&state, &meta, tenant_id, started, route.provider_id, &meta.model)
+            .await
+    {
+        return resp;
     }
 
     // Budget breaker (ITEM-016): its fallback model wins over the router;
@@ -481,9 +514,7 @@ async fn proxy_chat_completions(
     let budget_override = match budget::check_budget(&state, tenant_id, &meta.raw_prompt).await {
         Ok(model) => model,
         Err(resp) => {
-            let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(429, total_ms));
-            send_trace(&state.telemetry_tx, msg);
+            trace_error(&state, &meta, tenant_id, started, 429);
             return resp;
         }
     };
@@ -518,36 +549,7 @@ async fn proxy_chat_completions(
             Vec::new()
         }
     };
-    let mut chain = vec![primary.clone()];
-    chain.extend(fallbacks);
-    // Each chain entry carries its own route — the provider that owns that
-    // model — so a fallback to another provider's model hits the right upstream.
-    let mut seen = std::collections::HashSet::new();
-    let mut allowed: Vec<(String, Route)> = Vec::new();
-    for model in chain {
-        if !seen.insert(model.clone()) {
-            continue;
-        }
-        let model_route = if model == primary {
-            route.clone()
-        } else {
-            resolve_route(&state, &tenant, Some(&model), Surface::OpenAi)
-                .await
-                .unwrap_or_else(|_| route.clone())
-        };
-        if state
-            .model_store
-            .is_disabled(model_route.provider_id, &model)
-            .await
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        allowed.push((model, model_route));
-    }
-    if allowed.is_empty() {
-        allowed.push((primary.clone(), route.clone()));
-    }
+    let allowed = build_model_chain(&state, &tenant, &route, primary.clone(), fallbacks).await;
 
     let mut routing_event: Option<Value> = None;
     let mut upstream: Option<reqwest::Response> = None;
@@ -600,10 +602,7 @@ async fn proxy_chat_completions(
             Err(e) => {
                 if is_last {
                     tracing::error!("upstream request failed: {e}");
-                    let total_ms = started.elapsed().as_millis() as i64;
-                    let msg =
-                        build_trace(&meta, tenant_id, TraceOutcome::error(502, total_ms));
-                    send_trace(&state.telemetry_tx, msg);
+                    trace_error(&state, &meta, tenant_id, started, 502);
                     return json_error(
                         StatusCode::BAD_GATEWAY,
                         "upstream_error",
@@ -697,25 +696,9 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
     };
     let tenant_id = tenant.id;
 
-    let body_bytes = match axum::body::to_bytes(req.into_body(), MAX_REQUEST_BYTES).await {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            return json_error(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "payload_too_large",
-                "request body exceeds 10MB",
-            )
-        }
-    };
-    let payload: Value = match serde_json::from_slice(&body_bytes) {
-        Ok(payload) => payload,
-        Err(_) => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_json",
-                "request body must be valid JSON",
-            )
-        }
+    let (body_bytes, payload) = match read_json_body(req).await {
+        Ok(parsed) => parsed,
+        Err(resp) => return resp,
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     let mut meta = RequestMeta {
@@ -735,34 +718,17 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
     meta.provider_id = route.provider_id;
     let started = Instant::now();
 
-    match state.model_store.is_disabled(route.provider_id, &meta.model).await {
-        Ok(true) => {
-            let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(400, total_ms));
-            send_trace(&state.telemetry_tx, msg);
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "model_disabled",
-                "this model is disabled for your tenant",
-            );
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::error!("model selection lookup failed: {e}");
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "model_store_error",
-                "could not check model selection",
-            );
-        }
+    if let Err(resp) =
+        ensure_model_enabled(&state, &meta, tenant_id, started, route.provider_id, &meta.model)
+            .await
+    {
+        return resp;
     }
 
     // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
     // and bypassed here; only the hard monthly cap still applies.
     if let Err(resp) = budget::check_cap(&state, tenant_id).await {
-        let total_ms = started.elapsed().as_millis() as i64;
-        let msg = build_trace(&meta, tenant_id, TraceOutcome::error(429, total_ms));
-        send_trace(&state.telemetry_tx, msg);
+        trace_error(&state, &meta, tenant_id, started, 429);
         return resp;
     }
 
@@ -778,9 +744,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         Ok(response) => response,
         Err(e) => {
             tracing::error!("anthropic upstream request failed: {e}");
-            let total_ms = started.elapsed().as_millis() as i64;
-            let msg = build_trace(&meta, tenant_id, TraceOutcome::error(502, total_ms));
-            send_trace(&state.telemetry_tx, msg);
+            trace_error(&state, &meta, tenant_id, started, 502);
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream_error",
@@ -967,6 +931,43 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         api_key_id: meta.api_key_id,
         outcome: outcome.outcome,
     }
+}
+
+/// Refuse a model the tenant disabled with a typed, traced 400 (ITEM-044 AC5).
+async fn ensure_model_enabled(
+    state: &Arc<AppState>,
+    meta: &RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    provider_id: Option<Uuid>,
+    model: &str,
+) -> Result<(), Response> {
+    match state.model_store.is_disabled(provider_id, model).await {
+        Ok(false) => Ok(()),
+        Ok(true) => {
+            trace_error(state, meta, tenant_id, started, 400);
+            Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "model_disabled",
+                "this model is disabled for your tenant",
+            ))
+        }
+        Err(e) => {
+            tracing::error!("model selection lookup failed: {e}");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "model_store_error",
+                "could not check model selection",
+            ))
+        }
+    }
+}
+
+/// Trace a terminal error response (no usage, no completion body).
+fn trace_error(state: &AppState, meta: &RequestMeta, tenant_id: Uuid, started: Instant, status: u16) {
+    let total_ms = started.elapsed().as_millis() as i64;
+    let msg = build_trace(meta, tenant_id, TraceOutcome::error(status, total_ms));
+    send_trace(&state.telemetry_tx, msg);
 }
 
 /// Queue a trace without ever blocking the request path (AC5): a full channel

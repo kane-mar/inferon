@@ -241,17 +241,7 @@ fn reject_response() -> Response {
 /// heuristic router and the cheap-fallback override are OpenAI-shaped, so an
 /// Anthropic request is served as asked or rejected at the cap — never rewritten.
 pub async fn check_cap(state: &Arc<AppState>, tenant_id: Uuid) -> Result<(), Response> {
-    let budget = match state.budget_store.budget_for(tenant_id).await {
-        Ok(budget) => budget,
-        Err(e) => {
-            tracing::error!("budget lookup failed: {e}");
-            return Err(crate::json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "budget_store_error",
-                "budget lookup failed",
-            ));
-        }
-    };
+    let budget = load_budget(state, tenant_id).await?;
     match budget.map(|budget| enforce_budget(&budget)) {
         Some(BudgetVerdict::Reject) => Err(reject_response()),
         _ => Ok(()),
@@ -269,6 +259,21 @@ pub struct ModelOverride {
     pub reason: &'static str,
 }
 
+/// The tenant's budget row, or the typed 500 response when the lookup fails.
+async fn load_budget(
+    state: &Arc<AppState>,
+    tenant_id: Uuid,
+) -> Result<Option<TenantBudget>, Response> {
+    state.budget_store.budget_for(tenant_id).await.map_err(|e| {
+        tracing::error!("budget lookup failed: {e}");
+        crate::json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "budget_store_error",
+            "budget lookup failed",
+        )
+    })
+}
+
 /// Apply the breaker AND the heuristic router on the hot path, before
 /// forwarding. Returns the model the request should use (`None` = keep the
 /// client's model) or a rejection response when the hard cap is hit.
@@ -277,17 +282,7 @@ pub async fn check_budget(
     tenant_id: Uuid,
     payload: &Value,
 ) -> Result<Option<ModelOverride>, Response> {
-    let budget = match state.budget_store.budget_for(tenant_id).await {
-        Ok(budget) => budget,
-        Err(e) => {
-            tracing::error!("budget lookup failed: {e}");
-            return Err(crate::json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "budget_store_error",
-                "budget lookup failed",
-            ));
-        }
-    };
+    let budget = load_budget(state, tenant_id).await?;
     // Unconfigured tenant (no row): the router still runs with its defaults
     // (ITEM-015 behaviour unchanged); an explicit config can turn it off or
     // move the threshold (ITEM-046).
