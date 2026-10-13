@@ -4000,8 +4000,10 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
 
     #[tokio::test]
     async fn frontier_model_with_schema_contract_is_not_guarded() {
-        // Same schema contract but a frontier model: not guarded, passthrough.
-        let (response, mut rx) = traced_request(&guarded_stream_body("deepseek-v4-pro", "hi"), Some(CLIENT_KEY)).await;
+        // Same schema contract but a frontier model the router does not
+        // downgrade: passthrough, never guarded. (`deepseek-v4-pro` is the
+        // wrong choice here — ITEM-054 downshifts it to a cheap tier.)
+        let (response, mut rx) = traced_request(&guarded_stream_body("deepseek-reasoner", "hi"), Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         let out = axum::body::to_bytes(response.into_body(), 1024 * 1024)
             .await
@@ -4010,6 +4012,23 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let msg = rx.recv().await.expect("trace emitted");
         // 026 AC4: guard telemetry is additive — unguarded traces stay None.
         assert!(msg.guard_event.is_none(), "unguarded trace never gains a guard event");
+    }
+
+    #[tokio::test]
+    async fn a_router_downgraded_contract_request_is_guarded() {
+        // ITEM-054 downshifts deepseek-v4-pro to deepseek-flash, which is a
+        // cheap tier — so the guard engages on the downgraded request. This
+        // silently did not happen while `is_cheap_tier` omitted deepseek-flash.
+        let (response, mut rx) =
+            traced_request(&guarded_stream_body("deepseek-v4-pro", "hi"), Some(CLIENT_KEY)).await;
+        let _ = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let msg = rx.recv().await.expect("trace emitted");
+        assert!(
+            msg.guard_event.is_some(),
+            "the router-downgraded cheap tier is guarded"
+        );
     }
 
     /// Drive a real guarded request through axum::serve and drop the socket

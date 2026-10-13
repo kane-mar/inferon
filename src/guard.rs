@@ -89,8 +89,9 @@ impl GuardReason {
 /// v4-flash). Anything else (gpt-4o, deepseek-v4-pro, unknown) is frontier.
 pub fn is_cheap_tier(model: &str) -> bool {
     model.starts_with("gpt-4o-mini")
-        || model.starts_with("deepseek-v4-flash")
         || model.starts_with("deepseek-chat")
+        || model.starts_with("deepseek-flash")
+        || model.starts_with("deepseek-v4-flash")
 }
 
 /// Does this request qualify for the guard? True only when BOTH hold:
@@ -315,6 +316,10 @@ mod tests {
         assert!(is_cheap_tier("deepseek-chat"));
         assert!(is_cheap_tier("deepseek-v4-flash"));
         assert!(is_cheap_tier("deepseek-v4-flash-vision-exp"));
+        // `deepseek-flash` is the name the API actually returns and the router's
+        // DeepSeek downgrade target (ITEM-054) — it must be cheap too.
+        assert!(is_cheap_tier("deepseek-flash"));
+        assert!(is_cheap_tier("deepseek-flash-2026-01-01"));
     }
 
     #[test]
@@ -329,6 +334,8 @@ mod tests {
     fn guarded_requires_schema_and_cheap_model() {
         let with_schema = payload_with_schema();
         assert!(is_guarded_request(&with_schema, "deepseek-chat"));
+        // The router's DeepSeek downgrade target is guarded too (ITEM-054).
+        assert!(is_guarded_request(&with_schema, "deepseek-flash"));
         // Same contract but a frontier model -> not guarded.
         assert!(!is_guarded_request(&with_schema, "deepseek-v4-pro"));
         // No contract -> never guarded, regardless of model.
@@ -590,7 +597,7 @@ mod tests {
     #[test]
     fn fallback_escalates_cheap_original_requests_to_the_deployment_frontier() {
         // Replaying a cheap original to itself would fail the guard again.
-        for cheap in ["gpt-4o-mini", "deepseek-chat", "deepseek-v4-flash"] {
+        for cheap in ["gpt-4o-mini", "deepseek-chat", "deepseek-v4-flash", "deepseek-flash"] {
             let p = serde_json::json!({"model": cheap, "messages": []});
             assert_eq!(fallback_model(&p), DEFAULT_GUARD_FRONTIER);
         }
