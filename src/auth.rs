@@ -651,7 +651,7 @@ impl Accounts {
 
 /// GitHub's OAuth authorize endpoint URL for a sign-in attempt. `state` is the
 /// CSRF nonce; `redirect_uri` is where GitHub sends the code back.
-pub fn authorize_url(config: &OauthConfig, redirect_uri: &str, state: &str) -> String {
+pub(crate) fn authorize_url(config: &OauthConfig, redirect_uri: &str, state: &str) -> String {
     format!(
         "{}?client_id={}&redirect_uri={}&state={}&scope=read:user",
         config.authorize_url,

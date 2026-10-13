@@ -26,7 +26,7 @@ pub const TIER_PAIRS: &[(&str, &str)] = &[
 
 /// The cheap model to downshift `model` to, if it is the expensive member of a
 /// configured tier pair. `None` for the cheap member itself or an unpaired model.
-pub fn downgrade_target(model: &str) -> Option<&'static str> {
+pub(crate) fn downgrade_target(model: &str) -> Option<&'static str> {
     TIER_PAIRS.iter().find_map(|&(expensive, cheap)| {
         (model.starts_with(expensive) && !model.starts_with(cheap)).then_some(cheap)
     })
@@ -55,7 +55,7 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 }
 
 /// 0.0 (dead simple) .. 1.0 (frontier reasoning). Pure function of the payload.
-pub fn complexity_score(payload: &Value) -> f64 {
+pub(crate) fn complexity_score(payload: &Value) -> f64 {
     let mut score: f64 = 0.0;
     for key in ["tools", "functions"] {
         if payload[key].as_array().is_some_and(|a| !a.is_empty()) {

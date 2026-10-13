@@ -28,7 +28,7 @@ impl Secrets {
             .and_then(|value| Self::from_hex(&value))
     }
 
-    pub fn from_hex(master_hex: &str) -> Option<Self> {
+    pub(crate) fn from_hex(master_hex: &str) -> Option<Self> {
         let bytes = hex::decode(master_hex.trim()).ok()?;
         let key: [u8; 32] = bytes.try_into().ok()?;
         Some(Self {

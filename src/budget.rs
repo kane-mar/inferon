@@ -49,7 +49,7 @@ pub enum BudgetVerdict {
 /// Pure enforcement: hard cap -> Reject; inside the last 15% with a cheap
 /// model configured -> DowngradeTo; otherwise Allow. Integer math (cents),
 /// never float: 85% zone test is `spent * 20 >= limit * 17`.
-pub fn enforce_budget(budget: &TenantBudget) -> BudgetVerdict {
+pub(crate) fn enforce_budget(budget: &TenantBudget) -> BudgetVerdict {
     if budget.limit_cents <= 0 {
         return BudgetVerdict::Allow; // unconfigured / unlimited
     }

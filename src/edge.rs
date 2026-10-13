@@ -68,7 +68,7 @@ pub struct EdgeTrace {
 impl EdgeTrace {
     /// Convert to the pipeline's `TraceMessage`, tenant-scoped from the
     /// authenticated credential (never the body).
-    pub fn into_message(self, tenant_id: Uuid) -> TraceMessage {
+    pub(crate) fn into_message(self, tenant_id: Uuid) -> TraceMessage {
         TraceMessage {
             id: self.id.unwrap_or_else(Uuid::new_v4),
             tenant_id,

@@ -48,7 +48,8 @@ impl Embedder for NoEmbedder {
 /// Fit token ids into the fixed `MAX_TOKENS` window: truncate long inputs
 /// keeping the leading `[CLS]` and trailing `[SEP]`, then zero-pad (pad id 0)
 /// with a matching attention mask (1 real, 0 pad).
-pub fn fit_to_model_window(ids: &[u32]) -> ([i64; MAX_TOKENS], [i64; MAX_TOKENS]) {
+#[cfg(any(test, feature = "embedder"))]
+pub(crate) fn fit_to_model_window(ids: &[u32]) -> ([i64; MAX_TOKENS], [i64; MAX_TOKENS]) {
     let mut kept: Vec<u32> = if ids.len() > MAX_TOKENS {
         let mut k = ids[..MAX_TOKENS - 1].to_vec();
         k.push(*ids.last().expect("non-empty"));
@@ -69,7 +70,8 @@ pub fn fit_to_model_window(ids: &[u32]) -> ([i64; MAX_TOKENS], [i64; MAX_TOKENS]
 
 /// Attention-masked mean pooling over `tokens × EMBED_DIM` hidden states.
 /// Panics only on a malformed buffer (a programming error, not user input).
-pub fn mean_pool(hidden: &[f32], mask: &[i64], tokens: usize) -> [f32; EMBED_DIM] {
+#[cfg(any(test, feature = "embedder"))]
+pub(crate) fn mean_pool(hidden: &[f32], mask: &[i64], tokens: usize) -> [f32; EMBED_DIM] {
     assert_eq!(hidden.len(), tokens * EMBED_DIM, "hidden state shape");
     assert_eq!(mask.len(), tokens, "attention mask shape");
     let mut pooled = [0f32; EMBED_DIM];
@@ -92,7 +94,8 @@ pub fn mean_pool(hidden: &[f32], mask: &[i64], tokens: usize) -> [f32; EMBED_DIM
 }
 
 /// L2-normalize a vector (a zero vector stays zero).
-pub fn l2_normalize(mut v: [f32; EMBED_DIM]) -> [f32; EMBED_DIM] {
+#[cfg(any(test, feature = "embedder"))]
+pub(crate) fn l2_normalize(mut v: [f32; EMBED_DIM]) -> [f32; EMBED_DIM] {
     let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
         for x in v.iter_mut() {

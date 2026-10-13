@@ -56,7 +56,7 @@ pub struct SpendSignal {
 impl SpendSignal {
     /// Threshold = max(floor, multiplier × hourly baseline), rounded up to
     /// whole cents (ceil — never under-flag spend, matching cost_to_cents).
-    pub fn threshold_cents(&self, t: &AlertThresholds) -> i64 {
+    pub(crate) fn threshold_cents(&self, t: &AlertThresholds) -> i64 {
         let baseline = i64::try_from(
             (t.spend_multiplier * Decimal::from(self.baseline_per_hour_cents)).ceil(),
         )
@@ -65,7 +65,7 @@ impl SpendSignal {
     }
 
     /// Anomalous when the window strictly exceeds the threshold.
-    pub fn is_anomalous(&self, t: &AlertThresholds) -> bool {
+    pub(crate) fn is_anomalous(&self, t: &AlertThresholds) -> bool {
         self.window_cents > self.threshold_cents(t)
     }
 }
@@ -79,7 +79,7 @@ pub struct WasteSignal {
 impl WasteSignal {
     /// Anomalous when the daily flagged count passes the threshold (strictly
     /// greater than — "past a daily threshold" per AC1b).
-    pub fn is_anomalous(&self, t: &AlertThresholds) -> bool {
+    pub(crate) fn is_anomalous(&self, t: &AlertThresholds) -> bool {
         self.flagged_requests_24h > t.waste_daily_threshold
     }
 }
@@ -106,7 +106,7 @@ pub enum FireAction {
 /// `is_open` = an episode is currently firing; `last_fired_at_ms` = the last
 /// delivery time (None when open but never delivered, which cannot happen —
 /// Start always delivers). `now_ms` = evaluation time.
-pub fn decide_fire(
+pub(crate) fn decide_fire(
     is_open: bool,
     last_fired_at_ms: Option<i64>,
     now_ms: i64,
@@ -137,7 +137,7 @@ pub const KEY_SPEND_LIMIT: &str = "key_spend_limit";
 pub const PROVIDER_SPEND_LIMIT: &str = "provider_spend_limit";
 
 /// The per-entity episode class (kept long — `alerts.class` is TEXT).
-pub fn limit_class(kind: &str, id: uuid::Uuid) -> String {
+pub(crate) fn limit_class(kind: &str, id: uuid::Uuid) -> String {
     format!("{kind}:{id}")
 }
 

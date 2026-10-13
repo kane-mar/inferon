@@ -178,7 +178,7 @@ pub fn guard_flushed_event(guarded_model: &str) -> Value {
 /// Schema-level validation of the extracted content is ITEM-024's slice —
 /// this gate exists so the buffered flush decision has a real, testable seam
 /// before the schema machinery lands.
-pub fn validate_sse_container(bytes: &[u8]) -> Result<(), GuardReason> {
+pub(crate) fn validate_sse_container(bytes: &[u8]) -> Result<(), GuardReason> {
     if bytes.is_empty() {
         return Err(GuardReason::UpstreamFailure);
     }
@@ -223,7 +223,7 @@ pub fn check_guarded_sse(bytes: &[u8], schema: Option<&Value>) -> Result<(), Gua
 /// as successive `choices[0].delta.content` strings across frames; the
 /// assistant message (role present, non-empty delta) is assembled in order.
 /// Returns `None` when the stream carries no assistant content at all.
-pub fn extract_content(bytes: &[u8]) -> Option<String> {
+pub(crate) fn extract_content(bytes: &[u8]) -> Option<String> {
     let mut content = String::new();
     for line in bytes.split(|&b| b == b'\n') {
         let line = line.strip_suffix(b"\r").unwrap_or(line);
@@ -254,7 +254,7 @@ pub fn extract_content(bytes: &[u8]) -> Option<String> {
 ///
 /// Empty/missing content on an otherwise complete stream is a defined edge
 /// case (no content to validate -> schema violation, never a panic).
-pub fn validate_content(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
+pub(crate) fn validate_content(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
     let Some(schema) = schema else {
         // No contract to enforce — the guard has nothing to check. (Guarded
         // requests always carry one; this keeps the function total.)
