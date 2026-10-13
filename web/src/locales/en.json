@@ -170,6 +170,16 @@
     "status_label": "Status",
     "first_fired": "First fired",
     "last_fired": "Last fired",
+    "engagement": "Engagement",
+    "active_tenants": "Active tenants",
+    "active_keys": "Active keys",
+    "requests_per_dev": "Requests / developer",
+    "signups": "New signups",
+    "funnel": "First-request funnel",
+    "signed_up": "Signed up",
+    "created_provider": "Created a provider",
+    "first_request": "First request",
+    "returned": "Returned",
     "no_data": "No data for this window yet."
   },
   "OnboardingPage": {

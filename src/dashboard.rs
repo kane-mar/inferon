@@ -1139,6 +1139,110 @@ pub async fn operator_metrics(
     json_ok(value)
 }
 
+/// Relative change from `previous` to `current` (`None` when previous is 0).
+fn wow(current: i64, previous: i64) -> Option<f64> {
+    (previous > 0).then(|| (current - previous) as f64 / previous as f64)
+}
+
+/// GET /v1/dashboard/api/operator/activation?days=7 — engagement, not billing:
+/// active tenants/keys, requests per active developer, the first-request funnel,
+/// and the week-over-week trend. Operator-only, tenant-anonymised aggregates.
+pub async fn operator_activation(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let days = window.days();
+    // Activity this window vs the preceding window of the same length.
+    let activity: Option<(i64, i64, i64, i64, i64, i64)> = match sqlx::query_as(
+        "SELECT
+            COUNT(DISTINCT tenant_id) FILTER (WHERE created_at >= NOW() - $1 * INTERVAL '1 day'),
+            COUNT(DISTINCT api_key_id) FILTER (WHERE created_at >= NOW() - $1 * INTERVAL '1 day'),
+            COUNT(*) FILTER (WHERE created_at >= NOW() - $1 * INTERVAL '1 day'),
+            COUNT(DISTINCT tenant_id) FILTER (WHERE created_at >= NOW() - ($1 * 2) * INTERVAL '1 day'
+                                                AND created_at < NOW() - $1 * INTERVAL '1 day'),
+            COUNT(DISTINCT api_key_id) FILTER (WHERE created_at >= NOW() - ($1 * 2) * INTERVAL '1 day'
+                                                AND created_at < NOW() - $1 * INTERVAL '1 day'),
+            COUNT(*) FILTER (WHERE created_at >= NOW() - ($1 * 2) * INTERVAL '1 day'
+                               AND created_at < NOW() - $1 * INTERVAL '1 day')
+         FROM traces
+         WHERE created_at >= NOW() - ($1 * 2) * INTERVAL '1 day'",
+    )
+    .bind(days)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+    let (active_tenants, active_keys, requests, prev_tenants, prev_keys, prev_requests) =
+        activity.unwrap_or((0, 0, 0, 0, 0, 0));
+
+    // New tenant accounts (signups) this window vs the previous one.
+    let signups: (i64, i64) = match sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE created_at >= NOW() - $1 * INTERVAL '1 day'),
+                COUNT(*) FILTER (WHERE created_at >= NOW() - ($1 * 2) * INTERVAL '1 day'
+                                   AND created_at < NOW() - $1 * INTERVAL '1 day')
+         FROM tenants",
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+
+    // First-request funnel over the window's signup cohort.
+    let funnel: (i64, i64, i64, i64) = match sqlx::query_as(
+        "WITH cohort AS (SELECT id FROM tenants WHERE created_at >= NOW() - $1 * INTERVAL '1 day')
+         SELECT
+           (SELECT COUNT(*) FROM cohort),
+           (SELECT COUNT(*) FROM cohort c
+              WHERE EXISTS (SELECT 1 FROM providers p WHERE p.tenant_id = c.id)),
+           (SELECT COUNT(*) FROM cohort c
+              WHERE EXISTS (SELECT 1 FROM traces t WHERE t.tenant_id = c.id)),
+           (SELECT COUNT(*) FROM cohort c
+              WHERE (SELECT COUNT(DISTINCT date_trunc('day', t.created_at))
+                       FROM traces t WHERE t.tenant_id = c.id) >= 2)",
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+
+    let per_tenant = rate(requests, active_tenants);
+    let per_key = rate(requests, active_keys);
+    json_ok(json!({
+        "window_days": days,
+        "active_tenants": active_tenants,
+        "active_keys": active_keys,
+        "requests": requests,
+        "requests_per_active_tenant": per_tenant,
+        "requests_per_active_key": per_key,
+        "signups": signups.0,
+        "previous_signups": signups.1,
+        "previous_active_tenants": prev_tenants,
+        "previous_active_keys": prev_keys,
+        "previous_requests": prev_requests,
+        // Week-over-week trend (fraction; positive = growth).
+        "active_tenants_wow": wow(active_tenants, prev_tenants),
+        "requests_wow": wow(requests, prev_requests),
+        "signups_wow": wow(signups.0, signups.1),
+        "funnel": {
+            "signed_up": funnel.0,
+            "created_provider": funnel.1,
+            "first_request": funnel.2,
+            "returned": funnel.3,
+        },
+    }))
+}
+
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.
 pub async fn operator_summary(
     State(state): State<Arc<AppState>>,
@@ -3018,6 +3122,13 @@ mod tests {
     fn rate_is_none_without_a_denominator() {
         assert_eq!(super::rate(1, 2), Some(0.5));
         assert_eq!(super::rate(0, 0), None);
+    }
+
+    #[test]
+    fn wow_is_none_without_a_baseline() {
+        assert_eq!(super::wow(15, 10), Some(0.5));
+        assert_eq!(super::wow(5, 10), Some(-0.5));
+        assert_eq!(super::wow(10, 0), None);
     }
 
     async fn body_json(response: axum::response::Response) -> Value {

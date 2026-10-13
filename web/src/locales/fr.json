@@ -170,6 +170,16 @@
     "status_label": "Statut",
     "first_fired": "Premier déclenchement",
     "last_fired": "Dernier déclenchement",
+    "engagement": "Engagement",
+    "active_tenants": "Locataires actifs",
+    "active_keys": "Clés actives",
+    "requests_per_dev": "Requêtes / développeur",
+    "signups": "Nouvelles inscriptions",
+    "funnel": "Entonnoir de première requête",
+    "signed_up": "Inscrit",
+    "created_provider": "Fournisseur créé",
+    "first_request": "Première requête",
+    "returned": "Revenu",
     "no_data": "Aucune donnée pour cette fenêtre."
   },
   "OnboardingPage": {

@@ -48,11 +48,12 @@ export default async function OperatorPage(props: OperatorPageProps) {
   });
   const api = InferonApi.fromEnv();
   const auth = { cookie: session.cookie };
-  const [summary, tenants, guard, alerts] = await Promise.all([
+  const [summary, tenants, guard, alerts, activation] = await Promise.all([
     api.operatorSummary(days, auth),
     api.operatorTenants(days, auth),
     api.operatorGuard(days, auth),
     api.operatorAlerts(days, auth),
+    api.operatorActivation(days, auth),
   ]);
 
   return (
@@ -73,6 +74,54 @@ export default async function OperatorPage(props: OperatorPageProps) {
         <StatCard label={t('requests')} value={String(summary.requests)} />
         <StatCard label={t('errors')} value={String(summary.errors)} />
         <StatCard label={t('total_cost')} value={formatUsd(summary.total_cost_usd)} />
+      </div>
+
+      <div className="
+        mt-4 grid grid-cols-1 gap-4
+        lg:grid-cols-2
+      "
+      >
+        <Card title={t('engagement')}>
+          <div className="
+            grid grid-cols-2 gap-3
+            sm:grid-cols-4
+          "
+          >
+            <StatCard label={t('active_tenants')} value={String(activation.active_tenants)} />
+            <StatCard label={t('active_keys')} value={String(activation.active_keys)} />
+            <StatCard
+              label={t('requests_per_dev')}
+              value={
+                activation.requests_per_active_tenant == null
+                  ? '—'
+                  : activation.requests_per_active_tenant.toFixed(1)
+              }
+            />
+            <StatCard label={t('signups')} value={String(activation.signups)} />
+          </div>
+        </Card>
+
+        <Card title={t('funnel')}>
+          <ul className="text-sm">
+            {([
+              [t('signed_up'), activation.funnel.signed_up],
+              [t('created_provider'), activation.funnel.created_provider],
+              [t('first_request'), activation.funnel.first_request],
+              [t('returned'), activation.funnel.returned],
+            ] as const).map(([label, count]) => (
+              <li
+                key={label}
+                className="
+                  flex justify-between border-b py-2
+                  last:border-0
+                "
+              >
+                <span className="text-muted-foreground">{label}</span>
+                <span className="tabular-nums">{count}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
       </div>
 
       <div className="

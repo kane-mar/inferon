@@ -142,6 +142,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/operator/guard", get(dashboard::operator_guard))
         .route("/v1/dashboard/api/operator/metrics", get(dashboard::operator_metrics))
         .route(
+            "/v1/dashboard/api/operator/activation",
+            get(dashboard::operator_activation),
+        )
+        .route(
             "/v1/dashboard/api/operator/keys",
             get(dashboard::operator_keys).post(dashboard::operator_keys_create),
         )

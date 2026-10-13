@@ -343,6 +343,30 @@ export type OperatorTenantRow = {
   cost_usd: string;
 };
 
+/** ITEM-062: operator engagement view — active tenants/keys, funnel, WoW. */
+export type OperatorActivation = {
+  window_days: number;
+  active_tenants: number;
+  active_keys: number;
+  requests: number;
+  requests_per_active_tenant: number | null;
+  requests_per_active_key: number | null;
+  signups: number;
+  previous_signups: number;
+  previous_active_tenants: number;
+  previous_active_keys: number;
+  previous_requests: number;
+  active_tenants_wow: number | null;
+  requests_wow: number | null;
+  signups_wow: number | null;
+  funnel: {
+    signed_up: number;
+    created_provider: number;
+    first_request: number;
+    returned: number;
+  };
+};
+
 export type OperatorTenants = { tenants: OperatorTenantRow[]; window_days: number };
 
 export type OperatorGuard = {
@@ -586,6 +610,10 @@ export class InferonApi {
 
   operatorAlerts(days: number, auth: Auth): Promise<OperatorAlerts> {
     return this.request('GET', `/v1/dashboard/api/operator/alerts${windowQuery(days)}`, undefined, auth);
+  }
+
+  operatorActivation(days: number, auth: Auth): Promise<OperatorActivation> {
+    return this.request('GET', `/v1/dashboard/api/operator/activation${windowQuery(days)}`, undefined, auth);
   }
 
   private async request<T>(
