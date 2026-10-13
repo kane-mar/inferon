@@ -33,3 +33,27 @@ attribution.
 
 **Source:** 2026-10-12 metrics review — events are traced but their value is not
 computed.
+
+## Close-out (2026-10-13)
+
+- `cost::savings_vs(counterfactual, served, tokens)` = `max(0, asked - served)`
+  (unit-tested against the price table).
+- The telemetry worker computes each trace's saving from its `router_event` /
+  `routing_event` `from_model` versus the model that served, and records
+  `traces.savings_usd` + `traces.savings_kind` (`router` | `fallback`)
+  (migration 027).
+- `/api/summary` exposes `router_savings_usd`, `fallback_savings_usd`,
+  `total_savings_usd` (incl. cache) and `unreduced_cost_usd`; it **reconciles**:
+  `actual + router/fallback savings = unreduced`.
+- `/api/by-model` exposes `savings_usd` + `frontier_cost_usd` per model (the
+  value of the cheaper tier).
+- Web: the dashboard savings KPI is now **total savings**, with cache savings as
+  a hint.
+- Rust **275 → 277** tests, clippy clean; tsc/eslint/i18n green. Commit
+  `4b4b61c`; CI `38408441964` (test+web+deploy) green.
+- **Live**: a simple `deepseek-v4-pro` request was router-downgraded to
+  `deepseek-flash` → `savings_usd = 0.000082` (`kind = router`) on an actual cost
+  of `0.000041`; the summary reported `total_savings_usd = 0.000252`
+  (router 0.000082 + cache 0.000170) and `unreduced_cost_usd = 0.000708`
+  (`0.000626 + 0.000082` — the reconciliation holds). Historical rows contribute
+  zero (no event → no savings).

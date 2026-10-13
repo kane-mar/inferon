@@ -27,7 +27,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-055 | Quality & outcome telemetry | improvement | **done (2026-10-13)** — derived `outcome` (ok/empty/refused/error/truncated, OpenAI+Anthropic JSON/SSE) on traces; `X-Inferon-Trace-Id` + `POST /v1/quality` thumbs; `/api/quality` + `/dashboard/quality`. Live end to end |
 | ITEM-056 | Latency percentiles | improvement | **done (2026-10-12)** — p50/p95/p99 of TTFT/total from Postgres `percentile_cont`; dashboard shows p95 headline + avg hint. Live: matches direct SQL (p95 4585ms vs avg 1660ms). Overhead split + p95 alerts are ITEM-066 |
 | ITEM-057 | Error taxonomy & truncation visibility | improvement | **done (2026-10-13)** — `ErrorClass` (upstream_429/5xx, client_4xx, inferon_4xx/5xx, transport, timeout, guard, client_abort) on `traces.error_class` (migration 026); summary/quality expose `errors_by_class` + `truncated_rate`; by-provider shows error rate. Live: upstream 400 → `client_4xx`. Alerting split to ITEM-068 |
-| ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **new** — compute what routing/fallback/cache actually saved (counterfactual model + price delta); reconcile actual + savings = unreduced |
+| ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **done (2026-10-13)** — `traces.savings_usd`/`savings_kind` (migration 027); summary exposes router/fallback/total savings + unreduced cost (reconciles); by-model frontier cost. Live: downgrade saved $0.000082 on a $0.000041 call |
 | ITEM-059 | Telemetry integrity counters | improvement | **done (2026-10-12)** — in-process counters for traces queued/persisted/dropped(by reason) + unpriced models; operator-only `GET /operator/metrics`. Live: counters move with traffic, `lost:0` |
 | ITEM-060 | Throughput & capacity metrics | improvement | **new** — requests/min, in-flight gauge, telemetry queue depth, flush lag (operator endpoint) |
 | ITEM-061 | Provider experience metrics | improvement | **new** — per-provider latency (p95) + error rate alongside spend/reachability; alert on degradation |
@@ -44,8 +44,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/057/059 closed; items captured through ITEM-068)_ —
-work the open set **top-down**: next the metric items **058, 060–062**, then the
+_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/057/058/059 closed; items captured through ITEM-068)_ —
+work the open set **top-down**: next the metric items **060–062**, then the
 closed-loop items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
 (overhead/alerts), **ITEM-067** (structured-output normalization), **ITEM-068**
 (error-rate alerting), then the staged OmniRouting cluster **029–032**.
