@@ -113,6 +113,7 @@
     "error_rate": "Taux d'erreur",
     "tokens": "Jetons",
     "cache_savings": "Économies de cache",
+    "total_savings": "Économies totales",
     "cached": "En cache",
     "avg_ttft": "TTFT moyen",
     "p95_ttft": "TTFT p95",

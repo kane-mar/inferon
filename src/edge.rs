@@ -101,6 +101,8 @@ impl EdgeTrace {
                     crate::quality::Outcome::Ok
                 }),
             error_class: crate::errors::ErrorClass::from_db(self.error_class.as_deref()),
+            savings_usd: rust_decimal::Decimal::ZERO,
+            savings_kind: None,
         }
     }
 }

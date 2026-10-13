@@ -54,6 +54,11 @@ pub struct TraceMessage {
     pub outcome: crate::quality::Outcome,
     /// ITEM-057: why a failed/aborted request failed (`None` on success).
     pub error_class: Option<crate::errors::ErrorClass>,
+    /// ITEM-058: estimated saving from serving a cheaper model than the client
+    /// asked for (a router downgrade or a fallback).
+    pub savings_usd: rust_decimal::Decimal,
+    /// ITEM-058: what produced `savings_usd` ("router" | "fallback").
+    pub savings_kind: Option<String>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -101,8 +106,8 @@ impl TraceSink for PostgresTraceSink {
                     total_duration_ms, status_code, raw_prompt, raw_completion,
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
-                    outcome, error_class
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)"#,
+                    outcome, error_class, savings_usd, savings_kind
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -127,6 +132,8 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.router_event.as_ref().map(Json))
             .bind(msg.outcome.as_str())
             .bind(msg.error_class.map(|class| class.as_str()))
+            .bind(msg.savings_usd)
+            .bind(msg.savings_kind.as_deref())
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -222,6 +229,26 @@ pub async fn telemetry_worker(
                         cached,
                     );
                     msg.upstream_cost_usd = costed;
+                    // ITEM-058: what serving a cheaper model saved vs the model
+                    // the client asked for (router downgrade or fallback).
+                    let counterfactual = msg
+                        .router_event
+                        .as_ref()
+                        .or(msg.routing_event.as_ref())
+                        .and_then(|event| event["from_model"].as_str());
+                    if let Some(asked) = counterfactual {
+                        msg.savings_usd = cost::savings_vs(
+                            asked,
+                            &msg.request_model,
+                            msg.prompt_tokens,
+                            msg.completion_tokens,
+                            cached,
+                        );
+                        msg.savings_kind = Some(
+                            if msg.router_event.is_some() { "router" } else { "fallback" }
+                                .to_string(),
+                        );
+                    }
                     buffer.push(msg);
                     if buffer.len() >= batch_size {
                         sink.flush(&mut buffer).await;

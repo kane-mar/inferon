@@ -251,8 +251,9 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           delta={tokensDelta}
         />
         <KpiCard
-          label={t('cache_savings')}
-          value={formatUsd(summary.cache_savings_usd)}
+          label={t('total_savings')}
+          value={formatUsd(summary.total_savings_usd)}
+          hint={`${t('cache_savings')} ${formatUsd(summary.cache_savings_usd)}`}
         />
         <KpiCard
           label={t('p95_ttft')}

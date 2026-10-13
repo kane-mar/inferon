@@ -130,6 +130,21 @@ pub fn cache_savings(
     (uncached - costed).max(Decimal::ZERO)
 }
 
+/// Estimated saving from serving a request on `served_model` instead of the
+/// `counterfactual_model` the client asked for (a router downgrade or a
+/// fallback). Zero when the substitute is not cheaper (or is the same model).
+pub fn savings_vs(
+    counterfactual_model: &str,
+    served_model: &str,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i64,
+) -> Decimal {
+    let asked = calculate_cost(counterfactual_model, prompt_tokens, completion_tokens, cached_tokens);
+    let served = calculate_cost(served_model, prompt_tokens, completion_tokens, cached_tokens);
+    (asked - served).max(Decimal::ZERO)
+}
+
 /// Estimated saving if a gpt-4o-tier request had run on gpt-4o-mini
 /// (price delta applied to the actual token counts).
 pub fn savings_if_mini(prompt_tokens: i64, completion_tokens: i64) -> Decimal {
@@ -317,6 +332,21 @@ mod tests {
         assert_eq!(
             calculate_cost("claude-3-5-sonnet-20241022", 1_000_000, 1_000_000, 0),
             dec("18.00")
+        );
+    }
+
+    #[test]
+    fn savings_vs_is_the_cheaper_serve_delta_and_never_negative() {
+        // gpt-4o -> gpt-4o-mini on 1M prompt: 2.50 - 0.15 = 2.35.
+        assert_eq!(savings_vs("gpt-4o", "gpt-4o-mini", 1_000_000, 0, 0), dec("2.35"));
+        // The reverse (a more expensive substitute) is not a saving.
+        assert_eq!(savings_vs("gpt-4o-mini", "gpt-4o", 1_000_000, 0, 0), Decimal::ZERO);
+        // Same model -> nothing.
+        assert_eq!(savings_vs("deepseek-flash", "deepseek-flash", 1_000_000, 0, 0), Decimal::ZERO);
+        // deepseek-v4-pro -> deepseek-flash, 1M in + 1M out: (0.66-0.22)+(1.98-0.66) = 1.76.
+        assert_eq!(
+            savings_vs("deepseek-v4-pro", "deepseek-flash", 1_000_000, 1_000_000, 0),
+            dec("1.76")
         );
     }
 

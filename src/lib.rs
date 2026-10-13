@@ -953,6 +953,8 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         api_key_id: meta.api_key_id,
         outcome: outcome.outcome,
         error_class: outcome.error_class,
+        savings_usd: rust_decimal::Decimal::ZERO,
+        savings_kind: None,
     }
 }
 
@@ -2783,6 +2785,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             api_key_id: None,
             outcome: crate::quality::Outcome::Ok,
             error_class: None,
+            savings_usd: rust_decimal::Decimal::ZERO,
+            savings_kind: None,
         }
     }
 
@@ -3623,6 +3627,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         messages: usize,
         cache_miss_flags: usize,
         over_provisioned_flags: usize,
+        savings_usd: rust_decimal::Decimal,
+        router_savings: usize,
     }
 
     struct SharedSink(std::sync::Arc<tokio::sync::Mutex<SinkCounters>>);
@@ -3641,6 +3647,10 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                     if waste["over_provisioned"] == true {
                         counters.over_provisioned_flags += 1;
                     }
+                }
+                counters.savings_usd += msg.savings_usd;
+                if msg.savings_kind.as_deref() == Some("router") {
+                    counters.router_savings += 1;
                 }
             }
         }
@@ -3683,6 +3693,28 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         false
+    }
+
+    #[tokio::test]
+    async fn worker_attributes_router_savings() {
+        let (tx, rx) = mpsc::channel(8);
+        let counters = spawn_worker(rx, 50, 16);
+        let mut msg = dummy_trace();
+        // Router downgraded gpt-4o -> gpt-4o-mini for a 1M-token prompt:
+        // 2.50 - 0.15 = 2.35 saved.
+        msg.request_model = "gpt-4o-mini".to_string();
+        msg.prompt_tokens = 1_000_000;
+        msg.completion_tokens = 0;
+        msg.router_event = Some(json!({
+            "from_model": "gpt-4o",
+            "to_model": "gpt-4o-mini",
+            "reason": "heuristic_router"
+        }));
+        tx.send(msg).await.unwrap();
+        assert!(wait_until(counters.clone(), |c| c.messages == 1).await);
+        let counters = counters.lock().await;
+        assert_eq!(counters.savings_usd.to_string(), "2.35");
+        assert_eq!(counters.router_savings, 1);
     }
 
     #[tokio::test]

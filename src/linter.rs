@@ -109,6 +109,8 @@ mod tests {
             api_key_id: None,
             outcome: crate::quality::Outcome::Ok,
             error_class: None,
+            savings_usd: rust_decimal::Decimal::ZERO,
+            savings_kind: None,
         }
     }
 

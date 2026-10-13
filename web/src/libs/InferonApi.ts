@@ -49,7 +49,11 @@ export type Summary = {
   /** Fraction of prompt tokens served from the provider cache (0..1), or null. */
   cache_hit_rate: number | null;
   cache_savings_usd: string;
-  /** ITEM-057: aborted/cut-off responses and their rate. */
+  /** ITEM-058: model-substitution (router/fallback) savings attribution. */
+  router_savings_usd: string;
+  fallback_savings_usd: string;
+  total_savings_usd: string;
+  unreduced_cost_usd: string;
   truncated: number;
   truncated_rate: number | null;
   /** ITEM-057: failure counts by class (upstream_429, transport, ...). */
@@ -78,6 +82,9 @@ export type ModelRow = {
   cost_usd: string;
   cached_prompt_tokens: number;
   cache_savings_usd: string;
+  /** ITEM-058: what this model's traffic would have cost on the asked models. */
+  savings_usd: string;
+  frontier_cost_usd: string;
 };
 
 export type ByModel = { models: ModelRow[] };

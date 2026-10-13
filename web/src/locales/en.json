@@ -113,6 +113,7 @@
     "error_rate": "Error rate",
     "tokens": "Tokens",
     "cache_savings": "Cache savings",
+    "total_savings": "Total savings",
     "cached": "Cached",
     "avg_ttft": "Avg TTFT",
     "p95_ttft": "P95 TTFT",

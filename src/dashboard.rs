@@ -58,6 +58,9 @@ type SummaryRow = (
     i64,
     Decimal,
     i64,
+    Decimal,
+    Decimal,
+    Decimal,
 );
 
 /// `(ttft_p50, ttft_p95, ttft_p99, duration_p50, duration_p95, duration_p99)`.
@@ -69,6 +72,10 @@ type LatencyRow = (
     Option<f64>,
     Option<f64>,
 );
+
+/// ITEM-058 `(model, requests, prompt_tokens, completion_tokens, cost,
+/// cached_tokens, cache_savings, savings)` — one spend-by-model row.
+type ModelAggregateRow = (String, i64, i64, i64, Decimal, i64, Decimal, Decimal);
 
 /// ITEM-055 `(requests, ok, empty, refused, errors, truncated, guard_fallback,
 /// unclassified)` — the overall quality totals row.
@@ -302,7 +309,10 @@ async fn query_summary(
                     MAX(created_at)::text,
                     COALESCE(SUM(cached_prompt_tokens), 0),
                     COALESCE(SUM(cache_savings_usd), 0),
-                    COUNT(*) FILTER (WHERE truncated)
+                    COUNT(*) FILTER (WHERE truncated),
+                    COALESCE(SUM(savings_usd), 0),
+                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'router'), 0),
+                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'fallback'), 0)
              FROM traces
              WHERE ($1::uuid IS NULL OR tenant_id = $1)
                AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -331,6 +341,9 @@ async fn query_summary(
         cached_tokens,
         cache_savings,
         truncated,
+        savings,
+        router_savings,
+        fallback_savings,
     ) = row.unwrap_or((
         0,
         Decimal::ZERO,
@@ -344,6 +357,9 @@ async fn query_summary(
         0,
         Decimal::ZERO,
         0,
+        Decimal::ZERO,
+        Decimal::ZERO,
+        Decimal::ZERO,
     ));
     // ITEM-056: tail latency percentiles (NULL when there are no samples).
     let (
@@ -435,6 +451,12 @@ async fn query_summary(
         "truncated": truncated,
         "truncated_rate": rate(truncated, requests),
         "errors_by_class": errors_by_class,
+        "router_savings_usd": router_savings.to_string(),
+        "fallback_savings_usd": fallback_savings.to_string(),
+        "total_savings_usd": (savings + cache_savings).to_string(),
+        // What the request would have cost on the model the client asked for
+        // (model-substitution axis; cache is a separate axis above).
+        "unreduced_cost_usd": (total_cost + savings).to_string(),
     }))
 }
 
@@ -443,10 +465,11 @@ async fn query_by_model(
     tenant: Option<uuid::Uuid>,
     window: &Window,
 ) -> Response {
-    let rows: Vec<(String, i64, i64, i64, Decimal, i64, Decimal)> = match sqlx::query_as(
+    let rows: Vec<ModelAggregateRow> = match sqlx::query_as(
         "SELECT request_model, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0),
-                COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0)
+                COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0),
+                COALESCE(SUM(savings_usd), 0)
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
            AND created_at >= NOW() - ($2 * INTERVAL '1 day')
@@ -463,7 +486,7 @@ async fn query_by_model(
 
     let models: Vec<Value> = rows
         .into_iter()
-        .map(|(model, requests, prompt_tokens, completion_tokens, cost, cached_tokens, cache_savings)| {
+        .map(|(model, requests, prompt_tokens, completion_tokens, cost, cached_tokens, cache_savings, savings)| {
             json!({
                 "model": model,
                 "requests": requests,
@@ -472,6 +495,10 @@ async fn query_by_model(
                 "cost_usd": cost.to_string(),
                 "cached_prompt_tokens": cached_tokens,
                 "cache_savings_usd": cache_savings.to_string(),
+                "savings_usd": savings.to_string(),
+                // ITEM-058: what this model's traffic would have cost on the
+                // models the clients asked for (the value of the cheaper tier).
+                "frontier_cost_usd": (cost + savings).to_string(),
             })
         })
         .collect();
