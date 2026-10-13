@@ -37,3 +37,27 @@ quality-gap signal) and for any cost/quality trade-off claim.
 
 **Source:** 2026-10-12 metrics review — quality is the missing input for the
 OmniRouting autonomy roadmap (ITEM-029/030).
+
+## Close-out (2026-10-13)
+
+- `src/quality.rs`: `Outcome {ok, empty, refused, error, truncated}` derived from
+  the status + body the proxy already holds — OpenAI and Anthropic envelopes,
+  both JSON and SSE — with no extra upstream call and no client dependency
+  (12 unit tests: blank content, tool calls, content_filter, Anthropic
+  `stop_reason: refusal`, streaming deltas, non-2xx).
+- Persistence: `traces.outcome` (migration 025) via `TraceMessage`; edge traces
+  may carry their own outcome and fall back to a status-derived one.
+- `X-Inferon-Trace-Id` on completion responses; `POST /v1/quality` attaches an
+  optional client thumbs up/down, upserted into `trace_quality` keyed by trace id
+  so it never races the async trace insert.
+- `GET /v1/dashboard/api/quality`: overall success/empty/refusal/error/
+  guard-fallback rates + thumbs (`unclassified` for pre-025 rows), by model and
+  by system-prompt cluster.
+- Web: `/dashboard/quality` page + nav entry.
+- Rust **252 → 261** tests, clippy clean; tsc/eslint/i18n green. Commits `7a4d91c`
+  + `203d45b`; CI `38385227716` (test+web+deploy) green.
+- **Live**: a real `deepseek-flash` request returned `X-Inferon-Trace-Id`, the
+  trace recorded `outcome = ok`; `POST /v1/quality {"signal":"down"}` answered 202
+  and `GET /api/quality` reflected `thumbs_down = 1` for that model, with
+  per-model success rates. Historical rows read `unclassified` (outcome was never
+  recorded before 025).

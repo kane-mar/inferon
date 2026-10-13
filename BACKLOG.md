@@ -24,7 +24,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-052 | Hybrid data plane (on-prem proxy + cloud control plane) | feature | **done — slice 1 (2026-10-12)** — `POST /v1/edge/traces` ingest backbone (tenant-authed batches → existing sink; cloud-authoritative cost). Live: batch persisted with recomputed cost/cache savings. Edge node mode + config sync split to ITEM-065 |
 | ITEM-053 | Cache-hit telemetry & savings | improvement | **done (2026-10-12)** — persists cached prompt tokens + savings; summary/by-model expose cache hit rate + `cache_savings_usd`; dashboard KPI + Cached % column. ITEM-018 finding |
 | ITEM-054 | Router axis for DeepSeek-native tiers | feature | **done (2026-10-12)** — configurable `TIER_PAIRS` (gpt-4o→mini, deepseek-v4-pro→flash); router event traced (`traces.router_event`). ITEM-018 finding |
-| ITEM-055 | Quality & outcome telemetry | improvement | **new** — per-request `outcome` (ok/empty/refused/error) + optional client quality signal; quality view by model/prompt. The missing input for ITEM-029/030 |
+| ITEM-055 | Quality & outcome telemetry | improvement | **done (2026-10-13)** — derived `outcome` (ok/empty/refused/error/truncated, OpenAI+Anthropic JSON/SSE) on traces; `X-Inferon-Trace-Id` + `POST /v1/quality` thumbs; `/api/quality` + `/dashboard/quality`. Live end to end |
 | ITEM-056 | Latency percentiles | improvement | **done (2026-10-12)** — p50/p95/p99 of TTFT/total from Postgres `percentile_cont`; dashboard shows p95 headline + avg hint. Live: matches direct SQL (p95 4585ms vs avg 1660ms). Overhead split + p95 alerts are ITEM-066 |
 | ITEM-057 | Error taxonomy & truncation visibility | improvement | **new** — classify failures (upstream_429/5xx, transport, client/inferon 4xx, guard, timeout); surface the already-persisted `truncated`/abort rate |
 | ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **new** — compute what routing/fallback/cache actually saved (counterfactual model + price delta); reconcile actual + savings = unreduced |
@@ -42,12 +42,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-12 (ITEM-018/050/051/052/053/054/056/059 closed; metrics review captured as ITEM-055..064)_ —
-work the open set **top-down**: next the metric items **055, 057, 058, 060–062**,
-then the closed-loop items **063–064**, then **ITEM-065** (edge node mode) and
-**ITEM-066** (overhead/alerts), then the staged OmniRouting cluster **029–032**.
-ITEM-055 (quality) is the input 029/030 consume, so it lands before the
-OmniRouting unpark.
+_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/059 closed; metrics review captured as ITEM-055..064)_ —
+work the open set **top-down**: next the metric items **057, 058, 060–062**, then the
+closed-loop items **063–064**, then **ITEM-065** (edge node mode) and **ITEM-066**
+(overhead/alerts), then the staged OmniRouting cluster **029–032**. ITEM-055
+(quality, done) was the input 029/030 consume, so the OmniRouting unpark is now
+unblocked on the quality side.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
