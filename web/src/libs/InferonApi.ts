@@ -74,6 +74,53 @@ export type ModelRow = {
 
 export type ByModel = { models: ModelRow[] };
 
+/** ITEM-055: derived response-quality view. */
+export type QualityOverall = {
+  requests: number;
+  ok: number;
+  empty: number;
+  refused: number;
+  errors: number;
+  truncated: number;
+  unclassified: number;
+  guard_fallback: number;
+  thumbs_up: number;
+  thumbs_down: number;
+  success_rate: number | null;
+  empty_rate: number | null;
+  refusal_rate: number | null;
+  error_rate: number | null;
+  guard_fallback_rate: number | null;
+};
+
+export type QualityModelRow = {
+  model: string;
+  requests: number;
+  ok: number;
+  empty: number;
+  errors: number;
+  thumbs_up: number;
+  thumbs_down: number;
+  success_rate: number | null;
+};
+
+export type QualityPromptRow = {
+  system_prompt_hash: string;
+  requests: number;
+  ok: number;
+  empty: number;
+  errors: number;
+  success_rate: number | null;
+};
+
+export type Quality = {
+  window_days: number;
+  scope: 'tenant' | 'operator';
+  overall: QualityOverall;
+  models: QualityModelRow[];
+  prompts: QualityPromptRow[];
+};
+
 export type PromptRow = {
   system_prompt_hash: string;
   requests: number;
@@ -356,6 +403,10 @@ export class InferonApi {
 
   byModel(days: number, cookie?: string): Promise<ByModel> {
     return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${windowQuery(days)}`, undefined, { cookie });
+  }
+
+  quality(days: number, cookie?: string): Promise<Quality> {
+    return this.request<Quality>('GET', `/v1/dashboard/api/quality${windowQuery(days)}`, undefined, { cookie });
   }
 
   byPrompt(days: number, limit = 10, cookie?: string): Promise<ByPrompt> {

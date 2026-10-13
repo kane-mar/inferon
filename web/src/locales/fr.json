@@ -65,6 +65,7 @@
     "connect": "Connexion",
     "providers": "Fournisseurs",
     "routing": "Routage",
+    "quality": "Qualité",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -241,6 +242,26 @@
     "test_connection": "Tester la connexion",
     "probe_ok": "Connecté — {count} modèles",
     "probe_failed": "Fournisseur injoignable"
+  },
+  "QualityPage": {
+    "title_bar": "Qualité",
+    "title_bar_description": "Fréquence à laquelle les réponses étaient exploitables — déduite de la réponse, plus vos pouces le cas échéant.",
+    "success_rate": "Taux de réussite",
+    "empty_rate": "Taux de vide",
+    "refusal_rate": "Taux de refus",
+    "error_rate": "Taux d'erreur",
+    "guard_fallback_rate": "Repli du garde-fou",
+    "by_model": "Par modèle",
+    "by_prompt": "Par grappe d'invites",
+    "model": "Modèle",
+    "cluster": "Grappe",
+    "requests": "Requêtes",
+    "ok": "OK",
+    "empty": "Vide",
+    "errors": "Erreurs",
+    "success": "Réussite",
+    "thumbs_up": "Positif",
+    "thumbs_down": "Négatif"
   },
   "RoutingPage": {
     "title_bar": "Routage",

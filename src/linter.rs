@@ -107,6 +107,7 @@ mod tests {
             router_event: None,
             provider_id: None,
             api_key_id: None,
+            outcome: crate::quality::Outcome::Ok,
         }
     }
 

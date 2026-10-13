@@ -18,6 +18,7 @@ pub mod linter;
 pub mod metrics;
 pub mod models;
 pub mod providers;
+pub mod quality;
 pub mod router;
 pub mod routing;
 pub mod secret;
@@ -34,6 +35,7 @@ use crate::usage::{
     system_prompt_hash, system_prompt_hash_anthropic, usage_from_anthropic_json,
     usage_from_anthropic_sse_bytes, usage_from_json,
 };
+use crate::quality::{outcome_for_json, outcome_for_sse, Outcome};
 
 use axum::{
     body::Body,
@@ -86,6 +88,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/messages", post(proxy_messages))
         .route("/v1/edge/traces", post(edge::ingest))
+        .route("/v1/quality", post(quality_signal))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
@@ -124,6 +127,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/by-provider", get(dashboard::by_provider))
         .route("/v1/dashboard/api/by-key", get(dashboard::by_key))
+        .route("/v1/dashboard/api/quality", get(dashboard::quality))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
         .route("/v1/dashboard/api/timeseries", get(dashboard::timeseries))
         .route("/v1/dashboard/api/guard", get(dashboard::guard))
@@ -868,6 +872,7 @@ async fn forward_buffered(
     };
     let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
     let usage = parse_usage(&response_json);
+    let outcome = outcome_for_json(status.as_u16(), &response_json);
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
@@ -881,6 +886,7 @@ async fn forward_buffered(
             ttft_ms,
             raw_completion: response_json,
             truncated: false,
+            outcome,
         },
     );
     send_trace(&state.telemetry_tx, msg);
@@ -890,7 +896,7 @@ async fn forward_buffered(
     if let Some(content_type) = content_type.or(upstream_content_type) {
         response.headers_mut().insert(CONTENT_TYPE, content_type);
     }
-    response
+    with_trace_id(response, meta.id)
 }
 
 /// Request-derived fields shared by every trace of this request.
@@ -917,6 +923,8 @@ struct TraceOutcome {
     ttft_ms: Option<i64>,
     raw_completion: Option<Value>,
     truncated: bool,
+    /// ITEM-055: whether the response was usable.
+    outcome: Outcome,
 }
 
 impl TraceOutcome {
@@ -929,6 +937,7 @@ impl TraceOutcome {
             ttft_ms: None,
             raw_completion: None,
             truncated: false,
+            outcome: Outcome::Error,
         }
     }
 }
@@ -956,6 +965,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         router_event: meta.router_event.clone(),
         provider_id: meta.provider_id,
         api_key_id: meta.api_key_id,
+        outcome: outcome.outcome,
     }
 }
 
@@ -971,6 +981,81 @@ fn send_trace(tx: &mpsc::Sender<TraceMessage>, msg: TraceMessage) {
         Err(mpsc::error::TrySendError::Closed(_)) => {
             crate::metrics::count_dropped(false);
             tracing::debug!("telemetry channel closed; trace dropped");
+        }
+    }
+}
+
+/// Body of `POST /v1/quality` (ITEM-055).
+#[derive(serde::Deserialize)]
+struct QualitySignalBody {
+    trace_id: Uuid,
+    signal: String,
+    #[serde(default)]
+    score: Option<f64>,
+}
+
+/// POST /v1/quality — attach a client quality signal to a traced request.
+///
+/// Tenant-authenticated with the tenant's API key. The trace may not be
+/// persisted yet (telemetry is async), so the signal is upserted into its own
+/// table keyed by trace id; the dashboard joins the two. `X-Inferon-Trace-Id`
+/// on a completion response gives the client the id to send here.
+async fn quality_signal(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<QualitySignalBody>,
+) -> Response {
+    let tenant = match authenticate(&state, &headers).await {
+        Ok(Some(tenant)) => tenant,
+        Ok(None) => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_api_key",
+                "missing or invalid Authorization header",
+            )
+        }
+        Err(e) => {
+            tracing::error!("quality signal tenant lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "tenant_store_error",
+                "tenant lookup failed",
+            );
+        }
+    };
+    if !matches!(body.signal.as_str(), "up" | "down") {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_signal",
+            "signal must be \"up\" or \"down\"",
+        );
+    }
+    let score = body.score.map(|score| score.clamp(0.0, 1.0));
+    let result = sqlx::query(
+        "INSERT INTO trace_quality (trace_id, tenant_id, signal, score)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (trace_id) DO UPDATE
+           SET signal = EXCLUDED.signal, score = EXCLUDED.score, created_at = NOW()",
+    )
+    .bind(body.trace_id)
+    .bind(tenant.id)
+    .bind(&body.signal)
+    .bind(score)
+    .execute(&state.db)
+    .await;
+    match result {
+        Ok(_) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "ok": true, "trace_id": body.trace_id.to_string() })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("quality signal insert failed: {e}");
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "quality_store_error",
+                "could not store the quality signal",
+            )
         }
     }
 }
@@ -1013,6 +1098,15 @@ pub(crate) fn mint_client_key() -> String {
     format!("{CLIENT_KEY_PREFIX}{}", Uuid::new_v4().simple())
 }
 
+/// ITEM-055: tag a response with the request's trace id so a client can attach
+/// a quality signal to it out of band.
+fn with_trace_id(mut response: Response, trace_id: Uuid) -> Response {
+    if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
+        response.headers_mut().insert("x-inferon-trace-id", value);
+    }
+    response
+}
+
 /// OpenAI-style JSON error response.
 pub(crate) fn json_error(status: StatusCode, err_type: &str, message: &str) -> Response {
     let body = serde_json::json!({"error": {"message": message, "type": err_type}}).to_string();
@@ -1038,13 +1132,14 @@ fn stream_response(
     parse_usage: fn(&[u8]) -> Option<Usage>,
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
+    let trace_id = meta.id;
     let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx, parse_usage);
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    response
+    with_trace_id(response, trace_id)
 }
 
 /// Guarded buffered response (ITEM-023). For requests with a JSON-schema
@@ -1088,13 +1183,13 @@ async fn guarded_stream_response(
             // ttft is when the client actually sees the first byte: after the
             // buffered flush (Slice 4 latency target measures this, ITEM-027).
             guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
-            guard_emit.emit(usage, false);
+            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes));
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            response
+            with_trace_id(response, guard_emit.meta.id)
         }
         Err(reason) => {
             tracing::warn!(
@@ -1126,7 +1221,7 @@ async fn fallback_to_frontier(
         Ok(body) => body,
         Err(e) => {
             tracing::error!("guard fallback payload reserialization failed: {e}");
-            guard_emit.emit(Usage::default(), false);
+            guard_emit.emit(Usage::default(), false, Outcome::Error);
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "serialization_error",
@@ -1152,7 +1247,7 @@ async fn fallback_to_frontier(
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some("transport error"));
             guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(Usage::default(), false);
+            guard_emit.emit(Usage::default(), false, Outcome::Error);
             json_error(
                 StatusCode::BAD_GATEWAY,
                 "guard_fallback_error",
@@ -1165,7 +1260,7 @@ async fn fallback_to_frontier(
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some(&detail));
             guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(Usage::default(), false);
+            guard_emit.emit(Usage::default(), false, Outcome::Error);
             json_error(
                 StatusCode::BAD_GATEWAY,
                 "guard_fallback_error",
@@ -1181,7 +1276,7 @@ async fn fallback_to_frontier(
                 Ok(bytes) => bytes,
                 Err(e) => {
                     tracing::error!("guard frontier body read failed: {e}");
-                    guard_emit.emit(Usage::default(), true);
+                    guard_emit.emit(Usage::default(), true, Outcome::Truncated);
                     return json_error(
                         StatusCode::BAD_GATEWAY,
                         "guard_fallback_error",
@@ -1190,13 +1285,13 @@ async fn fallback_to_frontier(
                 }
             };
             let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
-            guard_emit.emit(usage, false);
+            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes));
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            response
+            with_trace_id(response, guard_emit.meta.id)
         }
     }
 }
@@ -1247,7 +1342,7 @@ impl BufferedGuard {
         *self.guard_event.borrow_mut() = Some(event);
     }
 
-    fn emit(&self, usage: Usage, truncated: bool) {
+    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome) {
         if self.emitted.replace(true) {
             return;
         }
@@ -1266,6 +1361,7 @@ impl BufferedGuard {
                 ttft_ms: None,
                 raw_completion: None,
                 truncated,
+                outcome,
             },
         );
         msg.guard_event = self.guard_event.borrow().clone();
@@ -1277,7 +1373,7 @@ impl Drop for BufferedGuard {
     fn drop(&mut self) {
         if !self.emitted.get() {
             tracing::debug!("guarded request dropped before flush; recording truncated trace");
-            self.emit(Usage::default(), true);
+            self.emit(Usage::default(), true, Outcome::Truncated);
         }
     }
 }
@@ -1326,7 +1422,7 @@ impl StreamEmit {
 
     /// Emit the trace unless one was already sent. `truncated` marks a stream
     /// that ended before the upstream finished (mid-stream error).
-    fn emit(&self, usage: Usage, truncated: bool) {
+    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome) {
         if self.emitted.replace(true) {
             return;
         }
@@ -1341,6 +1437,7 @@ impl StreamEmit {
                 ttft_ms: self.ttft_ms(),
                 raw_completion: None,
                 truncated,
+                outcome,
             },
         );
         send_trace(&self.tx, msg);
@@ -1354,7 +1451,7 @@ impl Drop for StreamEmit {
             // the very end by the provider) never arrived, so token counts are
             // unknown — record zeroes and flag the trace as truncated.
             tracing::debug!("stream dropped before completion; recording truncated trace");
-            self.emit(Usage::default(), true);
+            self.emit(Usage::default(), true, Outcome::Truncated);
         }
     }
 }
@@ -1395,7 +1492,12 @@ fn stream_with_trace(
             }
         }
         let usage = parse_usage(&accumulated).unwrap_or_default();
-        emit.emit(usage, errored);
+        let outcome = if errored {
+            Outcome::Truncated
+        } else {
+            outcome_for_sse(status, &accumulated)
+        };
+        emit.emit(usage, errored, outcome);
     }
 }
 
@@ -1700,6 +1802,33 @@ mod tests {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
                                 .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                                .unwrap()
+                        }
+                        Some("content") => {
+                            // A clean 2xx non-streaming completion with text.
+                            axum::response::Response::builder()
+                                .header("content-type", "application/json")
+                                .body(Body::from(
+                                    r#"{"choices":[{"message":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#,
+                                ))
+                                .unwrap()
+                        }
+                        Some("empty") => {
+                            // A 2xx with a blank completion — ITEM-055 `empty`.
+                            axum::response::Response::builder()
+                                .header("content-type", "application/json")
+                                .body(Body::from(
+                                    r#"{"choices":[{"message":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
+                                ))
+                                .unwrap()
+                        }
+                        Some("refusal") => {
+                            // A content-filter stop — ITEM-055 `refused`.
+                            axum::response::Response::builder()
+                                .header("content-type", "application/json")
+                                .body(Body::from(
+                                    r#"{"choices":[{"message":{"content":""},"finish_reason":"content_filter"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
+                                ))
                                 .unwrap()
                         }
                         Some("nodone") => {
@@ -2172,6 +2301,113 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[tokio::test]
+    async fn a_useful_completion_traces_ok() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.outcome, crate::quality::Outcome::Ok);
+    }
+
+    #[tokio::test]
+    async fn a_blank_completion_traces_empty() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"empty","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.outcome, crate::quality::Outcome::Empty);
+    }
+
+    #[tokio::test]
+    async fn a_content_filter_stop_traces_refused() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"refusal","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.outcome, crate::quality::Outcome::Refused);
+    }
+
+    #[tokio::test]
+    async fn an_upstream_error_traces_error() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"fail","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.outcome, crate::quality::Outcome::Error);
+    }
+
+    #[tokio::test]
+    async fn a_stream_with_content_traces_ok() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"streamy","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        // The trace is queued when the body is fully consumed.
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.outcome, crate::quality::Outcome::Ok);
+    }
+
+    #[tokio::test]
+    async fn a_proxied_response_carries_its_trace_id() {
+        let response = chat_request(
+            r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert!(
+            response.headers().get("x-inferon-trace-id").is_some(),
+            "clients need the id to attach a quality signal"
+        );
+    }
+
+    async fn quality_request(body: &str, auth: Option<&str>) -> axum::response::Response {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/v1/quality")
+            .header("content-type", "application/json");
+        if let Some(key) = auth {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        build_router(test_state("http://127.0.0.1:1/v1/chat/completions"))
+            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_quality_signal_requires_a_key() {
+        let body = format!(r#"{{"trace_id":"{}","signal":"up"}}"#, uuid::Uuid::new_v4());
+        assert_eq!(
+            quality_request(&body, None).await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unknown_quality_signal_is_refused() {
+        let body = format!(r#"{{"trace_id":"{}","signal":"maybe"}}"#, uuid::Uuid::new_v4());
+        let response = quality_request(&body, Some(CLIENT_KEY)).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn a_tenant_provider_overrides_the_shared_key() {
         let tenant = seeded_tenant();
         let state = route_state(std::sync::Arc::new(
@@ -2451,6 +2687,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             router_event: None,
             provider_id: None,
             api_key_id: None,
+            outcome: crate::quality::Outcome::Ok,
         }
     }
 

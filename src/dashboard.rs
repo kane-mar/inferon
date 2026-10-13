@@ -69,6 +69,10 @@ type LatencyRow = (
     Option<f64>,
 );
 
+/// ITEM-055 `(requests, ok, empty, refused, errors, truncated, guard_fallback,
+/// unclassified)` — the overall quality totals row.
+type QualityTotalsRow = (i64, i64, i64, i64, i64, i64, i64, i64);
+
 /// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
 /// cost, limit_cents)` — one spend-by-provider row.
 type ProviderAggregateRow = (Option<uuid::Uuid>, String, String, i64, i64, i64, Decimal, i64);
@@ -698,6 +702,168 @@ async fn query_timeseries(
         "window_days": days,
         "offset_days": offset,
         "points": points,
+    }))
+}
+
+/// GET /v1/dashboard/api/quality?days=7 (tenant scope) — ITEM-055 quality view:
+/// derived outcomes, guard-fallback rate, and the optional client thumbs, overall
+/// and by model / system-prompt cluster.
+pub async fn quality(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Response {
+    match tenant_or(&state, &headers).await {
+        Ok(id) => query_quality(&state, Some(id), &window).await,
+        Err(resp) => resp,
+    }
+}
+
+/// A rate as a fraction in 0..1, or `None` when there is no denominator.
+fn rate(part: i64, total: i64) -> Option<f64> {
+    (total > 0).then(|| part as f64 / total as f64)
+}
+
+async fn query_quality(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+) -> Response {
+    let days = window.days();
+    // Overall totals: derived outcomes + guard fallbacks + unclassified history.
+    let totals: Option<QualityTotalsRow> = match sqlx::query_as(
+        "SELECT COUNT(*),
+                COUNT(*) FILTER (WHERE outcome = 'ok'),
+                COUNT(*) FILTER (WHERE outcome = 'empty'),
+                COUNT(*) FILTER (WHERE outcome = 'refused'),
+                COUNT(*) FILTER (WHERE outcome = 'error'),
+                COUNT(*) FILTER (WHERE outcome = 'truncated'),
+                COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
+                COUNT(*) FILTER (WHERE outcome IS NULL)
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+    let (requests, ok, empty, refused, errors, truncated, guard_fallback, unclassified) =
+        totals.unwrap_or((0, 0, 0, 0, 0, 0, 0, 0));
+
+    let thumbs: (i64, i64) = match sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE signal = 'up'),
+                COUNT(*) FILTER (WHERE signal = 'down')
+         FROM trace_quality
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => return db_err(e),
+    };
+
+    let models: Vec<(String, i64, i64, i64, i64, i64, i64)> = match sqlx::query_as(
+        "SELECT t.request_model, COUNT(*),
+                COUNT(*) FILTER (WHERE t.outcome = 'ok'),
+                COUNT(*) FILTER (WHERE t.outcome = 'empty'),
+                COUNT(*) FILTER (WHERE t.outcome = 'error'),
+                COUNT(*) FILTER (WHERE q.signal = 'up'),
+                COUNT(*) FILTER (WHERE q.signal = 'down')
+         FROM traces t
+         LEFT JOIN trace_quality q ON q.trace_id = t.id
+         WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
+           AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
+         GROUP BY t.request_model ORDER BY 2 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+
+    let prompts: Vec<(String, i64, i64, i64, i64)> = match sqlx::query_as(
+        "SELECT system_prompt_hash, COUNT(*),
+                COUNT(*) FILTER (WHERE outcome = 'ok'),
+                COUNT(*) FILTER (WHERE outcome = 'empty'),
+                COUNT(*) FILTER (WHERE outcome = 'error')
+         FROM traces
+         WHERE system_prompt_hash IS NOT NULL
+           AND ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+         GROUP BY system_prompt_hash ORDER BY 2 DESC LIMIT 20",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+
+    let model_rows: Vec<Value> = models
+        .into_iter()
+        .map(|(model, reqs, model_ok, model_empty, model_errors, up, down)| {
+            json!({
+                "model": model,
+                "requests": reqs,
+                "ok": model_ok,
+                "empty": model_empty,
+                "errors": model_errors,
+                "thumbs_up": up,
+                "thumbs_down": down,
+                "success_rate": rate(model_ok, reqs),
+            })
+        })
+        .collect();
+    let prompt_rows: Vec<Value> = prompts
+        .into_iter()
+        .map(|(hash, reqs, prompt_ok, prompt_empty, prompt_errors)| {
+            json!({
+                "system_prompt_hash": hash,
+                "requests": reqs,
+                "ok": prompt_ok,
+                "empty": prompt_empty,
+                "errors": prompt_errors,
+                "success_rate": rate(prompt_ok, reqs),
+            })
+        })
+        .collect();
+
+    json_ok(json!({
+        "window_days": days,
+        "scope": if tenant.is_some() { "tenant" } else { "operator" },
+        "overall": {
+            "requests": requests,
+            "ok": ok,
+            "empty": empty,
+            "refused": refused,
+            "errors": errors,
+            "truncated": truncated,
+            "unclassified": unclassified,
+            "guard_fallback": guard_fallback,
+            "thumbs_up": thumbs.0,
+            "thumbs_down": thumbs.1,
+            "success_rate": rate(ok, requests),
+            "empty_rate": rate(empty, requests),
+            "refusal_rate": rate(refused, requests),
+            "error_rate": rate(errors, requests),
+            "guard_fallback_rate": rate(guard_fallback, requests),
+        },
+        "models": model_rows,
+        "prompts": prompt_rows,
     }))
 }
 
@@ -2706,6 +2872,12 @@ mod tests {
             .header(axum::http::header::COOKIE, format!("inferon_session={token}"))
             .body(Body::from(body.to_string()))
             .unwrap()
+    }
+
+    #[test]
+    fn rate_is_none_without_a_denominator() {
+        assert_eq!(super::rate(1, 2), Some(0.5));
+        assert_eq!(super::rate(0, 0), None);
     }
 
     async fn body_json(response: axum::response::Response) -> Value {

@@ -59,6 +59,10 @@ pub struct EdgeTrace {
     pub provider_id: Option<Uuid>,
     #[serde(default)]
     pub api_key_id: Option<Uuid>,
+    /// ITEM-055: the edge's own outcome classification; the cloud accepts it but
+    /// falls back to a status-derived value when absent/unknown.
+    #[serde(default)]
+    pub outcome: Option<String>,
 }
 
 impl EdgeTrace {
@@ -87,6 +91,12 @@ impl EdgeTrace {
             router_event: self.router_event,
             provider_id: self.provider_id,
             api_key_id: self.api_key_id,
+            outcome: crate::quality::Outcome::from_db(self.outcome.as_deref())
+                .unwrap_or(if self.status_code >= 400 {
+                    crate::quality::Outcome::Error
+                } else {
+                    crate::quality::Outcome::Ok
+                }),
         }
     }
 }

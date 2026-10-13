@@ -65,6 +65,7 @@
     "connect": "Connect",
     "providers": "Providers",
     "routing": "Routing",
+    "quality": "Quality",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator"
@@ -241,6 +242,26 @@
     "test_connection": "Test connection",
     "probe_ok": "Connected — {count} models",
     "probe_failed": "Could not reach the provider"
+  },
+  "QualityPage": {
+    "title_bar": "Quality",
+    "title_bar_description": "How often responses were usable — derived from the response, plus your thumbs when supplied.",
+    "success_rate": "Success rate",
+    "empty_rate": "Empty rate",
+    "refusal_rate": "Refusal rate",
+    "error_rate": "Error rate",
+    "guard_fallback_rate": "Guard fallback",
+    "by_model": "By model",
+    "by_prompt": "By prompt cluster",
+    "model": "Model",
+    "cluster": "Cluster",
+    "requests": "Requests",
+    "ok": "OK",
+    "empty": "Empty",
+    "errors": "Errors",
+    "success": "Success",
+    "thumbs_up": "Up",
+    "thumbs_down": "Down"
   },
   "RoutingPage": {
     "title_bar": "Routing",
