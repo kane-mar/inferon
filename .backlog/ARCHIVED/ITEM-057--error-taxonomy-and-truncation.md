@@ -31,3 +31,25 @@ aborted/stream-cut responses are invisible.
 
 **Source:** 2026-10-12 metrics review — reliability has no taxonomy and abort
 data is dead.
+
+## Close-out (2026-10-13)
+
+- `src/errors.rs`: `ErrorClass` (upstream_429 / upstream_5xx / client_4xx /
+  inferon_4xx / inferon_5xx / transport / timeout / guard / client_abort),
+  chosen at the failure site (never string-matching). Persisted as
+  `traces.error_class` (migration 026, partial index); edge traces may carry
+  their own.
+- Wired at every failure site: `forward_buffered` (upstream status), transport
+  (`reqwest::Error::is_timeout`), budget/model-disabled (`inferon_4xx`), guard
+  failures, and stream/guard aborts (`client_abort`).
+- Visibility: `/api/summary` gains `truncated`, `truncated_rate`,
+  `errors_by_class`; `/api/quality` gains `truncated_rate`, `errors_by_class`;
+  by-provider rows gain `errors` + `error_rate` (AC2).
+- Web: the quality page shows a truncation KPI and an errors-by-class table.
+- Rust **270 → 275** tests, clippy clean; tsc/eslint/i18n green. Commit
+  `13b5942`; CI `38404578001` (test+web+deploy) green.
+- **Live**: an upstream 400 was classified `client_4xx` and surfaced in
+  `errors_by_class` with `truncated: 0`. Pre-026 rows have a NULL class (they
+  predate the taxonomy), mirroring the outcome `unclassified` handling.
+- **AC4 (alertable) split to ITEM-068** — the data is now available to the alert
+  engine; the error-rate alert itself is the follow-up.
