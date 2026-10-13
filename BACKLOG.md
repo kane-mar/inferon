@@ -36,18 +36,19 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
 | ITEM-065 | Edge node mode & config sync (hybrid data plane — slice 2) | feature | **new** — edge mode against a local provider, revocable edge token + enrollment, versioned config sync, telemetry shipping via ITEM-052, explicit offline behaviour, node health |
 | ITEM-066 | Proxy overhead split & latency regression alerts | improvement | **new** — expose proxy time vs upstream time; alert on a p95 regression. Split from ITEM-056 |
+| ITEM-067 | Structured-output normalization (guard on the default provider) | feature | **new** — `json_schema`→`json_object` where unsupported (DeepSeek) with the schema kept for the guard; validate the frontier replay. Finding 2026-10-13 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/059 closed; metrics review captured as ITEM-055..064)_ —
+_Last updated: 2026-10-13 (ITEM-018/050/051/052/053/054/055/056/059 closed; metrics review captured as ITEM-055..067)_ —
 work the open set **top-down**: next the metric items **057, 058, 060–062**, then the
-closed-loop items **063–064**, then **ITEM-065** (edge node mode) and **ITEM-066**
-(overhead/alerts), then the staged OmniRouting cluster **029–032**. ITEM-055
-(quality, done) was the input 029/030 consume, so the OmniRouting unpark is now
-unblocked on the quality side.
+closed-loop items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
+(overhead/alerts), **ITEM-067** (structured-output normalization), then the staged
+OmniRouting cluster **029–032**. ITEM-055 (quality, done) was the input 029/030
+consume, so the OmniRouting unpark is now unblocked on the quality side.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
