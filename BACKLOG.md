@@ -31,7 +31,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-059 | Telemetry integrity counters | improvement | **done (2026-10-12)** — in-process counters for traces queued/persisted/dropped(by reason) + unpriced models; operator-only `GET /operator/metrics`. Live: counters move with traffic, `lost:0` |
 | ITEM-060 | Throughput & capacity metrics | improvement | **done (2026-10-13)** — `requests_total`/`per_minute`/`in_flight`/`requests_by_provider` + telemetry queue depth/capacity + `last_flush_age_ms` on the operator metrics endpoint. Live: rate 1→2 on a request, flush age refreshed |
 | ITEM-061 | Provider experience metrics | improvement | **done (2026-10-14)** — per-provider avg/p95 TTFT + total duration + error rate in `by-provider`; dashboard provider table shows error rate + p95. Live: Deepseek 36.4% errors, p95 TTFT 2394ms. Degradation alerting folded into ITEM-068 |
-| ITEM-062 | Product activation & retention metrics | improvement | **new** — active tenants/keys, requests per developer, first-request funnel; operator-only aggregates |
+| ITEM-062 | Product activation & retention metrics | improvement | **done (2026-10-14)** — operator `/api/operator/activation`: active tenants/keys, requests per developer, WoW trend, first-request funnel; operator console Engagement card + funnel. Live: 14 keys / 2 tenants / 1776 requests |
 | ITEM-063 | Cache-affinity routing | feature | **new** — route same-prefix requests to the provider/model that has the prefix warm; weigh cache value vs downgrade value; bounded TTL affinity |
 | ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
 | ITEM-065 | Edge node mode & config sync (hybrid data plane — slice 2) | feature | **new** — edge mode against a local provider, revocable edge token + enrollment, versioned config sync, telemetry shipping via ITEM-052, explicit offline behaviour, node health |
@@ -44,9 +44,9 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-14 (ITEM-018/050/051/052/053/054/055/056/057/058/059/060/061 closed; items captured through ITEM-068)_ —
-work the open set **top-down**: next **ITEM-062** (activation/retention), then the
-closed-loop items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
+_Last updated: 2026-10-14 (metric cluster ITEM-055..062 all closed)_ —
+all metric items are done. Work the open set **top-down**: next the closed-loop
+items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
 (overhead/alerts), **ITEM-067** (structured-output normalization), **ITEM-068**
 (error-rate + per-provider alerting), then the staged OmniRouting cluster
 **029–032**.
