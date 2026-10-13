@@ -74,9 +74,6 @@ export type Summary = {
 export type ModelRow = {
   model: string;
   requests: number;
-  /** ITEM-057: failures and their rate for this provider. */
-  errors: number;
-  error_rate: number | null;
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: string;
@@ -155,6 +152,13 @@ export type ProviderSpendRow = {
   name: string;
   kind: string;
   requests: number;
+  /** ITEM-057/061: failures + rate, and latency (mean + p95), per provider. */
+  errors: number;
+  error_rate: number | null;
+  avg_ttft_ms: number | null;
+  ttft_p95_ms: number | null;
+  avg_duration_ms: number | null;
+  duration_p95_ms: number | null;
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: string;

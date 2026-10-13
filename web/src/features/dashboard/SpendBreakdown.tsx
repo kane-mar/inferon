@@ -19,12 +19,21 @@ export type SpendBreakdownRow = {
   requests: number;
   tokens: number;
   limitCents: number;
+  /** ITEM-061: provider health (absent for key rows). */
+  errorRate?: number | null;
+  p95Ms?: number | null;
 };
 
 const COMPACT_INPUT = `
   w-24 rounded-md border bg-background px-2 py-1 font-mono text-xs outline-none
   focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
 `;
+
+const pctOrDash = (value: number | null | undefined): string =>
+  (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
+
+const msOrDash = (value: number | null | undefined): string =>
+  (value == null ? '—' : `${Math.round(value)}ms`);
 
 const Th = (props: { children: React.ReactNode; align?: 'left' | 'right' }) => (
   <th
@@ -165,6 +174,12 @@ export const SpendBreakdown = (props: {
         <tr className="border-b text-muted-foreground">
           <Th>{props.kind === 'key' ? t('key') : t('provider')}</Th>
           <Th align="right">{t('requests')}</Th>
+          {props.kind === 'provider' && (
+            <>
+              <Th align="right">{t('error_rate')}</Th>
+              <Th align="right">{t('p95_ttft')}</Th>
+            </>
+          )}
           <Th align="right">{t('tokens')}</Th>
           <Th align="right">{t('cost')}</Th>
           <Th align="right">{t('limit')}</Th>
@@ -204,6 +219,12 @@ export const SpendBreakdown = (props: {
                 )}
               </td>
               <td className="py-2 text-right tabular-nums">{formatInt(row.requests)}</td>
+              {props.kind === 'provider' && (
+                <>
+                  <td className="py-2 text-right tabular-nums">{pctOrDash(row.errorRate)}</td>
+                  <td className="py-2 text-right tabular-nums">{msOrDash(row.p95Ms)}</td>
+                </>
+              )}
               <td className="py-2 text-right tabular-nums">{formatCompact(row.tokens)}</td>
               <td className="py-2 text-right tabular-nums">
                 {formatUsd(row.costUsd)}

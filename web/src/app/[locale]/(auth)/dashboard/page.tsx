@@ -102,6 +102,8 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     requests: p.requests,
     tokens: p.prompt_tokens + p.completion_tokens,
     limitCents: p.spend_limit_cents,
+    errorRate: p.error_rate,
+    p95Ms: p.ttft_p95_ms,
   }));
 
   const prevKeyCost = new Map((prevByKey?.keys ?? []).map(k => [k.key_id ?? k.label, k.cost_usd]));

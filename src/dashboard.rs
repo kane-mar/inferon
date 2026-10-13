@@ -83,7 +83,21 @@ type QualityTotalsRow = (i64, i64, i64, i64, i64, i64, i64, i64);
 
 /// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
 /// cost, limit_cents)` — one spend-by-provider row.
-type ProviderAggregateRow = (Option<uuid::Uuid>, String, String, i64, i64, i64, i64, Decimal, i64);
+type ProviderAggregateRow = (
+    Option<uuid::Uuid>,
+    String,
+    String,
+    i64,
+    i64,
+    i64,
+    i64,
+    Decimal,
+    i64,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+);
 
 /// `(api_key_id, label, requests, prompt_tokens, completion_tokens, cost,
 /// limit_cents)` — one spend-by-key row.
@@ -561,7 +575,11 @@ async fn query_by_provider(
                     COALESCE(SUM(t.prompt_tokens), 0),
                     COALESCE(SUM(t.completion_tokens), 0),
                     COALESCE(SUM(t.upstream_cost_usd), 0),
-                    COALESCE(p.spend_limit_cents, 0)
+                    COALESCE(p.spend_limit_cents, 0),
+                    AVG(t.time_to_first_token_ms)::float8,
+                    percentile_cont(0.95) WITHIN GROUP (ORDER BY t.time_to_first_token_ms)::float8,
+                    AVG(t.total_duration_ms)::float8,
+                    percentile_cont(0.95) WITHIN GROUP (ORDER BY t.total_duration_ms)::float8
              FROM traces t
              LEFT JOIN providers p ON p.id = t.provider_id
              WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
@@ -583,7 +601,21 @@ async fn query_by_provider(
     let providers: Vec<Value> = rows
         .into_iter()
         .map(
-            |(id, name, kind, requests, errors, prompt_tokens, completion_tokens, cost, limit_cents)| {
+            |(
+                id,
+                name,
+                kind,
+                requests,
+                errors,
+                prompt_tokens,
+                completion_tokens,
+                cost,
+                limit_cents,
+                avg_ttft_ms,
+                ttft_p95_ms,
+                avg_duration_ms,
+                duration_p95_ms,
+            )| {
                 json!({
                     "provider_id": id.map(|v| v.to_string()),
                     "name": name,
@@ -591,6 +623,10 @@ async fn query_by_provider(
                     "requests": requests,
                     "errors": errors,
                     "error_rate": rate(errors, requests),
+                    "avg_ttft_ms": avg_ttft_ms,
+                    "ttft_p95_ms": ttft_p95_ms,
+                    "avg_duration_ms": avg_duration_ms,
+                    "duration_p95_ms": duration_p95_ms,
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "cost_usd": cost.to_string(),
