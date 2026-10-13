@@ -30,7 +30,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-058 | Savings attribution (router/fallback/cache/frontier delta) | improvement | **done (2026-10-13)** — `traces.savings_usd`/`savings_kind` (migration 027); summary exposes router/fallback/total savings + unreduced cost (reconciles); by-model frontier cost. Live: downgrade saved $0.000082 on a $0.000041 call |
 | ITEM-059 | Telemetry integrity counters | improvement | **done (2026-10-12)** — in-process counters for traces queued/persisted/dropped(by reason) + unpriced models; operator-only `GET /operator/metrics`. Live: counters move with traffic, `lost:0` |
 | ITEM-060 | Throughput & capacity metrics | improvement | **done (2026-10-13)** — `requests_total`/`per_minute`/`in_flight`/`requests_by_provider` + telemetry queue depth/capacity + `last_flush_age_ms` on the operator metrics endpoint. Live: rate 1→2 on a request, flush age refreshed |
-| ITEM-061 | Provider experience metrics | improvement | **new** — per-provider latency (p95) + error rate alongside spend/reachability; alert on degradation |
+| ITEM-061 | Provider experience metrics | improvement | **done (2026-10-14)** — per-provider avg/p95 TTFT + total duration + error rate in `by-provider`; dashboard provider table shows error rate + p95. Live: Deepseek 36.4% errors, p95 TTFT 2394ms. Degradation alerting folded into ITEM-068 |
 | ITEM-062 | Product activation & retention metrics | improvement | **new** — active tenants/keys, requests per developer, first-request funnel; operator-only aggregates |
 | ITEM-063 | Cache-affinity routing | feature | **new** — route same-prefix requests to the provider/model that has the prefix warm; weigh cache value vs downgrade value; bounded TTL affinity |
 | ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
@@ -44,11 +44,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-14 (ITEM-018/050/051/052/053/054/055/056/057/058/059/060 closed; items captured through ITEM-068)_ —
-work the open set **top-down**: next the metric items **061–062**, then the
+_Last updated: 2026-10-14 (ITEM-018/050/051/052/053/054/055/056/057/058/059/060/061 closed; items captured through ITEM-068)_ —
+work the open set **top-down**: next **ITEM-062** (activation/retention), then the
 closed-loop items **063–064**, then **ITEM-065** (edge node mode), **ITEM-066**
 (overhead/alerts), **ITEM-067** (structured-output normalization), **ITEM-068**
-(error-rate alerting), then the staged OmniRouting cluster **029–032**.
+(error-rate + per-provider alerting), then the staged OmniRouting cluster
+**029–032**.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

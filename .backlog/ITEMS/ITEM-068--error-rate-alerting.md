@@ -20,6 +20,9 @@ is the alerting half.
    tunable, consistent with the spend/waste thresholds.
 4. Optional: per-class alerting (e.g. only `transport`) is expressible, not just
    the overall rate.
+5. **Per-provider degradation** (folded in from ITEM-061 AC3, 2026-10-14): a
+   provider whose error rate or p95 latency crosses a threshold raises an alert,
+   so a cheap-but-failing or slow provider surfaces before it costs the tenant.
 
 **Technical Notes:**
 - Extend `AlertThresholds` + the `aggregate_signals` query (requests/errors in
@@ -27,4 +30,5 @@ is the alerting half.
   `SpendSignal`/`WasteSignal` so the rule is unit-testable without a DB.
 - `traces.error_class` (ITEM-057) makes the per-class signal derivable.
 
-**Source:** 2026-10-13 — ITEM-057 AC4 split out.
+**Source:** 2026-10-13 — ITEM-057 AC4 split out; extended with ITEM-061 AC3
+(per-provider degradation) on 2026-10-14.
