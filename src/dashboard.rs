@@ -1209,6 +1209,7 @@ pub async fn operator_activation(
               WHERE (SELECT COUNT(DISTINCT date_trunc('day', t.created_at))
                        FROM traces t WHERE t.tenant_id = c.id) >= 2)",
     )
+    .bind(days)
     .fetch_one(&state.db)
     .await
     {
