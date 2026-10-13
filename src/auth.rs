@@ -791,121 +791,18 @@ pub async fn callback(
             _ => false,
         };
 
-    let outcome = match (query.code.as_deref(), state_matches) {
-        (None, _) => crate::json_error(
+    let outcome = match query.code.as_deref() {
+        None => crate::json_error(
             StatusCode::BAD_REQUEST,
             "oauth_callback_error",
             "GitHub did not return an authorization code",
         ),
-        (Some(_), false) => crate::json_error(
+        Some(_) if !state_matches => crate::json_error(
             StatusCode::BAD_REQUEST,
             "oauth_state_mismatch",
             "OAuth state mismatch — start the sign-in again",
         ),
-        (Some(code), true) => match accounts
-            .github
-            .exchange_code(code, &redirect_uri(&headers))
-            .await
-        {
-            Err(e) => {
-                tracing::warn!("GitHub OAuth exchange failed: {e}");
-                crate::json_error(
-                    StatusCode::BAD_GATEWAY,
-                    "github_exchange_failed",
-                    "GitHub did not complete the sign-in",
-                )
-            }
-            Ok(github_user) => match accounts
-                .users
-                .upsert_github_user(
-                    github_user.github_id,
-                    &github_user.login,
-                    accounts.operator_logins.contains(&github_user.login),
-                )
-                .await
-            {
-                Err(e) => {
-                    tracing::error!("user upsert failed: {e}");
-                    crate::json_error(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "user_store_error",
-                        "could not record the sign-in",
-                    )
-                }
-                Ok(user) => {
-                    let token = crate::session::issue_session(
-                        user.id,
-                        &accounts.session_secret,
-                        now_secs(),
-                        crate::session::SESSION_TTL_SECS,
-                    );
-                    let session_cookie = crate::session::set_cookie(&token, secure);
-                    match accounts.users.tenant_for_user(user.id).await {
-                        Err(e) => {
-                            tracing::error!("membership lookup failed: {e}");
-                            crate::json_error(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "user_store_error",
-                                "could not resolve the sign-in",
-                            )
-                        }
-                        // Returning user: straight to their dashboard (ITEM-036 AC2).
-                        Ok(Some(_)) => {
-                            let mut response = redirect_to("/dashboard");
-                            add_cookie(&mut response, &session_cookie);
-                            response
-                        }
-                        // A first-time user either claims a member invite
-                        // (ITEM-039: join the inviter's tenant, no key) or
-                        // auto-provisions a tenant + owner + key (ITEM-036).
-                        Ok(None) => match accounts.users.claim_invite(&user.github_login).await {
-                            Err(e) => {
-                                tracing::error!("invite claim failed: {e}");
-                                crate::json_error(
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "user_store_error",
-                                    "could not check your invite",
-                                )
-                            }
-                            Ok(Some(invited_tenant)) => {
-                                match accounts
-                                    .users
-                                    .add_membership(invited_tenant, user.id, "member")
-                                    .await
-                                {
-                                    Err(e) => {
-                                        tracing::error!("membership insert failed: {e}");
-                                        crate::json_error(
-                                            StatusCode::INTERNAL_SERVER_ERROR,
-                                            "provisioning_failed",
-                                            "could not join your team's tenant",
-                                        )
-                                    }
-                                    Ok(()) => {
-                                        let mut response = redirect_to("/dashboard");
-                                        add_cookie(&mut response, &session_cookie);
-                                        response
-                                    }
-                                }
-                            }
-                            Ok(None) => {
-                                match provision_first_tenant(&state, accounts, user).await {
-                                    Err(e) => e,
-                                    // No key is minted here: the frontend's
-                                    // keys page mints the first one (shown
-                                    // once) — the backend renders no HTML.
-                                    Ok(()) => {
-                                        let mut response = redirect_to("/dashboard/onboarding");
-                                        add_cookie(&mut response, &session_cookie);
-                                        response
-                                    }
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
+        Some(code) => complete_sign_in(&state, accounts, code, &headers, secure).await,
     };
     // The state cookie is one-time: clear it on every outcome.
     let mut response = outcome;
@@ -913,6 +810,120 @@ pub async fn callback(
         &mut response,
         &crate::session::cookie(crate::session::OAUTH_STATE_COOKIE, "", 0, secure),
     );
+    response
+}
+
+/// Exchange the code for a GitHub identity, record the sign-in, and route the
+/// user: an existing member to their dashboard, a first-time user through
+/// [`admit_user`]. Each failure is a typed JSON response.
+async fn complete_sign_in(
+    state: &Arc<AppState>,
+    accounts: &Accounts,
+    code: &str,
+    headers: &HeaderMap,
+    secure: bool,
+) -> Response {
+    let github_user = match accounts.github.exchange_code(code, &redirect_uri(headers)).await {
+        Ok(user) => user,
+        Err(e) => {
+            tracing::warn!("GitHub OAuth exchange failed: {e}");
+            return crate::json_error(
+                StatusCode::BAD_GATEWAY,
+                "github_exchange_failed",
+                "GitHub did not complete the sign-in",
+            );
+        }
+    };
+    let user = match accounts
+        .users
+        .upsert_github_user(
+            github_user.github_id,
+            &github_user.login,
+            accounts.operator_logins.contains(&github_user.login),
+        )
+        .await
+    {
+        Ok(user) => user,
+        Err(e) => {
+            tracing::error!("user upsert failed: {e}");
+            return crate::json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "user_store_error",
+                "could not record the sign-in",
+            );
+        }
+    };
+    match accounts.users.tenant_for_user(user.id).await {
+        Err(e) => {
+            tracing::error!("membership lookup failed: {e}");
+            crate::json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "user_store_error",
+                "could not resolve the sign-in",
+            )
+        }
+        // Returning user: straight to their dashboard (ITEM-036 AC2).
+        Ok(Some(_)) => redirect_with_session("/dashboard", user.id, accounts, secure),
+        Ok(None) => admit_user(state, accounts, user, secure).await,
+    }
+}
+
+/// Admit a first-time user (no membership): join a pending invite as a member
+/// (ITEM-039, no key), or auto-provision a tenant they own (ITEM-036). `user`
+/// is consumed by provisioning.
+async fn admit_user(
+    state: &Arc<AppState>,
+    accounts: &Accounts,
+    user: User,
+    secure: bool,
+) -> Response {
+    let user_id = user.id;
+    match accounts.users.claim_invite(&user.github_login).await {
+        Err(e) => {
+            tracing::error!("invite claim failed: {e}");
+            crate::json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "user_store_error",
+                "could not check your invite",
+            )
+        }
+        Ok(Some(invited_tenant)) => {
+            match accounts.users.add_membership(invited_tenant, user_id, "member").await {
+                Err(e) => {
+                    tracing::error!("membership insert failed: {e}");
+                    crate::json_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "provisioning_failed",
+                        "could not join your team's tenant",
+                    )
+                }
+                Ok(()) => redirect_with_session("/dashboard", user_id, accounts, secure),
+            }
+        }
+        // No key is minted here: the frontend's keys page mints the first one
+        // (shown once) — the backend renders no HTML.
+        Ok(None) => match provision_first_tenant(state, accounts, user).await {
+            Err(resp) => resp,
+            Ok(()) => redirect_with_session("/dashboard/onboarding", user_id, accounts, secure),
+        },
+    }
+}
+
+/// A redirect to `location` carrying a fresh session cookie for `user_id`.
+fn redirect_with_session(
+    location: &str,
+    user_id: Uuid,
+    accounts: &Accounts,
+    secure: bool,
+) -> Response {
+    let token = crate::session::issue_session(
+        user_id,
+        &accounts.session_secret,
+        now_secs(),
+        crate::session::SESSION_TTL_SECS,
+    );
+    let mut response = redirect_to(location);
+    add_cookie(&mut response, &crate::session::set_cookie(&token, secure));
     response
 }
 
@@ -1736,5 +1747,150 @@ mod tests {
             .find(|c| c.starts_with("inferon_session="))
             .expect("session clear cookie");
         assert!(raw.contains("Max-Age=0"), "expired: {raw}");
+    }
+
+    // --- callback branch coverage (drives the refactor of `callback`) ---
+
+    type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// A `UserStore` that fails one configured call; everything else delegates
+    /// to a working in-memory store. Lets the tests drive `callback`'s error
+    /// branches deterministically.
+    #[derive(Clone, Default)]
+    struct FailingUserStore {
+        inner: InMemoryUserStore,
+        fail: Option<&'static str>,
+    }
+
+    #[async_trait::async_trait]
+    impl UserStore for FailingUserStore {
+        async fn upsert_github_user(
+            &self,
+            github_id: i64,
+            github_login: &str,
+            is_operator: bool,
+        ) -> StoreResult<User> {
+            if self.fail == Some("upsert") {
+                return Err("boom".into());
+            }
+            self.inner.upsert_github_user(github_id, github_login, is_operator).await
+        }
+        async fn promote_logins(&self, logins: &[&str]) -> StoreResult<usize> {
+            self.inner.promote_logins(logins).await
+        }
+        async fn find_by_id(&self, user_id: Uuid) -> StoreResult<Option<User>> {
+            self.inner.find_by_id(user_id).await
+        }
+        async fn tenant_for_user(&self, user_id: Uuid) -> StoreResult<Option<(Uuid, String)>> {
+            if self.fail == Some("tenant_for_user") {
+                return Err("boom".into());
+            }
+            self.inner.tenant_for_user(user_id).await
+        }
+        async fn add_membership(&self, tenant_id: Uuid, user_id: Uuid, role: &str) -> StoreResult<()> {
+            if self.fail == Some("add_membership") {
+                return Err("boom".into());
+            }
+            self.inner.add_membership(tenant_id, user_id, role).await
+        }
+        async fn invite_member(&self, tenant_id: Uuid, github_login: &str) -> StoreResult<()> {
+            self.inner.invite_member(tenant_id, github_login).await
+        }
+        async fn claim_invite(&self, github_login: &str) -> StoreResult<Option<Uuid>> {
+            if self.fail == Some("claim_invite") {
+                return Err("boom".into());
+            }
+            self.inner.claim_invite(github_login).await
+        }
+        async fn list_members(&self, tenant_id: Uuid) -> StoreResult<Vec<(Uuid, String, String)>> {
+            self.inner.list_members(tenant_id).await
+        }
+        async fn remove_member(&self, tenant_id: Uuid, member_id: Uuid) -> StoreResult<bool> {
+            self.inner.remove_member(tenant_id, member_id).await
+        }
+        async fn list_invites(&self, tenant_id: Uuid) -> StoreResult<Vec<String>> {
+            self.inner.list_invites(tenant_id).await
+        }
+    }
+
+    /// Drive login -> callback against a `FailingUserStore`; `invite` is
+    /// pre-claimed by the FakeGithub login "octocat".
+    async fn callback_with_store(
+        fail: Option<&'static str>,
+        invite: bool,
+    ) -> axum::response::Response {
+        let store = std::sync::Arc::new(FailingUserStore {
+            inner: InMemoryUserStore::default(),
+            fail,
+        });
+        if invite {
+            store
+                .inner
+                .invite_member(Uuid::new_v4(), "octocat")
+                .await
+                .expect("invite");
+        }
+        let users: std::sync::Arc<dyn UserStore> = store.clone();
+        let state = test_state(test_accounts(users, std::sync::Arc::new(FakeGithub::default())));
+        oauth_dance(&crate::build_router(state), "code").await
+    }
+
+    #[tokio::test]
+    async fn callback_without_a_code_is_rejected() {
+        let users = std::sync::Arc::new(InMemoryUserStore::default());
+        let state = test_state(test_accounts(users, std::sync::Arc::new(FakeGithub::default())));
+        let response = crate::build_router(state)
+            .oneshot(request(
+                "/auth/callback?state=s",
+                "GET",
+                &[(crate::session::OAUTH_STATE_COOKIE, "s")],
+                false,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(body_json(response).await["error"]["type"], "oauth_callback_error");
+    }
+
+    #[tokio::test]
+    async fn callback_clears_the_one_time_state_cookie() {
+        let users = std::sync::Arc::new(InMemoryUserStore::default());
+        let state = test_state(test_accounts(users, std::sync::Arc::new(FakeGithub::default())));
+        let callback = oauth_dance(&crate::build_router(state), "c").await;
+        let cleared = callback
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .any(|c| c.starts_with("inferon_oauth_state=") && c.contains("Max-Age=0"));
+        assert!(cleared, "the state cookie is one-time and must be cleared");
+    }
+
+    #[tokio::test]
+    async fn a_failed_user_upsert_answers_500() {
+        let response = callback_with_store(Some("upsert"), false).await;
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body_json(response).await["error"]["type"], "user_store_error");
+    }
+
+    #[tokio::test]
+    async fn a_failed_membership_lookup_answers_500() {
+        let response = callback_with_store(Some("tenant_for_user"), false).await;
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body_json(response).await["error"]["type"], "user_store_error");
+    }
+
+    #[tokio::test]
+    async fn a_failed_invite_claim_answers_500() {
+        let response = callback_with_store(Some("claim_invite"), false).await;
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body_json(response).await["error"]["type"], "user_store_error");
+    }
+
+    #[tokio::test]
+    async fn a_failed_invite_membership_answers_provisioning_failure() {
+        let response = callback_with_store(Some("add_membership"), true).await;
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body_json(response).await["error"]["type"], "provisioning_failed");
     }
 }
