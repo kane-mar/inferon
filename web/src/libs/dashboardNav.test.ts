@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { dashboardNav } from './dashboardNav';
 
 describe('dashboardNav — role-aware menu', () => {
-  it('gives tenants home, connect, providers, routing, keys and members', () => {
+  it('gives tenants home, connect, providers, routing, quality, keys and members', () => {
     expect(dashboardNav(false).map(item => item.href)).toEqual([
       '/dashboard',
       '/dashboard/onboarding',
       '/dashboard/providers',
       '/dashboard/routing',
+      '/dashboard/quality',
       '/dashboard/keys',
       '/dashboard/members',
     ]);
@@ -21,6 +22,7 @@ describe('dashboardNav — role-aware menu', () => {
       '/dashboard/onboarding',
       '/dashboard/providers',
       '/dashboard/routing',
+      '/dashboard/quality',
       '/dashboard/keys',
       '/dashboard/members',
       '/dashboard/operator',
