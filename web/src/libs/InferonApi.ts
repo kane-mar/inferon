@@ -49,6 +49,11 @@ export type Summary = {
   /** Fraction of prompt tokens served from the provider cache (0..1), or null. */
   cache_hit_rate: number | null;
   cache_savings_usd: string;
+  /** ITEM-057: aborted/cut-off responses and their rate. */
+  truncated: number;
+  truncated_rate: number | null;
+  /** ITEM-057: failure counts by class (upstream_429, transport, ...). */
+  errors_by_class: Record<string, number>;
   avg_ttft_ms: number | null;
   avg_duration_ms: number | null;
   /** ITEM-056: tail latency percentiles (ms), null when no samples. */
@@ -65,6 +70,9 @@ export type Summary = {
 export type ModelRow = {
   model: string;
   requests: number;
+  /** ITEM-057: failures and their rate for this provider. */
+  errors: number;
+  error_rate: number | null;
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd: string;
@@ -91,6 +99,10 @@ export type QualityOverall = {
   refusal_rate: number | null;
   error_rate: number | null;
   guard_fallback_rate: number | null;
+  /** ITEM-057: aborted/cut-off responses and their rate. */
+  truncated_rate: number | null;
+  /** ITEM-057: failure counts by class (upstream_429, transport, ...). */
+  errors_by_class: Record<string, number>;
 };
 
 export type QualityModelRow = {

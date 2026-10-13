@@ -57,6 +57,7 @@ type SummaryRow = (
     Option<String>,
     i64,
     Decimal,
+    i64,
 );
 
 /// `(ttft_p50, ttft_p95, ttft_p99, duration_p50, duration_p95, duration_p99)`.
@@ -75,7 +76,7 @@ type QualityTotalsRow = (i64, i64, i64, i64, i64, i64, i64, i64);
 
 /// `(provider_id, name, kind, requests, prompt_tokens, completion_tokens,
 /// cost, limit_cents)` — one spend-by-provider row.
-type ProviderAggregateRow = (Option<uuid::Uuid>, String, String, i64, i64, i64, Decimal, i64);
+type ProviderAggregateRow = (Option<uuid::Uuid>, String, String, i64, i64, i64, i64, Decimal, i64);
 
 /// `(api_key_id, label, requests, prompt_tokens, completion_tokens, cost,
 /// limit_cents)` — one spend-by-key row.
@@ -300,7 +301,8 @@ async fn query_summary(
                     MIN(created_at)::text,
                     MAX(created_at)::text,
                     COALESCE(SUM(cached_prompt_tokens), 0),
-                    COALESCE(SUM(cache_savings_usd), 0)
+                    COALESCE(SUM(cache_savings_usd), 0),
+                    COUNT(*) FILTER (WHERE truncated)
              FROM traces
              WHERE ($1::uuid IS NULL OR tenant_id = $1)
                AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -328,7 +330,21 @@ async fn query_summary(
         last_at,
         cached_tokens,
         cache_savings,
-    ) = row.unwrap_or((0, Decimal::ZERO, 0, 0, 0, None, None, None, None, 0, Decimal::ZERO));
+        truncated,
+    ) = row.unwrap_or((
+        0,
+        Decimal::ZERO,
+        0,
+        0,
+        0,
+        None,
+        None,
+        None,
+        None,
+        0,
+        Decimal::ZERO,
+        0,
+    ));
     // ITEM-056: tail latency percentiles (NULL when there are no samples).
     let (
         ttft_p50_ms,
@@ -358,6 +374,29 @@ async fn query_summary(
         Ok(row) => row,
         Err(e) => return db_err(e),
     };
+    // ITEM-057: the failure taxonomy, grouped by class (null = no failure).
+    let by_class: Vec<(String, i64)> = match sqlx::query_as(
+        "SELECT error_class, COUNT(*)
+         FROM traces
+         WHERE error_class IS NOT NULL
+           AND ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')
+         GROUP BY error_class ORDER BY 2 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let errors_by_class: serde_json::Map<String, Value> = by_class
+        .into_iter()
+        .map(|(class, count)| (class, json!(count)))
+        .collect();
     // Unit economics computed server-side so no float ever touches a cost.
     let avg_cost = if requests > 0 {
         (total_cost / Decimal::from(requests)).round_dp(8)
@@ -393,6 +432,9 @@ async fn query_summary(
         "cached_prompt_tokens": cached_tokens,
         "cache_hit_rate": cache_hit_rate,
         "cache_savings_usd": cache_savings.to_string(),
+        "truncated": truncated,
+        "truncated_rate": rate(truncated, requests),
+        "errors_by_class": errors_by_class,
     }))
 }
 
@@ -488,6 +530,7 @@ async fn query_by_provider(
                     COALESCE(p.name, 'Shared platform key'),
                     COALESCE(p.kind, 'shared'),
                     COUNT(*),
+                    COUNT(*) FILTER (WHERE t.status_code >= 400),
                     COALESCE(SUM(t.prompt_tokens), 0),
                     COALESCE(SUM(t.completion_tokens), 0),
                     COALESCE(SUM(t.upstream_cost_usd), 0),
@@ -513,12 +556,14 @@ async fn query_by_provider(
     let providers: Vec<Value> = rows
         .into_iter()
         .map(
-            |(id, name, kind, requests, prompt_tokens, completion_tokens, cost, limit_cents)| {
+            |(id, name, kind, requests, errors, prompt_tokens, completion_tokens, cost, limit_cents)| {
                 json!({
                     "provider_id": id.map(|v| v.to_string()),
                     "name": name,
                     "kind": kind,
                     "requests": requests,
+                    "errors": errors,
+                    "error_rate": rate(errors, requests),
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "cost_usd": cost.to_string(),
@@ -813,6 +858,28 @@ async fn query_quality(
         Err(e) => return db_err(e),
     };
 
+    // ITEM-057: the failure taxonomy, grouped by class.
+    let by_class: Vec<(String, i64)> = match sqlx::query_as(
+        "SELECT error_class, COUNT(*)
+         FROM traces
+         WHERE error_class IS NOT NULL
+           AND ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+         GROUP BY error_class ORDER BY 2 DESC",
+    )
+    .bind(tenant)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return db_err(e),
+    };
+    let errors_by_class: serde_json::Map<String, Value> = by_class
+        .into_iter()
+        .map(|(class, count)| (class, json!(count)))
+        .collect();
+
     let model_rows: Vec<Value> = models
         .into_iter()
         .map(|(model, reqs, model_ok, model_empty, model_errors, up, down)| {
@@ -853,6 +920,7 @@ async fn query_quality(
             "errors": errors,
             "truncated": truncated,
             "unclassified": unclassified,
+            "errors_by_class": errors_by_class,
             "guard_fallback": guard_fallback,
             "thumbs_up": thumbs.0,
             "thumbs_down": thumbs.1,
@@ -861,6 +929,7 @@ async fn query_quality(
             "refusal_rate": rate(refused, requests),
             "error_rate": rate(errors, requests),
             "guard_fallback_rate": rate(guard_fallback, requests),
+            "truncated_rate": rate(truncated, requests),
         },
         "models": model_rows,
         "prompts": prompt_rows,

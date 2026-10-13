@@ -14,6 +14,7 @@ pub mod auth;
 pub mod dashboard;
 pub mod edge;
 pub mod embed;
+pub mod errors;
 pub mod linter;
 pub mod metrics;
 pub mod models;
@@ -37,6 +38,7 @@ use crate::usage::{
     usage_from_anthropic_sse_bytes, usage_from_json,
 };
 use crate::quality::{outcome_for_json, outcome_for_sse, Outcome};
+use crate::errors::ErrorClass;
 
 use axum::{
     body::Body,
@@ -514,7 +516,7 @@ async fn proxy_chat_completions(
     let budget_override = match budget::check_budget(&state, tenant_id, &meta.raw_prompt).await {
         Ok(model) => model,
         Err(resp) => {
-            trace_error(&state, &meta, tenant_id, started, 429);
+            trace_error(&state, &meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
             return resp;
         }
     };
@@ -602,7 +604,14 @@ async fn proxy_chat_completions(
             Err(e) => {
                 if is_last {
                     tracing::error!("upstream request failed: {e}");
-                    trace_error(&state, &meta, tenant_id, started, 502);
+                    trace_error(
+                        &state,
+                        &meta,
+                        tenant_id,
+                        started,
+                        502,
+                        ErrorClass::from_transport(&e),
+                    );
                     return json_error(
                         StatusCode::BAD_GATEWAY,
                         "upstream_error",
@@ -728,7 +737,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
     // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
     // and bypassed here; only the hard monthly cap still applies.
     if let Err(resp) = budget::check_cap(&state, tenant_id).await {
-        trace_error(&state, &meta, tenant_id, started, 429);
+        trace_error(&state, &meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
         return resp;
     }
 
@@ -744,7 +753,14 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         Ok(response) => response,
         Err(e) => {
             tracing::error!("anthropic upstream request failed: {e}");
-            trace_error(&state, &meta, tenant_id, started, 502);
+            trace_error(
+                &state,
+                &meta,
+                tenant_id,
+                started,
+                502,
+                ErrorClass::from_transport(&e),
+            );
             return json_error(
                 StatusCode::BAD_GATEWAY,
                 "upstream_error",
@@ -837,6 +853,8 @@ async fn forward_buffered(
     let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
     let usage = parse_usage(&response_json);
     let outcome = outcome_for_json(status.as_u16(), &response_json);
+    let error_class = (!status.is_success())
+        .then(|| ErrorClass::from_upstream_status(status.as_u16()));
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
@@ -851,6 +869,7 @@ async fn forward_buffered(
             raw_completion: response_json,
             truncated: false,
             outcome,
+            error_class,
         },
     );
     send_trace(&state.telemetry_tx, msg);
@@ -889,11 +908,13 @@ struct TraceOutcome {
     truncated: bool,
     /// ITEM-055: whether the response was usable.
     outcome: Outcome,
+    /// ITEM-057: why a failure/abort happened (`None` on success).
+    error_class: Option<ErrorClass>,
 }
 
 impl TraceOutcome {
     /// A terminal error response with no usage or completion body.
-    fn error(status: u16, total_duration_ms: i64) -> Self {
+    fn error(status: u16, total_duration_ms: i64, error_class: ErrorClass) -> Self {
         Self {
             status,
             total_duration_ms,
@@ -902,6 +923,7 @@ impl TraceOutcome {
             raw_completion: None,
             truncated: false,
             outcome: Outcome::Error,
+            error_class: Some(error_class),
         }
     }
 }
@@ -930,6 +952,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         provider_id: meta.provider_id,
         api_key_id: meta.api_key_id,
         outcome: outcome.outcome,
+        error_class: outcome.error_class,
     }
 }
 
@@ -945,7 +968,7 @@ async fn ensure_model_enabled(
     match state.model_store.is_disabled(provider_id, model).await {
         Ok(false) => Ok(()),
         Ok(true) => {
-            trace_error(state, meta, tenant_id, started, 400);
+            trace_error(state, meta, tenant_id, started, 400, ErrorClass::Inferon4xx);
             Err(json_error(
                 StatusCode::BAD_REQUEST,
                 "model_disabled",
@@ -964,9 +987,16 @@ async fn ensure_model_enabled(
 }
 
 /// Trace a terminal error response (no usage, no completion body).
-fn trace_error(state: &AppState, meta: &RequestMeta, tenant_id: Uuid, started: Instant, status: u16) {
+fn trace_error(
+    state: &AppState,
+    meta: &RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    status: u16,
+    error_class: ErrorClass,
+) {
     let total_ms = started.elapsed().as_millis() as i64;
-    let msg = build_trace(meta, tenant_id, TraceOutcome::error(status, total_ms));
+    let msg = build_trace(meta, tenant_id, TraceOutcome::error(status, total_ms, error_class));
     send_trace(&state.telemetry_tx, msg);
 }
 
@@ -1184,7 +1214,7 @@ async fn guarded_stream_response(
             // ttft is when the client actually sees the first byte: after the
             // buffered flush (Slice 4 latency target measures this, ITEM-027).
             guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
-            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes));
+            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
             response
@@ -1222,7 +1252,7 @@ async fn fallback_to_frontier(
         Ok(body) => body,
         Err(e) => {
             tracing::error!("guard fallback payload reserialization failed: {e}");
-            guard_emit.emit(Usage::default(), false, Outcome::Error);
+            guard_emit.emit(Usage::default(), false, Outcome::Error, Some(ErrorClass::Inferon5xx));
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "serialization_error",
@@ -1248,7 +1278,12 @@ async fn fallback_to_frontier(
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some("transport error"));
             guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(Usage::default(), false, Outcome::Error);
+            guard_emit.emit(
+                Usage::default(),
+                false,
+                Outcome::Error,
+                Some(ErrorClass::from_transport(&e)),
+            );
             json_error(
                 StatusCode::BAD_GATEWAY,
                 "guard_fallback_error",
@@ -1261,7 +1296,7 @@ async fn fallback_to_frontier(
             let event =
                 guard::guard_event("fallback_failed", reason, &guarded_model, Some(&detail));
             guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(Usage::default(), false, Outcome::Error);
+            guard_emit.emit(Usage::default(), false, Outcome::Error, Some(ErrorClass::Guard));
             json_error(
                 StatusCode::BAD_GATEWAY,
                 "guard_fallback_error",
@@ -1277,7 +1312,7 @@ async fn fallback_to_frontier(
                 Ok(bytes) => bytes,
                 Err(e) => {
                     tracing::error!("guard frontier body read failed: {e}");
-                    guard_emit.emit(Usage::default(), true, Outcome::Truncated);
+                    guard_emit.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::Transport));
                     return json_error(
                         StatusCode::BAD_GATEWAY,
                         "guard_fallback_error",
@@ -1286,7 +1321,7 @@ async fn fallback_to_frontier(
                 }
             };
             let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
-            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes));
+            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
             response
@@ -1343,7 +1378,7 @@ impl BufferedGuard {
         *self.guard_event.borrow_mut() = Some(event);
     }
 
-    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome) {
+    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome, error_class: Option<ErrorClass>) {
         if self.emitted.replace(true) {
             return;
         }
@@ -1363,6 +1398,7 @@ impl BufferedGuard {
                 raw_completion: None,
                 truncated,
                 outcome,
+                error_class,
             },
         );
         msg.guard_event = self.guard_event.borrow().clone();
@@ -1374,7 +1410,7 @@ impl Drop for BufferedGuard {
     fn drop(&mut self) {
         if !self.emitted.get() {
             tracing::debug!("guarded request dropped before flush; recording truncated trace");
-            self.emit(Usage::default(), true, Outcome::Truncated);
+            self.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::ClientAbort));
         }
     }
 }
@@ -1423,7 +1459,7 @@ impl StreamEmit {
 
     /// Emit the trace unless one was already sent. `truncated` marks a stream
     /// that ended before the upstream finished (mid-stream error).
-    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome) {
+    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome, error_class: Option<ErrorClass>) {
         if self.emitted.replace(true) {
             return;
         }
@@ -1439,6 +1475,7 @@ impl StreamEmit {
                 raw_completion: None,
                 truncated,
                 outcome,
+                error_class,
             },
         );
         send_trace(&self.tx, msg);
@@ -1452,7 +1489,7 @@ impl Drop for StreamEmit {
             // the very end by the provider) never arrived, so token counts are
             // unknown — record zeroes and flag the trace as truncated.
             tracing::debug!("stream dropped before completion; recording truncated trace");
-            self.emit(Usage::default(), true, Outcome::Truncated);
+            self.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::ClientAbort));
         }
     }
 }
@@ -1498,7 +1535,7 @@ fn stream_with_trace(
         } else {
             outcome_for_sse(status, &accumulated)
         };
-        emit.emit(usage, errored, outcome);
+        emit.emit(usage, errored, outcome, errored.then_some(ErrorClass::Transport));
     }
 }
 
@@ -2299,6 +2336,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
         let msg = rx.recv().await.unwrap();
         assert_eq!(msg.status_code, 429);
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Inferon4xx));
     }
 
     #[tokio::test]
@@ -2347,6 +2385,59 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let msg = rx.recv().await.unwrap();
         assert_eq!(msg.outcome, crate::quality::Outcome::Error);
+    }
+
+    #[tokio::test]
+    async fn an_upstream_429_is_classified() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"rate","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Upstream429));
+    }
+
+    #[tokio::test]
+    async fn an_upstream_5xx_is_classified() {
+        let (response, mut rx) = traced_request(
+            r#"{"model":"fail","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Upstream5xx));
+    }
+
+    #[tokio::test]
+    async fn a_transport_failure_is_classified() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: "http://127.0.0.1:1/v1/chat/completions".to_string(),
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"deepseek-flash","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Transport));
     }
 
     #[tokio::test]
@@ -2569,7 +2660,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     #[tokio::test]
     async fn a_disabled_model_is_refused_with_a_typed_error() {
         let tenant = seeded_tenant();
-        let (tx, _rx) = mpsc::channel(8);
+        let (tx, mut rx) = mpsc::channel(8);
         // Model selection is per provider: seed an openai provider and disable
         // one of its catalog models.
         let provider_store = crate::providers::InMemoryProviderStore::default();
@@ -2617,6 +2708,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let body = axum::body::to_bytes(response.into_body(), 1024 * 64).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["error"]["type"], "model_disabled");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Inferon4xx));
     }
 
     #[tokio::test]
@@ -2689,6 +2782,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             provider_id: None,
             api_key_id: None,
             outcome: crate::quality::Outcome::Ok,
+            error_class: None,
         }
     }
 
@@ -3715,6 +3809,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .expect("channel open");
         assert!(msg.truncated, "aborted stream must be flagged truncated");
         assert_eq!(msg.status_code, 200);
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::ClientAbort));
         assert!(msg.raw_completion.is_none());
         // Exactly one trace: the abort must not also fire the normal emit.
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;

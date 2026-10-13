@@ -38,18 +38,54 @@ export default async function QualityPage(props: {
       <div className="
         mt-6 grid grid-cols-2 gap-3
         lg:grid-cols-3
-        xl:grid-cols-5
+        xl:grid-cols-6
       "
       >
         <KpiCard label={t('success_rate')} value={pct(overall.success_rate)} />
         <KpiCard label={t('empty_rate')} value={pct(overall.empty_rate)} goodWhen="down" />
         <KpiCard label={t('refusal_rate')} value={pct(overall.refusal_rate)} goodWhen="down" />
         <KpiCard label={t('error_rate')} value={pct(overall.error_rate)} goodWhen="down" />
+        <KpiCard label={t('truncated_rate')} value={pct(overall.truncated_rate)} goodWhen="down" />
         <KpiCard
           label={t('guard_fallback_rate')}
           value={pct(overall.guard_fallback_rate)}
           goodWhen="down"
         />
+      </div>
+
+      <div className="mt-4">
+        <Card title={t('by_error_class')}>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className={HEAD}>{t('class')}</th>
+                  <th className={HEAD}>{t('count')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(overall.errors_by_class).map(([errorClass, count]) => (
+                  <tr
+                    key={errorClass}
+                    className="
+                      border-b
+                      last:border-0
+                    "
+                  >
+                    <td className={`
+                      ${CELL}
+                      font-mono
+                    `}
+                    >
+                      {errorClass}
+                    </td>
+                    <td className={CELL}>{count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       </div>
 
       <div className="mt-4">

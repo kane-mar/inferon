@@ -63,6 +63,9 @@ pub struct EdgeTrace {
     /// falls back to a status-derived value when absent/unknown.
     #[serde(default)]
     pub outcome: Option<String>,
+    /// ITEM-057: the edge's own error class for a failed trace.
+    #[serde(default)]
+    pub error_class: Option<String>,
 }
 
 impl EdgeTrace {
@@ -97,6 +100,7 @@ impl EdgeTrace {
                 } else {
                     crate::quality::Outcome::Ok
                 }),
+            error_class: crate::errors::ErrorClass::from_db(self.error_class.as_deref()),
         }
     }
 }
