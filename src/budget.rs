@@ -281,24 +281,27 @@ pub async fn check_budget(
     state: &Arc<AppState>,
     tenant_id: Uuid,
     payload: &Value,
+    policy_threshold: Option<f64>,
 ) -> Result<Option<ModelOverride>, Response> {
     let budget = load_budget(state, tenant_id).await?;
-    // Unconfigured tenant (no row): the router still runs with its defaults
-    // (ITEM-015 behaviour unchanged); an explicit config can turn it off or
-    // move the threshold (ITEM-046).
+    // Unconfigured tenant (no row): the router still runs. The adaptive policy
+    // (ITEM-064) may supply the threshold, else the router's default.
     let Some(budget) = budget else {
-        return Ok(crate::router::maybe_downgrade(payload).map(|model| ModelOverride {
+        let chosen = match policy_threshold {
+            Some(threshold) => crate::router::maybe_downgrade_with(payload, threshold),
+            None => crate::router::maybe_downgrade(payload),
+        };
+        return Ok(chosen.map(|model| ModelOverride {
             model,
             reason: ROUTER_REASON,
         }));
     };
     match enforce_budget(&budget) {
         BudgetVerdict::Allow => Ok(if budget.router_enabled {
-            crate::router::maybe_downgrade_with(payload, budget.router_threshold).map(|model| {
-                ModelOverride {
-                    model,
-                    reason: ROUTER_REASON,
-                }
+            let threshold = policy_threshold.unwrap_or(budget.router_threshold);
+            crate::router::maybe_downgrade_with(payload, threshold).map(|model| ModelOverride {
+                model,
+                reason: ROUTER_REASON,
             })
         } else {
             None

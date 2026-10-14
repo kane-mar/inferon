@@ -18,6 +18,9 @@ const TELEMETRY_BATCH_SIZE: usize = 100;
 /// Alert evaluation cadence (ITEM-020): an in-process interval task, no new
 /// daemon/service — the proxy binary stays the only deployment unit.
 const ALERT_EVAL_INTERVAL_SECS: u64 = 60;
+/// Adaptive policy cadence (ITEM-064): one bounded analysis pass. The first
+/// tick fires immediately, so a fresh deploy bootstraps a policy.
+const ADAPT_INTERVAL_SECS: u64 = 900;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -81,6 +84,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Adaptive policy loop (ITEM-064): derive a bounded policy from telemetry
+    // and publish it; the hot path reads it on the next request.
+    {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(ADAPT_INTERVAL_SECS));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                inferon::policy::run_adaptation(&pool).await;
+            }
+        });
+    }
+
     // A connect timeout keeps an unreachable provider (e.g. a LAN model the
     // cloud host cannot route to) from hanging a request indefinitely; it
     // covers DNS + TCP + TLS. No overall timeout — streaming responses can be
@@ -136,6 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         affinity_store: std::sync::Arc::new(inferon::affinity::PostgresAffinityStore::new(
             pool.clone(),
         )),
+        policy_store: Arc::new(inferon::policy::PostgresPolicyStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
         accounts,

@@ -19,6 +19,7 @@ pub mod errors;
 pub mod linter;
 pub mod metrics;
 pub mod models;
+pub mod policy;
 pub mod providers;
 pub mod quality;
 pub mod router;
@@ -78,6 +79,8 @@ pub struct AppState {
     pub budget_store: Arc<dyn budget::BudgetStore>,
     /// ITEM-063: per-prefix warm-target lookup for cache-affinity routing.
     pub affinity_store: Arc<dyn affinity::AffinityStore>,
+    /// ITEM-064: the tenant's active adaptive policy (versioned).
+    pub policy_store: Arc<dyn policy::PolicyStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
@@ -147,6 +150,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/operator/activation",
             get(dashboard::operator_activation),
+        )
+        .route(
+            "/v1/dashboard/api/operator/policy/:tenant_id",
+            get(dashboard::operator_policy),
+        )
+        .route(
+            "/v1/dashboard/api/operator/policy/:tenant_id/freeze",
+            post(dashboard::operator_policy_freeze),
+        )
+        .route(
+            "/v1/dashboard/api/operator/policy/:tenant_id/rollback/:version",
+            post(dashboard::operator_policy_rollback),
         )
         .route(
             "/v1/dashboard/api/operator/keys",
@@ -500,6 +515,7 @@ async fn proxy_chat_completions(
         routing_event: None,
         router_event: None,
         cache_affinity: None,
+        policy_version: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -521,9 +537,26 @@ async fn proxy_chat_completions(
         return resp;
     }
 
+    // ITEM-064: the adaptive policy may override the router threshold.
+    let policy = match state.policy_store.active(tenant_id).await {
+        Ok(policy) => policy.filter(|policy| policy.enabled),
+        Err(e) => {
+            tracing::warn!("policy lookup failed: {e}");
+            None
+        }
+    };
+    meta.policy_version = policy.as_ref().map(|policy| policy.version);
+    let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
     // Budget breaker (ITEM-016): its fallback model wins over the router;
     // a hard-cap rejection is traced and answered 429 before any upstream call.
-    let budget_override = match budget::check_budget(&state, tenant_id, &meta.raw_prompt).await {
+    let budget_override = match budget::check_budget(
+        &state,
+        tenant_id,
+        &meta.raw_prompt,
+        policy_threshold,
+    )
+    .await
+    {
         Ok(model) => model,
         Err(resp) => {
             trace_error(&state, &meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
@@ -744,6 +777,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         routing_event: None,
         router_event: None,
         cache_affinity: None,
+        policy_version: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -922,6 +956,8 @@ struct RequestMeta {
     router_event: Option<Value>,
     /// ITEM-063: set when cache affinity changed the serving model.
     cache_affinity: Option<Value>,
+    /// ITEM-064: the adaptive policy version in force for this request.
+    policy_version: Option<i64>,
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
@@ -985,6 +1021,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         savings_usd: rust_decimal::Decimal::ZERO,
         savings_kind: None,
         cache_affinity: meta.cache_affinity.clone(),
+        policy_version: meta.policy_version,
     }
 }
 
@@ -2026,6 +2063,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2070,6 +2108,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2146,6 +2185,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2211,6 +2251,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2238,6 +2279,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: mpsc::channel(1).0,
             operator_key: None,
             accounts: None,
@@ -2402,6 +2444,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: affinity,
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2426,6 +2469,54 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let event = msg.cache_affinity.expect("affinity event recorded");
         assert_eq!(event["from_model"], "deepseek-flash");
         assert_eq!(event["to_model"], "deepseek-v4-pro");
+    }
+
+    #[tokio::test]
+    async fn an_active_policy_threshold_overrides_the_router() {
+        // ITEM-064: the hot path reads the versioned policy. A threshold of 0.0
+        // never downgrades, and the trace records the policy version.
+        let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let policy_store = std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default());
+        crate::policy::PolicyStore::publish(
+            &*policy_store,
+            tenant,
+            crate::policy::Policy {
+                version: 0,
+                router_threshold: Some(0.0),
+                evidence: json!({}),
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store,
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        let json = json_body(response).await;
+        assert_eq!(json["model"], "gpt-4o", "threshold 0.0 never downgrades");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.policy_version, Some(1));
     }
 
     #[tokio::test]
@@ -2512,6 +2603,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2659,6 +2751,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2731,6 +2824,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2784,6 +2878,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2822,6 +2917,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             ),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2880,6 +2976,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             savings_usd: rust_decimal::Decimal::ZERO,
             savings_kind: None,
             cache_affinity: None,
+            policy_version: None,
         }
     }
 
@@ -2981,6 +3078,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3006,6 +3104,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: state.budget_store.clone(),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             operator_key: state.operator_key.clone(),
             accounts: None,
             db: state.db.clone(),
@@ -3684,6 +3783,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3887,6 +3987,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3957,6 +4058,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -4272,6 +4374,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,

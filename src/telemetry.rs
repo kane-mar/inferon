@@ -61,6 +61,8 @@ pub struct TraceMessage {
     pub savings_kind: Option<String>,
     /// ITEM-063: set when cache affinity changed the serving model.
     pub cache_affinity: Option<Value>,
+    /// ITEM-064: the adaptive policy version in force for this request.
+    pub policy_version: Option<i64>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -131,8 +133,8 @@ impl TraceSink for PostgresTraceSink {
                     total_duration_ms, status_code, raw_prompt, raw_completion,
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
-                    outcome, error_class, savings_usd, savings_kind, cache_affinity
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)"#,
+                    outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -160,6 +162,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.savings_usd)
             .bind(msg.savings_kind.as_deref())
             .bind(msg.cache_affinity.as_ref().map(Json))
+            .bind(msg.policy_version)
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {

@@ -112,6 +112,7 @@ mod tests {
             savings_usd: rust_decimal::Decimal::ZERO,
             savings_kind: None,
             cache_affinity: None,
+            policy_version: None,
         }
     }
 

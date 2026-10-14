@@ -10,7 +10,7 @@
 
 use serde_json::Value;
 
-const DOWNGRADE_THRESHOLD: f64 = 0.35;
+pub(crate) const DOWNGRADE_THRESHOLD: f64 = 0.35;
 
 const CODE_MARKERS: [&str; 7] = ["```", "def ", "class ", "fn ", "import ", "SELECT ", "FROM "];
 const JSON_SPEC_MARKERS: [&str; 2] = ["\"type\": \"object\"", "\"properties\""];

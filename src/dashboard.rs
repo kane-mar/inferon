@@ -1255,6 +1255,62 @@ pub async fn operator_activation(
     }))
 }
 
+/// GET /v1/dashboard/api/operator/policy/:tenant_id — the tenant's active
+/// adaptive policy (version + evidence), operator-only (ITEM-064).
+pub async fn operator_policy(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<uuid::Uuid>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    match state.policy_store.active(tenant_id).await {
+        Ok(policy) => json_ok(json!({
+            "tenant_id": tenant_id.to_string(),
+            "policy": policy,
+        })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/operator/policy/:tenant_id/freeze — the kill switch:
+/// disable adaptation so the static config applies again.
+pub async fn operator_policy_freeze(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<uuid::Uuid>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    match state.policy_store.freeze(tenant_id).await {
+        Ok(()) => json_ok(json!({ "ok": true })),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
+/// POST /v1/dashboard/api/operator/policy/:tenant_id/rollback/:version —
+/// re-activate a previous version (a new version is appended, auditable).
+pub async fn operator_policy_rollback(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((tenant_id, version)): Path<(uuid::Uuid, i64)>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    match state.policy_store.rollback(tenant_id, version).await {
+        Ok(Some(policy)) => json_ok(json!({ "ok": true, "policy": policy })),
+        Ok(None) => crate::json_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "no such policy version",
+        ),
+        Err(e) => internal(&e.to_string()),
+    }
+}
+
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.
 pub async fn operator_summary(
     State(state): State<Arc<AppState>>,
@@ -2528,6 +2584,7 @@ mod tests {
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
             accounts,
