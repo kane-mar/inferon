@@ -1,4 +1,4 @@
-## ITEM-068: Error-rate alerting (ITEM-057 AC4)
+## ITEM-068: Metric-regression alerting (error rate, provider health, latency)
 
 **As a** tenant
 **I want** to be alerted when my error rate (overall or for a specific class)
@@ -23,6 +23,10 @@ is the alerting half.
 5. **Per-provider degradation** (folded in from ITEM-061 AC3, 2026-10-14): a
    provider whose error rate or p95 latency crosses a threshold raises an alert,
    so a cheap-but-failing or slow provider surfaces before it costs the tenant.
+6. **Latency regression** (folded in from ITEM-066 AC3, 2026-10-14): a p95
+   regression of TTFT, total duration, or proxy overhead (ITEM-056/066) over a
+   window raises an alert, with a per-tenant baseline so seasonality does not
+   fire on a normal ramp.
 
 **Technical Notes:**
 - Extend `AlertThresholds` + the `aggregate_signals` query (requests/errors in
@@ -31,4 +35,4 @@ is the alerting half.
 - `traces.error_class` (ITEM-057) makes the per-class signal derivable.
 
 **Source:** 2026-10-13 — ITEM-057 AC4 split out; extended with ITEM-061 AC3
-(per-provider degradation) on 2026-10-14.
+(per-provider degradation) and ITEM-066 AC3 (latency regression) on 2026-10-14.
