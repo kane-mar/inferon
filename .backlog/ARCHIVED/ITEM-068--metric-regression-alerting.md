@@ -36,3 +36,25 @@ is the alerting half.
 
 **Source:** 2026-10-13 — ITEM-057 AC4 split out; extended with ITEM-061 AC3
 (per-provider degradation) and ITEM-066 AC3 (latency regression) on 2026-10-14.
+
+## Close-out (2026-10-14)
+
+- `alerts::ErrorSignal`: fires when the 24h error rate strictly exceeds a
+  configured fraction, **gated by a minimum request count** so a tiny sample
+  cannot fire it (integer/decimal math: `errors > rate × requests`).
+- `alerts::LatencySignal`: fires when the 24h p95 exceeds a configured multiple
+  of the **preceding 24h** p95 — a per-tenant baseline, so a normal ramp does not
+  fire; no baseline means nothing to regress from.
+- Both classes run through the existing ITEM-020 lifecycle (start / re-fire ≤24h
+  / clear) and appear in the operator alert view.
+- Thresholds on `tenant_configurations` (migration 032): `alert_error_rate` 0.5,
+  `alert_error_min_requests` 20, `alert_latency_multiplier` 3.0.
+- `aggregate_signals` extends its single query with requests/errors/p95 over the
+  trailing day vs the preceding day.
+- Rust **296 → 298** tests, clippy clean. Commit `989b359`; CI `38644200423`
+  (test+web+deploy) green.
+- **Live**: after 60 errors / 99 requests (60.6% > 50%, ≥ 20) the engine fired an
+  `error_rate` episode — `status: firing`, `detail: {errors_24h: 60,
+  requests_24h: 99}`. At 39% (25/64) it correctly stayed silent.
+- **AC4** (per-class alerting) is optional and was skipped. **AC5** (per-provider
+  degradation) is split to **ITEM-071**.
