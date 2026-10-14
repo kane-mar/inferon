@@ -20,7 +20,7 @@ use rust_decimal::Decimal;
 
 /// Per-tenant alert thresholds. `None` values mean the DB default applies
 /// (see migration 003) — the SQL layer fills them before calling the logic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AlertThresholds {
     /// N in "spend exceeds N× its own baseline".
     pub spend_multiplier: Decimal,
@@ -28,17 +28,27 @@ pub struct AlertThresholds {
     pub spend_floor_cents: i64,
     /// Waste-flagged requests per day that count as a spike.
     pub waste_daily_threshold: i64,
+    /// ITEM-068: fire when the 24h error rate exceeds this fraction.
+    pub error_rate: Decimal,
+    /// Minimum 24h requests before the error rate is trusted (small-sample guard).
+    pub error_min_requests: i64,
+    /// ITEM-068: fire when the 24h p95 exceeds this multiple of the preceding
+    /// 24h p95 (a per-tenant baseline, so a normal ramp does not fire).
+    pub latency_multiplier: f64,
 }
 
 impl AlertThresholds {
     /// Conservative defaults (migration 003 column defaults): 5× baseline or
-    /// $1/hr floor; 50 waste-flagged requests/day. Tuned after ITEM-018
-    /// brings real traffic (decision note in the item file).
+    /// $1/hr floor; 50 waste-flagged requests/day; a 50% error rate over 20+
+    /// requests; a 3× p95 regression.
     pub fn defaults() -> Self {
         Self {
             spend_multiplier: Decimal::new(5, 0),
             spend_floor_cents: 100,
             waste_daily_threshold: 50,
+            error_rate: Decimal::new(5, 1),
+            error_min_requests: 20,
+            latency_multiplier: 3.0,
         }
     }
 }
@@ -81,6 +91,41 @@ impl WasteSignal {
     /// greater than — "past a daily threshold" per AC1b).
     pub(crate) fn is_anomalous(&self, t: &AlertThresholds) -> bool {
         self.flagged_requests_24h > t.waste_daily_threshold
+    }
+}
+
+/// ITEM-068: the tenant's 24h error rate (with a minimum-sample guard).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ErrorSignal {
+    pub requests_24h: i64,
+    pub errors_24h: i64,
+}
+
+impl ErrorSignal {
+    /// Anomalous when the rate strictly exceeds the threshold, but only once
+    /// there are enough requests that the rate means something. Compared as
+    /// `errors > rate x requests` so no float ever touches the decision.
+    pub(crate) fn is_anomalous(&self, t: &AlertThresholds) -> bool {
+        self.requests_24h >= t.error_min_requests
+            && Decimal::from(self.errors_24h) > t.error_rate * Decimal::from(self.requests_24h)
+    }
+}
+
+/// ITEM-068: the tenant's 24h p95 latency versus its own preceding-24h p95.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LatencySignal {
+    pub p95_ms: f64,
+    pub baseline_p95_ms: f64,
+}
+
+impl LatencySignal {
+    /// Anomalous when the current p95 exceeds the baseline multiple. Without a
+    /// baseline (a new tenant) nothing fires — there is nothing to regress from.
+    pub(crate) fn is_anomalous(&self, t: &AlertThresholds) -> bool {
+        let multiplier = t.latency_multiplier;
+        self.baseline_p95_ms > 0.0
+            && self.p95_ms > 0.0
+            && self.p95_ms > multiplier * self.baseline_p95_ms
     }
 }
 
@@ -130,6 +175,9 @@ pub const REFIRE_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
 /// Alert class identifiers persisted in `alerts.class`.
 pub const SPEND_VELOCITY: &str = "spend_velocity";
 pub const WASTE_SPIKE: &str = "waste_spike";
+/// ITEM-068: tenant-level metric-regression classes.
+pub const ERROR_RATE: &str = "error_rate";
+pub const LATENCY_REGRESSION: &str = "latency_regression";
 /// ITEM-047: per-entity monthly-limit classes; the episode class is
 /// `key_spend_limit:<uuid>` / `provider_spend_limit:<uuid>` so each entity has
 /// its own lifecycle.
@@ -163,19 +211,25 @@ pub async fn thresholds_for(
     pool: &sqlx::PgPool,
     tenant_id: uuid::Uuid,
 ) -> Result<AlertThresholds, Box<dyn std::error::Error + Send + Sync>> {
-    let row: Option<(rust_decimal::Decimal, i64, i32)> = sqlx::query_as(
-        "SELECT alert_spend_multiplier, alert_spend_floor_cents, alert_waste_daily_threshold
+    let row: Option<(rust_decimal::Decimal, i64, i32, rust_decimal::Decimal, i32, f64)> = sqlx::query_as(
+        "SELECT alert_spend_multiplier, alert_spend_floor_cents, alert_waste_daily_threshold,
+                alert_error_rate, alert_error_min_requests, alert_latency_multiplier::float8
          FROM tenant_configurations WHERE tenant_id = $1",
     )
     .bind(tenant_id)
     .fetch_optional(pool)
     .await?;
     Ok(row
-        .map(|(multiplier, floor_cents, waste)| AlertThresholds {
-            spend_multiplier: multiplier,
-            spend_floor_cents: floor_cents,
-            waste_daily_threshold: i64::from(waste),
-        })
+        .map(
+            |(multiplier, floor_cents, waste, error_rate, error_min, latency_mult)| AlertThresholds {
+                spend_multiplier: multiplier,
+                spend_floor_cents: floor_cents,
+                waste_daily_threshold: i64::from(waste),
+                error_rate,
+                error_min_requests: i64::from(error_min),
+                latency_multiplier: latency_mult,
+            },
+        )
         .unwrap_or_else(AlertThresholds::defaults))
 }
 
@@ -187,6 +241,10 @@ struct TenantSignals {
     window_cents: i64,
     baseline_per_hour_cents: i64,
     flagged_requests_24h: i64,
+    requests_24h: i64,
+    errors_24h: i64,
+    p95_ms: f64,
+    baseline_p95_ms: f64,
 }
 
 async fn aggregate_signals(
@@ -194,10 +252,10 @@ async fn aggregate_signals(
     tenant_id: uuid::Uuid,
 ) -> Result<TenantSignals, Box<dyn std::error::Error + Send + Sync>> {
     // Window = last SPEND_WINDOW_HOURS; baseline = the SPEND_BASELINE_HOURS
-    // *before* the window (a runaway does not dilute its own baseline); waste
-    // = flagged requests in the last WASTE_WINDOW_HOURS. The WHERE clamps the
-    // scan to the widest window; FILTERs pick the subsets.
-    let row: (i64, i64, i64) = sqlx::query_as(
+    // *before* the window (a runaway does not dilute its own baseline); waste,
+    // error rate and latency p95 over the trailing day, against the preceding
+    // day's p95 (ITEM-068). The WHERE clamps the scan to the widest window.
+    let row: (i64, i64, i64, i64, i64, f64, f64) = sqlx::query_as(
         "SELECT
             COALESCE(ROUND(SUM(upstream_cost_usd) FILTER
                 (WHERE created_at >= NOW() - $2 * INTERVAL '1 hour') * 100)::bigint, 0),
@@ -206,8 +264,18 @@ async fn aggregate_signals(
                   AND created_at < NOW() - $2 * INTERVAL '1 hour') * 100)::bigint, 0),
             COUNT(*) FILTER
                 (WHERE created_at >= NOW() - $4 * INTERVAL '1 hour'
-                  AND waste_detected IS NOT NULL AND waste_detected <> '{}'::jsonb)
-         FROM traces WHERE tenant_id = $1 AND created_at >= NOW() - $3 * INTERVAL '1 hour'",
+                  AND waste_detected IS NOT NULL AND waste_detected <> '{}'::jsonb),
+            COUNT(*) FILTER (WHERE created_at >= NOW() - $4 * INTERVAL '1 hour'),
+            COUNT(*) FILTER
+                (WHERE created_at >= NOW() - $4 * INTERVAL '1 hour' AND status_code >= 400),
+            COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY
+                CASE WHEN created_at >= NOW() - $4 * INTERVAL '1 hour'
+                     THEN total_duration_ms END)::float8, 0),
+            COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY
+                CASE WHEN created_at >= NOW() - ($4 * 2) * INTERVAL '1 hour'
+                      AND created_at < NOW() - $4 * INTERVAL '1 hour'
+                     THEN total_duration_ms END)::float8, 0)
+         FROM traces WHERE tenant_id = $1 AND created_at >= NOW() - ($4 * 2) * INTERVAL '1 hour'",
     )
     .bind(tenant_id)
     .bind(SPEND_WINDOW_HOURS)
@@ -219,6 +287,10 @@ async fn aggregate_signals(
         window_cents: row.0,
         baseline_per_hour_cents: row.1 / SPEND_BASELINE_HOURS,
         flagged_requests_24h: row.2,
+        requests_24h: row.3,
+        errors_24h: row.4,
+        p95_ms: row.5,
+        baseline_p95_ms: row.6,
     })
 }
 
@@ -396,6 +468,14 @@ pub async fn evaluate_tenant(
     let waste = WasteSignal {
         flagged_requests_24h: signals.flagged_requests_24h,
     };
+    let errors = ErrorSignal {
+        requests_24h: signals.requests_24h,
+        errors_24h: signals.errors_24h,
+    };
+    let latency = LatencySignal {
+        p95_ms: signals.p95_ms,
+        baseline_p95_ms: signals.baseline_p95_ms,
+    };
 
     let mut deliveries = Vec::new();
     for (class, anomalous, detail) in [
@@ -411,6 +491,22 @@ pub async fn evaluate_tenant(
             WASTE_SPIKE,
             waste.is_anomalous(&thresholds),
             serde_json::json!({"flagged_requests_24h": signals.flagged_requests_24h}),
+        ),
+        (
+            ERROR_RATE,
+            errors.is_anomalous(&thresholds),
+            serde_json::json!({
+                "requests_24h": signals.requests_24h,
+                "errors_24h": signals.errors_24h,
+            }),
+        ),
+        (
+            LATENCY_REGRESSION,
+            latency.is_anomalous(&thresholds),
+            serde_json::json!({
+                "p95_ms": signals.p95_ms,
+                "baseline_p95_ms": signals.baseline_p95_ms,
+            }),
         ),
     ] {
         if let Some(delivery) =
@@ -633,6 +729,7 @@ mod tests {
             spend_multiplier: Decimal::from_str_exact(mult).unwrap(),
             spend_floor_cents: floor,
             waste_daily_threshold: waste,
+            ..AlertThresholds::defaults()
         }
     }
 
@@ -715,6 +812,36 @@ mod tests {
         // A different per-tenant threshold applies.
         let strict = th("5", 100, 10);
         assert!(WasteSignal { flagged_requests_24h: 11 }.is_anomalous(&strict));
+    }
+
+    #[test]
+    fn error_rate_fires_only_past_the_threshold_with_enough_samples() {
+        let t = AlertThresholds::defaults(); // 50% over 20+ requests
+        // Below the sample floor: a 100% rate still does not fire.
+        assert!(!ErrorSignal { requests_24h: 19, errors_24h: 19 }.is_anomalous(&t));
+        // Exactly at the threshold rate is not "past" it.
+        assert!(!ErrorSignal { requests_24h: 100, errors_24h: 50 }.is_anomalous(&t));
+        // Past it, with enough samples: fires.
+        assert!(ErrorSignal { requests_24h: 100, errors_24h: 51 }.is_anomalous(&t));
+        // A zero-traffic window can never fire.
+        assert!(!ErrorSignal { requests_24h: 0, errors_24h: 0 }.is_anomalous(&t));
+    }
+
+    #[test]
+    fn latency_regression_needs_a_baseline_and_a_multiple() {
+        let t = AlertThresholds::defaults(); // 3x the preceding day's p95
+        assert!(
+            !LatencySignal { p95_ms: 500.0, baseline_p95_ms: 0.0 }.is_anomalous(&t),
+            "no baseline -> nothing to regress from"
+        );
+        assert!(
+            !LatencySignal { p95_ms: 250.0, baseline_p95_ms: 100.0 }.is_anomalous(&t),
+            "2.5x is under the 3x bar"
+        );
+        assert!(
+            LatencySignal { p95_ms: 350.0, baseline_p95_ms: 100.0 }.is_anomalous(&t),
+            "3.5x regresses"
+        );
     }
 
     #[test]
