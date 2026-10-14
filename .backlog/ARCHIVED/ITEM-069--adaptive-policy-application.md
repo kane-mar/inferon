@@ -31,3 +31,27 @@ the hot path does with it.
   hot path ignores fields it does not know.
 
 **Source:** 2026-10-12 adaptive-operation analysis; ITEM-064 split 2026-10-14.
+
+## Close-out — slice 1 (2026-10-14): provider health weights
+
+- `policy::provider_weight`: quality × latency (relative to the fleet median),
+  clamped to `[0.1, 1.0]`, **neutral below the sample floor** — too little data is
+  no opinion, never a silent penalty.
+- `analyse_providers` derives per-provider weights from the trailing week's
+  telemetry (error rate + p95); `run_adaptation` publishes them alongside the
+  threshold (`tenant_policies.provider_weights`, migration 033).
+- `providers::providers_for_model` lists every provider that owns a model;
+  `resolve_route` picks the **highest-weighted** one when the policy has weights
+  (a degrading provider is demoted), else the static ordering.
+- Inherits ITEM-064's guardrails (bounded, kill switch, rollback) and outcomes
+  stay attributed via `traces.policy_version`.
+- Rust **298 → 301** tests, clippy clean. Commit `b586d66`; CI `38655406264`
+  (test+web+deploy) green.
+- **Live**: policy **v8** for kane-mar carries
+  `provider_weights = {…: 1.0, 5c63dbbb: 0.407, …}` — the degrading Deepseek
+  provider (36% errors, higher p95) was demoted while the small-sample providers
+  stayed neutral at 1.0.
+- **Observed**: over several ticks the adapted threshold walked to ~0 (bounded,
+  but a non-zero floor may be preferable — a tuning consideration, not a defect).
+- **AC2 (task-cluster model preference) is split to ITEM-072** — it depends on
+  the staged ITEM-029/030.
