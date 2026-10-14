@@ -529,6 +529,7 @@ async fn proxy_chat_completions(
         cache_affinity: None,
         policy_version: None,
         proxy_ms: None,
+        wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -632,7 +633,11 @@ async fn proxy_chat_completions(
     for index in 0..allowed.len() {
         let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
         let model = model.clone();
-        let body = match budget::apply_model_override(&meta.raw_prompt, &model) {
+        // ITEM-067: the target's wire-format capability is per attempt, so a
+        // fallback to a provider that honours json_schema keeps the contract.
+        let downgrade_schema = guard::request_schema(&meta.raw_prompt).is_some()
+            && !providers::supports_json_schema(&attempt_route.kind, &model);
+        let body = match budget::forward_body(&meta.raw_prompt, &model, downgrade_schema) {
             Ok(bytes) => bytes,
             Err(e) => {
                 tracing::error!("payload reserialization failed: {e}");
@@ -643,6 +648,7 @@ async fn proxy_chat_completions(
                 );
             }
         };
+        meta.wire_format = downgrade_schema.then_some("json_object");
         let attempt = apply_provider_headers(
             state
                 .http_client
@@ -796,6 +802,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         cache_affinity: None,
         policy_version: None,
         proxy_ms: None,
+        wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -980,6 +987,9 @@ struct RequestMeta {
     policy_version: Option<i64>,
     /// ITEM-066: the proxy's own pre-upstream time (request-received → dispatch).
     proxy_ms: Option<i64>,
+    /// ITEM-067: set when the wire format was downgraded (json_schema →
+    /// json_object) because the target cannot honour a schema contract.
+    wire_format: Option<&'static str>,
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
@@ -1340,7 +1350,11 @@ async fn fallback_to_frontier(
     reason: GuardReason,
 ) -> Response {
     let frontier = guard::fallback_model(&guard_emit.meta.raw_prompt);
-    let replay_body = match budget::apply_model_override(&guard_emit.meta.raw_prompt, &frontier) {
+    // ITEM-067: the replay to the frontier is normalized the same way — a single
+    // DeepSeek deployment cannot accept json_schema at all.
+    let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
+        && !providers::supports_json_schema(&route.kind, &frontier);
+    let replay_body = match budget::forward_body(&guard_emit.meta.raw_prompt, &frontier, downgrade) {
         Ok(body) => body,
         Err(e) => {
             tracing::error!("guard fallback payload reserialization failed: {e}");
@@ -1413,6 +1427,15 @@ async fn fallback_to_frontier(
                 }
             };
             let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+            // ITEM-067 AC4: never serve an invalid replay silently — record a
+            // `fallback_invalid` event when the frontier also violates the schema.
+            let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
+            if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
+                guard_emit.note_guard(
+                    Some(&frontier),
+                    guard::guard_event("fallback_invalid", reason, &guarded_model, None),
+                );
+            }
             guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
             let mut response = Response::new(Body::from(bytes));
             *response.status_mut() = StatusCode::OK;
@@ -1465,7 +1488,11 @@ impl BufferedGuard {
     /// request_model to the model that ultimately serves — the cost basis),
     /// None when the cheap model itself served. Must run before any await
     /// after the guard verdict so a client abort still records the event.
-    fn note_guard(&self, served: Option<&str>, event: Value) {
+    fn note_guard(&self, served: Option<&str>, mut event: Value) {
+        // ITEM-067: surface a downgraded wire format on the guard event.
+        if let Some(wire_format) = self.meta.wire_format {
+            event["wire_format"] = json!(wire_format);
+        }
         *self.retarget_model.borrow_mut() = served.map(str::to_string);
         *self.guard_event.borrow_mut() = Some(event);
     }

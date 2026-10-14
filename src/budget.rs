@@ -322,6 +322,23 @@ pub fn apply_model_override(payload: &Value, model: &str) -> Result<Vec<u8>, ser
     forwarded["model"] = serde_json::Value::String(model.to_string());
     serde_json::to_vec(&forwarded)
 }
+
+/// The upstream body for `model` (ITEM-067): the client's payload with `model`
+/// set, and — when the target cannot honour a `json_schema` contract —
+/// `response_format` downgraded to `json_object`. The guard still holds the real
+/// schema from the original payload and validates the response against it.
+pub fn forward_body(
+    payload: &Value,
+    model: &str,
+    downgrade_schema: bool,
+) -> Result<Vec<u8>, serde_json::Error> {
+    let mut forwarded = payload.clone();
+    forwarded["model"] = serde_json::Value::String(model.to_string());
+    if downgrade_schema {
+        forwarded["response_format"] = serde_json::json!({"type": "json_object"});
+    }
+    serde_json::to_vec(&forwarded)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +457,28 @@ mod tests {
         let out: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(out["model"], "gpt-4o-mini");
         assert_eq!(out["messages"], payload["messages"], "only model changes");
+    }
+
+    #[test]
+    fn forward_body_sets_model_and_optionally_downgrades_the_wire_format() {
+        let payload = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "response_format": {"type": "json_schema", "json_schema": {"name": "a", "schema": {}}},
+            "messages": []
+        });
+        // No downgrade: the contract is forwarded unchanged.
+        let kept: Value =
+            serde_json::from_slice(&forward_body(&payload, "gpt-4o", false).unwrap()).unwrap();
+        assert_eq!(kept["model"], "gpt-4o");
+        assert_eq!(kept["response_format"]["type"], "json_schema");
+        // Downgrade: model set, wire format json_object.
+        let down: Value =
+            serde_json::from_slice(&forward_body(&payload, "deepseek-flash", true).unwrap())
+                .unwrap();
+        assert_eq!(down["model"], "deepseek-flash");
+        assert_eq!(
+            down["response_format"],
+            serde_json::json!({"type": "json_object"})
+        );
     }
 }

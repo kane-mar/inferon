@@ -96,6 +96,14 @@ pub fn is_anthropic(kind: &str) -> bool {
     kind == ANTHROPIC
 }
 
+/// Whether a provider of `kind` serving `model` can honour a `json_schema`
+/// contract. DeepSeek only supports `json_object`; an unknown compatible
+/// gateway is assumed to support it, so a request is never downgraded when it
+/// might be fine.
+pub fn supports_json_schema(kind: &str, model: &str) -> bool {
+    !(kind == "deepseek" || model.starts_with("deepseek"))
+}
+
 pub fn is_supported_kind(kind: &str) -> bool {
     PROVIDER_KINDS.contains(&kind)
 }
@@ -784,6 +792,17 @@ mod tests {
         assert!(is_anthropic("anthropic"));
         assert!(!is_anthropic("openai-compatible"));
         assert_eq!(default_name("anthropic"), "Anthropic");
+    }
+
+    #[test]
+    fn json_schema_support_is_conservative() {
+        // DeepSeek rejects json_schema; the model family is checked too, so a
+        // deepseek model behind a compatible gateway is still downgraded.
+        assert!(!supports_json_schema("deepseek", "deepseek-chat"));
+        assert!(!supports_json_schema("openai-compatible", "deepseek-v4-pro"));
+        // OpenAI (and unknown compatible gateways) support it: never downgrade.
+        assert!(supports_json_schema("openai", "gpt-4o"));
+        assert!(supports_json_schema("openai-compatible", "llama-3.1-70b"));
     }
 
     #[tokio::test]
