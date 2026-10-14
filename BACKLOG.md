@@ -36,7 +36,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **done — slice 1 (2026-10-14)** — versioned/auditable/reversible `tenant_policies` (migration 029); bounded adaptive router threshold from downgraded-tier quality; hot-path read + `traces.policy_version`; operator freeze/rollback. Live: published v1 (0.35→0.30) with evidence. Application beyond the threshold is ITEM-069 |
 | ITEM-065 | Edge node mode & config sync (hybrid data plane — slice 2) | feature | **done — cloud half (2026-10-14)** — `edge_nodes` (migration 030) + enrollment/revoke (token once); node-authenticated versioned `GET /v1/edge/config` (key hashes, controls, policy, models); node-authed trace ingest + heartbeat; `/dashboard/edge`. Live: enroll→config→ingest 202→revoke 401. Edge runtime is ITEM-070 |
 | ITEM-066 | Proxy overhead split & latency regression alerts | improvement | **done (2026-10-14)** — `traces.proxy_ms` (migration 031) + `proxy_p50/p95_ms` in the summary; dashboard shows the overhead share. Live: proxy 26ms vs total 1172ms. Latency regression alerts folded into ITEM-068 |
-| ITEM-067 | Structured-output normalization (guard on the default provider) | feature | **new** — `json_schema`→`json_object` where unsupported (DeepSeek) with the schema kept for the guard; validate the frontier replay. Finding 2026-10-13 |
+| ITEM-067 | Structured-output normalization (guard on the default provider) | feature | **done (2026-10-14)** — `json_schema`→`json_object` where unsupported (DeepSeek) with the schema kept for the guard; per-attempt; the frontier replay is normalized + validated (`fallback_invalid`). Live: deepseek-flash schema request 200 + `wire_format: json_object` |
 | ITEM-068 | Metric-regression alerting (error rate, provider health, latency) | improvement | **new** — alert when the error rate (overall/per class), a provider's health, or a p95 latency regresses past a per-tenant threshold; reuse the ITEM-020 lifecycle |
 | ITEM-069 | Adaptive policy application (provider weights & task-cluster preference) | feature | **new** — extend the ITEM-064 policy with provider weights (ITEM-061) and per task-cluster model preference (ITEM-029/030); bounded, holdout-gated, kill-switchable, measured |
 | ITEM-070 | Edge runtime (`--edge` mode) | feature | **new** — the on-prem binary: local provider, poll `GET /v1/edge/config`, local auth by synced key hashes, buffered telemetry shipping with backoff, explicit offline behaviour. Split from ITEM-065 |
@@ -46,11 +46,10 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-14 (metrics + cache affinity + adaptive policy slice 1 + edge control plane + proxy overhead done)_ —
-work the open set **top-down**: next **ITEM-067** (structured-output
-normalization), **ITEM-068** (metric-regression alerting), **ITEM-069** (adaptive
-policy application), **ITEM-070** (edge runtime), then the staged OmniRouting
-cluster **029–032**.
+_Last updated: 2026-10-14 (metrics + cache affinity + adaptive policy slice 1 + edge control plane + proxy overhead + structured-output normalization done)_ —
+work the open set **top-down**: next **ITEM-068** (metric-regression alerting),
+**ITEM-069** (adaptive policy application), **ITEM-070** (edge runtime), then the
+staged OmniRouting cluster **029–032**.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

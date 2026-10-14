@@ -54,3 +54,26 @@ response against it. The provider guarantees "valid JSON", the guard guarantees
 
 **Source:** 2026-10-13 — schema-guard finding surfaced while live-verifying the
 `is_cheap_tier` fix (commit `4e2dd88`). See the daily log entry of the same date.
+
+## Close-out (2026-10-14)
+
+- `providers::supports_json_schema(kind, model)`: **false** for deepseek (provider
+  kind or model family), **true** otherwise — an unknown compatible gateway is
+  never downgraded.
+- `budget::forward_body(payload, model, downgrade)`: sets the model and, when the
+  target cannot honour a schema contract, downgrades `response_format` to
+  `json_object`. The **original** payload (and therefore the guard's schema) is
+  unchanged.
+- The downgrade is decided **per attempt**, so a fallback to a provider that
+  supports `json_schema` keeps the contract; `meta.wire_format` records it and the
+  guard event carries `wire_format`.
+- The frontier replay is normalized the same way — and now **validated**: a
+  replay that also violates the schema records a `fallback_invalid` guard event
+  instead of being served silently (AC4).
+- Rust **294 → 296** tests, clippy clean. Commit `2696e62`; CI `38518067864`
+  (test+web+deploy) green.
+- **Live**: a `deepseek-flash` + `json_schema` + stream request returned **200**
+  (it used to 400) and traced
+  `guard_event = {outcome: "flushed", wire_format: "json_object",
+  guarded_model: "deepseek-flash"}` — the guard now validates on the default
+  provider.
