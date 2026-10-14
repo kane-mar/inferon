@@ -33,22 +33,23 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-061 | Provider experience metrics | improvement | **done (2026-10-14)** — per-provider avg/p95 TTFT + total duration + error rate in `by-provider`; dashboard provider table shows error rate + p95. Live: Deepseek 36.4% errors, p95 TTFT 2394ms. Degradation alerting folded into ITEM-068 |
 | ITEM-062 | Product activation & retention metrics | improvement | **done (2026-10-14)** — operator `/api/operator/activation`: active tenants/keys, requests per developer, WoW trend, first-request funnel; operator console Engagement card + funnel. Live: 14 keys / 2 tenants / 1776 requests |
 | ITEM-063 | Cache-affinity routing | feature | **done (2026-10-14)** — `prompt_affinity` + `keep_warm` (hit price vs chosen miss price), 30m TTL; warm targets recorded by the sink; proxy keeps the warm model over a downgrade and traces `cache_affinity`; by-prompt Cached % + summary `cache_affinity_requests`. Live: kept v4-pro over the flash downgrade |
-| ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **new** — versioned, auditable, reversible policy derived from telemetry and served to the hot path; bounded, holdout-gated, kill-switchable |
+| ITEM-064 | Adaptive policy loop (telemetry → policy → hot path) | feature | **done — slice 1 (2026-10-14)** — versioned/auditable/reversible `tenant_policies` (migration 029); bounded adaptive router threshold from downgraded-tier quality; hot-path read + `traces.policy_version`; operator freeze/rollback. Live: published v1 (0.35→0.30) with evidence. Application beyond the threshold is ITEM-069 |
 | ITEM-065 | Edge node mode & config sync (hybrid data plane — slice 2) | feature | **new** — edge mode against a local provider, revocable edge token + enrollment, versioned config sync, telemetry shipping via ITEM-052, explicit offline behaviour, node health |
 | ITEM-066 | Proxy overhead split & latency regression alerts | improvement | **new** — expose proxy time vs upstream time; alert on a p95 regression. Split from ITEM-056 |
 | ITEM-067 | Structured-output normalization (guard on the default provider) | feature | **new** — `json_schema`→`json_object` where unsupported (DeepSeek) with the schema kept for the guard; validate the frontier replay. Finding 2026-10-13 |
 | ITEM-068 | Error-rate alerting (ITEM-057 AC4) | improvement | **new** — fire an alert when the error rate (overall or per class) crosses a threshold; reuse the ITEM-020 lifecycle |
+| ITEM-069 | Adaptive policy application (provider weights & task-cluster preference) | feature | **new** — extend the ITEM-064 policy with provider weights (ITEM-061) and per task-cluster model preference (ITEM-029/030); bounded, holdout-gated, kill-switchable, measured |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-14 (metric cluster ITEM-055..063 done; ITEM-063 cache affinity closed)_ —
-work the open set **top-down**: next **ITEM-064** (adaptive policy loop), then
-**ITEM-065** (edge node mode), **ITEM-066** (overhead/alerts), **ITEM-067**
-(structured-output normalization), **ITEM-068** (error-rate + per-provider
-alerting), then the staged OmniRouting cluster **029–032**.
+_Last updated: 2026-10-14 (metric cluster + cache affinity + adaptive policy slice 1 done)_ —
+work the open set **top-down**: next **ITEM-065** (edge node mode), **ITEM-066**
+(overhead/alerts), **ITEM-067** (structured-output normalization), **ITEM-068**
+(error-rate + per-provider alerting), **ITEM-069** (adaptive policy application),
+then the staged OmniRouting cluster **029–032**.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

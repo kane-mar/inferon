@@ -39,3 +39,28 @@ provider health), so a closed loop is possible.
 
 **Source:** 2026-10-12 adaptive-operation analysis — apply intelligence to the
 running operation by closing the observation → policy → hot-path loop.
+
+## Close-out — slice 1 (2026-10-14): governance + adaptive router threshold
+
+- `policy::recommend_threshold`: a **bounded** ±0.05 step, a 20-request minimum
+  sample, clamped to [0.0, 0.9] — derived from the quality of what the router
+  already downshifted versus the tenant's baseline.
+- `tenant_policies` (migration 029) is **append-only**: publish / rollback /
+  freeze, each version carrying the **evidence** that justified it.
+  `PolicyStore` seam (Postgres + in-memory). `run_adaptation` is a scheduled pass
+  (main.rs, 15m) that publishes only when the bounded step moves.
+- The proxy reads the active policy **per request** and passes its threshold to
+  the router (no redeploy); `traces.policy_version` attributes the outcome, so a
+  bad policy is visible. Static config applies when the policy is frozen.
+- Operator governance: `GET /operator/policy/:tenant`, `POST .../freeze` (kill
+  switch), `POST .../rollback/:version`.
+- Rust **284 → 290** tests, clippy clean. Commit `7715e1b`; CI `38505859426` green.
+- **Live**: with 30 downgraded / 28 successful requests the scheduled pass
+  published **policy v1** — `router threshold 0.350 → 0.300` with evidence
+  `{reason: router_threshold_step, requests: 50, baseline_success: 0.8, ...}`; a
+  follow-up request traced `policy_version = 1`; `freeze` returned the policy to
+  null (static config). With too little evidence (5 downgraded) the loop
+  correctly published nothing.
+- **Split**: policy *application* beyond the threshold — provider weights and
+  task-cluster model preference, which depend on staged ITEM-029/030 — is
+  **ITEM-069**. This item is the loop and its governance, as scoped.
