@@ -26,12 +26,39 @@ pub const MAX_THRESHOLD: f64 = 0.9;
 /// hurting quality.
 const QUALITY_MARGIN: f64 = 0.05;
 
+/// A provider's health weight in `[0.1, 1.0]`: better quality and lower latency
+/// (relative to the fleet median) weigh more, so a degrading provider is
+/// demoted. Neutral (1.0) below the sample floor — too little data is no
+/// opinion, never a silent penalty.
+pub fn provider_weight(
+    requests: i64,
+    errors: i64,
+    p95_ms: f64,
+    median_p95_ms: f64,
+    min_sample: i64,
+) -> f64 {
+    if requests < min_sample {
+        return 1.0;
+    }
+    let quality = 1.0 - (errors as f64 / requests as f64);
+    let latency = if p95_ms > 0.0 && median_p95_ms > 0.0 {
+        (median_p95_ms / p95_ms).clamp(0.1, 1.0)
+    } else {
+        1.0
+    };
+    (quality * latency).clamp(0.1, 1.0)
+}
+
 /// One stored policy version for a tenant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Policy {
     pub version: i64,
     /// The adaptive router threshold (None = leave the static config alone).
     pub router_threshold: Option<f64>,
+    /// ITEM-069: per-provider health weights, keyed by provider id. Absent
+    /// (the default) means "no opinion" — the static ordering applies.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub provider_weights: std::collections::BTreeMap<String, f64>,
     /// Human-readable evidence for this version (why it changed).
     pub evidence: serde_json::Value,
     /// When true (the default), the hot path uses this policy. A kill switch
@@ -158,32 +185,46 @@ impl PostgresPolicyStore {
 #[async_trait::async_trait]
 impl PolicyStore for PostgresPolicyStore {
     async fn active(&self, tenant_id: Uuid) -> StoreResult<Option<Policy>> {
-        let row: Option<(i64, Option<f64>, serde_json::Value, bool)> = sqlx::query_as(
-            "SELECT version, router_threshold, evidence, enabled
+        let row: Option<(
+            i64,
+            Option<f64>,
+            serde_json::Value,
+            bool,
+            sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+        )> = sqlx::query_as(
+            "SELECT version, router_threshold, evidence, enabled, provider_weights
              FROM tenant_policies WHERE tenant_id = $1 AND enabled
              ORDER BY version DESC LIMIT 1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(version, router_threshold, evidence, enabled)| Policy {
+        Ok(row.map(|(version, router_threshold, evidence, enabled, weights)| Policy {
             version,
             router_threshold,
             evidence,
             enabled,
+            provider_weights: weights.0,
         }))
     }
 
     async fn publish(&self, tenant_id: Uuid, policy: Policy) -> StoreResult<Policy> {
-        let row: (i64, Option<f64>, serde_json::Value, bool) = sqlx::query_as(
-            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled)
-             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4)
-             RETURNING version, router_threshold, evidence, enabled",
+        let row: (
+            i64,
+            Option<f64>,
+            serde_json::Value,
+            bool,
+            sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+        ) = sqlx::query_as(
+            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled, provider_weights)
+             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4, $5)
+             RETURNING version, router_threshold, evidence, enabled, provider_weights",
         )
         .bind(tenant_id)
         .bind(policy.router_threshold)
         .bind(sqlx::types::Json(policy.evidence))
         .bind(policy.enabled)
+        .bind(sqlx::types::Json(policy.provider_weights.clone()))
         .fetch_one(&self.pool)
         .await?;
         Ok(Policy {
@@ -191,19 +232,24 @@ impl PolicyStore for PostgresPolicyStore {
             router_threshold: row.1,
             evidence: row.2,
             enabled: row.3,
+            provider_weights: row.4.0,
         })
     }
 
     async fn rollback(&self, tenant_id: Uuid, version: i64) -> StoreResult<Option<Policy>> {
-        let source: Option<(Option<f64>, serde_json::Value)> = sqlx::query_as(
-            "SELECT router_threshold, evidence FROM tenant_policies
+        let source: Option<(
+            Option<f64>,
+            serde_json::Value,
+            sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+        )> = sqlx::query_as(
+            "SELECT router_threshold, evidence, provider_weights FROM tenant_policies
              WHERE tenant_id = $1 AND version = $2",
         )
         .bind(tenant_id)
         .bind(version)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((router_threshold, evidence)) = source else {
+        let Some((router_threshold, evidence, weights)) = source else {
             return Ok(None);
         };
         self.publish(
@@ -213,6 +259,7 @@ impl PolicyStore for PostgresPolicyStore {
                 router_threshold,
                 evidence,
                 enabled: true,
+                provider_weights: weights.0,
             },
         )
         .await
@@ -296,26 +343,83 @@ pub async fn run_adaptation(pool: &sqlx::PgPool) {
             .and_then(|policy| policy.router_threshold)
             .or(configured)
             .unwrap_or(crate::router::DOWNGRADE_THRESHOLD);
-        match analyse(pool, tenant_id, current).await {
-            Ok(Some((next, evidence))) => {
-                let policy = Policy {
-                    version: 0,
-                    router_threshold: Some(next),
-                    evidence,
-                    enabled: true,
-                };
-                match store.publish(tenant_id, policy).await {
-                    Ok(published) => tracing::info!(
-                        "adaptive policy v{} for {tenant_id}: router threshold {current:.3} -> {next:.3}",
-                        published.version
-                    ),
-                    Err(e) => tracing::warn!("adaptive policy publish failed for {tenant_id}: {e}"),
-                }
+        let threshold = analyze_threshold(pool, tenant_id, current).await;
+        let provider_weights = match analyse_providers(pool, tenant_id).await {
+            Ok(weights) => weights,
+            Err(e) => {
+                tracing::warn!("adaptive provider analysis failed for {tenant_id}: {e}");
+                continue;
             }
-            Ok(None) => {}
-            Err(e) => tracing::warn!("adaptive policy analysis failed for {tenant_id}: {e}"),
+        };
+        let unchanged = active.as_ref().is_some_and(|policy| {
+            policy.router_threshold == Some(threshold) && policy.provider_weights == provider_weights
+        });
+        if unchanged {
+            continue;
+        }
+        let evidence = serde_json::json!({
+            "reason": "adaptive_step",
+            "from_threshold": active.as_ref().and_then(|policy| policy.router_threshold),
+            "to_threshold": threshold,
+            "provider_weights": provider_weights.clone(),
+        });
+        let policy = Policy {
+            version: 0,
+            router_threshold: Some(threshold),
+            provider_weights,
+            evidence,
+            enabled: true,
+        };
+        match store.publish(tenant_id, policy).await {
+            Ok(published) => tracing::info!(
+                "adaptive policy v{} for {tenant_id}: threshold {current:.3} -> {threshold:.3}",
+                published.version
+            ),
+            Err(e) => tracing::warn!("adaptive policy publish failed for {tenant_id}: {e}"),
         }
     }
+}
+
+/// The threshold recommendation: the moved value, or the current one when there
+/// is not enough evidence to move.
+async fn analyze_threshold(pool: &sqlx::PgPool, tenant_id: Uuid, current: f64) -> f64 {
+    match analyse(pool, tenant_id, current).await {
+        Ok(Some((next, _))) => next,
+        _ => current,
+    }
+}
+
+/// Per-provider health weights from the trailing week's telemetry: quality and
+/// latency (relative to the fleet median) decide the weight (ITEM-069).
+pub async fn analyse_providers(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+) -> StoreResult<std::collections::BTreeMap<String, f64>> {
+    let rows: Vec<(Uuid, i64, i64, f64)> = sqlx::query_as(
+        "SELECT t.provider_id,
+                COUNT(*),
+                COUNT(*) FILTER (WHERE t.status_code >= 400),
+                COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY t.total_duration_ms)::float8, 0)
+         FROM traces t
+         WHERE t.tenant_id = $1 AND t.provider_id IS NOT NULL
+           AND t.created_at >= NOW() - INTERVAL '7 days'
+         GROUP BY t.provider_id",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    let mut p95s: Vec<f64> = rows.iter().map(|row| row.3).filter(|p95| *p95 > 0.0).collect();
+    p95s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = p95s.get(p95s.len() / 2).copied().unwrap_or(0.0);
+    Ok(rows
+        .into_iter()
+        .map(|(provider_id, requests, errors, p95)| {
+            (
+                provider_id.to_string(),
+                provider_weight(requests, errors, p95, median, MIN_SAMPLE),
+            )
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -352,18 +456,34 @@ mod tests {
         assert_eq!(recommend_threshold(0.9, 100, 10, Some(0.9)), 0.9);
     }
 
+    #[test]
+    fn provider_weight_is_neutral_without_enough_data() {
+        // Below the sample floor: no opinion, never a silent penalty.
+        assert_eq!(provider_weight(9, 9, 5000.0, 100.0, 20), 1.0);
+    }
+
+    #[test]
+    fn provider_weight_rewards_quality_and_speed() {
+        // Perfect quality at the median latency -> full weight.
+        assert!(approx(provider_weight(100, 0, 100.0, 100.0, 20), 1.0));
+        // 50% errors and twice the median latency -> 0.5 x 0.5 = 0.25.
+        assert!(approx(provider_weight(100, 50, 200.0, 100.0, 20), 0.25));
+        // A healthy provider is never demoted below the floor.
+        assert!(approx(provider_weight(100, 100, 100.0, 100.0, 20), 0.1));
+    }
+
     #[tokio::test]
     async fn versions_are_append_only_and_rollback_restores() {
         let tenant = Uuid::new_v4();
         let store = InMemoryPolicyStore::default();
         assert_eq!(store.active(tenant).await.unwrap(), None);
         let v1 = store
-            .publish(tenant, Policy { version: 0, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true })
+            .publish(tenant, Policy { version: 0, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v1.version, 1);
         let v2 = store
-            .publish(tenant, Policy { version: 0, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true })
+            .publish(tenant, Policy { version: 0, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v2.version, 2);

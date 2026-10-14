@@ -350,13 +350,40 @@ fn apply_provider_headers(
     request
 }
 
+/// The adaptive policy's health weight for a provider (1.0 = no opinion).
+fn weight_of(weights: &std::collections::BTreeMap<String, f64>, id: &Uuid) -> f64 {
+    weights.get(&id.to_string()).copied().unwrap_or(1.0)
+}
+
 async fn resolve_route(
     state: &Arc<AppState>,
     tenant: &Tenant,
     model: Option<&str>,
     surface: Surface,
+    weights: Option<&std::collections::BTreeMap<String, f64>>,
 ) -> Result<Route, Response> {
-    match state.provider_store.resolve_for(tenant.id, model).await {
+    // ITEM-069: when several providers own the model, the adaptive policy's
+    // health weights pick the healthiest; otherwise the store's own ordering.
+    let preferred = match (model, weights) {
+        (Some(model), Some(weights)) if !weights.is_empty() => state
+            .provider_store
+            .providers_for_model(tenant.id, model)
+            .await
+            .ok()
+            .and_then(|ids| {
+                ids.into_iter().max_by(|a, b| {
+                    weight_of(weights, a)
+                        .partial_cmp(&weight_of(weights, b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            }),
+        _ => None,
+    };
+    let resolved = match preferred {
+        Some(id) => state.provider_store.resolve_provider(tenant.id, id).await,
+        None => state.provider_store.resolve_for(tenant.id, model).await,
+    };
+    match resolved {
         Ok(Some(provider)) => {
             // ITEM-050 AC5: never cross surfaces — an Anthropic provider serves
             // only /v1/messages, an OpenAI-shaped one only /v1/chat/completions.
@@ -448,6 +475,7 @@ async fn build_model_chain(
     route: &Route,
     primary: String,
     fallbacks: Vec<String>,
+    weights: Option<&std::collections::BTreeMap<String, f64>>,
 ) -> Vec<(String, Route)> {
     let mut seen = std::collections::HashSet::new();
     let mut chain = Vec::new();
@@ -458,7 +486,7 @@ async fn build_model_chain(
         let model_route = if model == primary {
             route.clone()
         } else {
-            resolve_route(state, tenant, Some(&model), Surface::OpenAi)
+            resolve_route(state, tenant, Some(&model), Surface::OpenAi, weights)
                 .await
                 .unwrap_or_else(|_| route.clone())
         };
@@ -533,7 +561,26 @@ async fn proxy_chat_completions(
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
-    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::OpenAi).await {
+    // ITEM-064/069: read the adaptive policy once — it supplies both the router
+    // threshold and the provider health weights.
+    let policy = match state.policy_store.active(tenant_id).await {
+        Ok(policy) => policy.filter(|policy| policy.enabled),
+        Err(e) => {
+            tracing::warn!("policy lookup failed: {e}");
+            None
+        }
+    };
+    meta.policy_version = policy.as_ref().map(|policy| policy.version);
+    let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
+    let route = match resolve_route(
+        &state,
+        &tenant,
+        Some(&meta.model),
+        Surface::OpenAi,
+        policy_weights,
+    )
+    .await
+    {
         Ok(route) => route,
         Err(resp) => return resp,
     };
@@ -551,15 +598,6 @@ async fn proxy_chat_completions(
         return resp;
     }
 
-    // ITEM-064: the adaptive policy may override the router threshold.
-    let policy = match state.policy_store.active(tenant_id).await {
-        Ok(policy) => policy.filter(|policy| policy.enabled),
-        Err(e) => {
-            tracing::warn!("policy lookup failed: {e}");
-            None
-        }
-    };
-    meta.policy_version = policy.as_ref().map(|policy| policy.version);
     let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
     // Budget breaker (ITEM-016): its fallback model wins over the router;
     // a hard-cap rejection is traced and answered 429 before any upstream call.
@@ -623,7 +661,7 @@ async fn proxy_chat_completions(
             Vec::new()
         }
     };
-    let allowed = build_model_chain(&state, &tenant, &route, primary.clone(), fallbacks).await;
+    let allowed = build_model_chain(&state, &tenant, &route, primary.clone(), fallbacks, policy_weights).await;
 
     let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
@@ -806,7 +844,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
-    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic).await {
+    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic, None).await {
         Ok(route) => route,
         Err(resp) => return resp,
     };    meta.provider_id = route.provider_id;
@@ -2556,6 +2594,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 router_threshold: Some(0.0),
                 evidence: json!({}),
                 enabled: true,
+                provider_weights: Default::default(),
             },
         )
         .await
@@ -2771,6 +2810,58 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[tokio::test]
+    async fn policy_weights_pick_the_healthier_provider_for_a_model() {
+        // ITEM-069: two providers own the same model; the policy's health weight
+        // demotes the default (first-inserted) one, so the other is chosen.
+        use crate::providers::{InMemoryProviderStore, NewProvider, ProviderStore};
+        let tenant = seeded_tenant();
+        let store = std::sync::Arc::new(InMemoryProviderStore::default());
+        let new = |name: &str, base: &str| NewProvider {
+            kind: "openai".to_string(),
+            name: name.to_string(),
+            base_url: base.to_string(),
+            key: format!("sk-{name}"),
+            metadata: Default::default(),
+            spend_limit_cents: 0,
+        };
+        let a = store
+            .insert(tenant.id, &new("a", "https://a.test/v1"))
+            .await
+            .unwrap();
+        let b = store
+            .insert(tenant.id, &new("b", "https://b.test/v1"))
+            .await
+            .unwrap();
+        store.record_models(a, &["shared-model".to_string()]).await.unwrap();
+        store.record_models(b, &["shared-model".to_string()]).await.unwrap();
+        let state = route_state(store.clone());
+
+        // Without weights, the default (first-inserted) provider wins.
+        let plain = resolve_route(&state, &tenant, Some("shared-model"), Surface::OpenAi, None)
+            .await
+            .unwrap();
+        assert_eq!(plain.provider_id, Some(a), "default ordering");
+
+        // A weight that demotes `a` promotes `b`.
+        let weights: std::collections::BTreeMap<String, f64> =
+            [(a.to_string(), 0.1), (b.to_string(), 1.0)].into_iter().collect();
+        let weighted = resolve_route(
+            &state,
+            &tenant,
+            Some("shared-model"),
+            Surface::OpenAi,
+            Some(&weights),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            weighted.url, "https://b.test/v1/chat/completions",
+            "the healthier provider wins"
+        );
+        assert_eq!(weighted.provider_id, Some(b));
+    }
+
+    #[tokio::test]
     async fn a_tenant_provider_overrides_the_shared_key() {
         let tenant = seeded_tenant();
         let state = route_state(std::sync::Arc::new(
@@ -2780,7 +2871,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 "sk-my-provider",
             ),
         ));
-        let route = resolve_route(&state, &tenant, None, Surface::OpenAi).await.expect("route");
+        let route = resolve_route(&state, &tenant, None, Surface::OpenAi, None).await.expect("route");
         assert_eq!(route.url, "https://my-provider.test/v1/chat/completions");
         assert_eq!(route.key, "sk-my-provider", "the tenant's own key wins");
         assert!(route.provider_id.is_some(), "ITEM-047: provider is attributed");
@@ -2792,7 +2883,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let state = route_state(std::sync::Arc::new(
             crate::providers::InMemoryProviderStore::default(),
         ));
-        let route = resolve_route(&state, &tenant, None, Surface::OpenAi).await.expect("route");
+        let route = resolve_route(&state, &tenant, None, Surface::OpenAi, None).await.expect("route");
         assert_eq!(route.url, "https://shared.test/v1/chat/completions");
         assert_eq!(route.key, MASTER_KEY);
         assert!(route.provider_id.is_none(), "shared key = no provider");

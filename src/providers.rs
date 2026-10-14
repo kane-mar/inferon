@@ -173,6 +173,9 @@ pub trait ProviderStore: Send + Sync {
     /// The tenant's provider that advertises `model`, preferring its default
     /// provider. `None` when no provider advertises it.
     async fn provider_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Option<Uuid>>;
+    /// Every provider advertising `model`, best-first (default, then oldest).
+    /// The adaptive policy uses this to pick the healthiest (ITEM-069).
+    async fn providers_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Vec<Uuid>>;
     /// The credential for the request path: the provider that advertises
     /// `model`, else the tenant's default provider. `None` when the tenant has
     /// no provider (shared platform key).
@@ -436,6 +439,20 @@ impl ProviderStore for PostgresProviderStore {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|(id,)| id))
+    }
+
+    async fn providers_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Vec<Uuid>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT p.id FROM providers p
+             JOIN provider_models pm ON pm.provider_id = p.id
+             WHERE p.tenant_id = $1 AND pm.model_id = $2
+             ORDER BY p.is_default DESC, p.created_at",
+        )
+        .bind(tenant_id)
+        .bind(model)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
     async fn resolve_for(
@@ -719,6 +736,29 @@ impl ProviderStore for InMemoryProviderStore {
             })
             .min_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()))
             .map(|row| row.provider.id))
+    }
+
+    async fn providers_for_model(&self, tenant_id: Uuid, model: &str) -> StoreResult<Vec<Uuid>> {
+        let rows = self.rows.lock().unwrap();
+        let models = self.models.lock().unwrap();
+        let mut candidates: Vec<(bool, String, Uuid)> = rows
+            .iter()
+            .filter(|row| {
+                row.provider.tenant_id == tenant_id
+                    && models
+                        .get(&row.provider.id)
+                        .is_some_and(|ids| ids.iter().any(|id| id == model))
+            })
+            .map(|row| {
+                (
+                    !row.provider.is_default,
+                    row.provider.created_at.clone(),
+                    row.provider.id,
+                )
+            })
+            .collect();
+        candidates.sort();
+        Ok(candidates.into_iter().map(|(_, _, id)| id).collect())
     }
 
     async fn resolve_for(
