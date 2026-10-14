@@ -69,6 +69,9 @@ export type Summary = {
   duration_p50_ms: number | null;
   duration_p95_ms: number | null;
   duration_p99_ms: number | null;
+  /** ITEM-066: the proxy's own pre-upstream time (p50/p95). */
+  proxy_p50_ms: number | null;
+  proxy_p95_ms: number | null;
   first_trace_at: string | null;
   last_trace_at: string | null;
 };

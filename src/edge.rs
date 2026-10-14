@@ -105,6 +105,7 @@ impl EdgeTrace {
             savings_kind: None,
             cache_affinity: None,
             policy_version: None,
+            proxy_ms: None,
         }
     }
 }

@@ -72,6 +72,8 @@ type LatencyRow = (
     Option<f64>,
     Option<f64>,
     Option<f64>,
+    Option<f64>,
+    Option<f64>,
 );
 
 /// ITEM-058 `(model, requests, prompt_tokens, completion_tokens, cost,
@@ -387,13 +389,17 @@ async fn query_summary(
         duration_p50_ms,
         duration_p95_ms,
         duration_p99_ms,
+        proxy_p50_ms,
+        proxy_p95_ms,
     ): LatencyRow = match sqlx::query_as(
         "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
                 percentile_cont(0.99) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
                 percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
-                percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_ms)::float8
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -461,6 +467,8 @@ async fn query_summary(
         "duration_p50_ms": duration_p50_ms,
         "duration_p95_ms": duration_p95_ms,
         "duration_p99_ms": duration_p99_ms,
+        "proxy_p50_ms": proxy_p50_ms,
+        "proxy_p95_ms": proxy_p95_ms,
         "first_trace_at": first_at,
         "last_trace_at": last_at,
         "cached_prompt_tokens": cached_tokens,

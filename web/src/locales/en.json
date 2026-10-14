@@ -117,6 +117,7 @@
     "total_savings": "Total savings",
     "cached": "Cached",
     "avg_ttft": "Avg TTFT",
+    "proxy_overhead": "Proxy overhead",
     "p95_ttft": "P95 TTFT",
     "ttft": "TTFT",
     "current": "Current",

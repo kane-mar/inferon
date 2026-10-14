@@ -262,7 +262,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={formatMs(summary.ttft_p95_ms)}
           delta={ttftDelta}
           goodWhen="down"
-          hint={`${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
+          hint={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
         />
       </div>
 

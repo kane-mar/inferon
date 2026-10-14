@@ -117,6 +117,7 @@
     "total_savings": "Économies totales",
     "cached": "En cache",
     "avg_ttft": "TTFT moyen",
+    "proxy_overhead": "Surcharge du proxy",
     "p95_ttft": "TTFT p95",
     "ttft": "TTFT",
     "current": "Période actuelle",

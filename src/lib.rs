@@ -491,6 +491,7 @@ async fn proxy_chat_completions(
     req: Request,
 ) -> Response {
     let _in_flight = crate::metrics::request_started();
+    let request_started = Instant::now();
     let tenant = match authenticate(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -527,6 +528,7 @@ async fn proxy_chat_completions(
         router_event: None,
         cache_affinity: None,
         policy_version: None,
+        proxy_ms: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -623,6 +625,9 @@ async fn proxy_chat_completions(
     let allowed = build_model_chain(&state, &tenant, &route, primary.clone(), fallbacks).await;
 
     let mut routing_event: Option<Value> = None;
+    // ITEM-066: the proxy's own pre-upstream time, recorded before the first
+    // dispatch.
+    meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
     let mut upstream: Option<reqwest::Response> = None;
     for index in 0..allowed.len() {
         let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
@@ -755,6 +760,7 @@ async fn proxy_chat_completions(
 /// traced and costed.
 async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Response {
     let _in_flight = crate::metrics::request_started();
+    let request_started = Instant::now();
     let tenant = match authenticate_anthropic(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -789,6 +795,7 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         router_event: None,
         cache_affinity: None,
         policy_version: None,
+        proxy_ms: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -817,6 +824,8 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         .http_client
         .post(&route.url)
         .header("Content-Type", "application/json");
+    // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
+    meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
     for (header, value) in providers::auth_headers(&route.kind, &route.key, &route.metadata) {
         request = request.header(header, value);
     }
@@ -969,6 +978,8 @@ struct RequestMeta {
     cache_affinity: Option<Value>,
     /// ITEM-064: the adaptive policy version in force for this request.
     policy_version: Option<i64>,
+    /// ITEM-066: the proxy's own pre-upstream time (request-received → dispatch).
+    proxy_ms: Option<i64>,
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
@@ -1033,6 +1044,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         savings_kind: None,
         cache_affinity: meta.cache_affinity.clone(),
         policy_version: meta.policy_version,
+        proxy_ms: meta.proxy_ms,
     }
 }
 
@@ -2553,6 +2565,22 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[tokio::test]
+    async fn a_trace_records_its_proxy_overhead() {
+        // ITEM-066: the proxy's own pre-upstream time is on the trace and is a
+        // component of the total.
+        let (response, mut rx) = traced_request(
+            r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        let proxy = msg.proxy_ms.expect("proxy overhead recorded");
+        assert!(proxy >= 0);
+        assert!(proxy <= msg.total_duration_ms, "overhead is part of the total");
+    }
+
+    #[tokio::test]
     async fn a_useful_completion_traces_ok() {
         let (response, mut rx) = traced_request(
             r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
@@ -3015,6 +3043,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             savings_kind: None,
             cache_affinity: None,
             policy_version: None,
+            proxy_ms: None,
         }
     }
 
