@@ -458,6 +458,13 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                         tracking-wide uppercase
                       "
                       >
+                        {t('cached')}
+                      </th>
+                      <th className="
+                        py-2 text-right font-mono text-xs font-medium
+                        tracking-wide uppercase
+                      "
+                      >
                         {t('cost')}
                       </th>
                     </tr>
@@ -479,6 +486,11 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                         </td>
                         <td className="py-2 text-right tabular-nums">
                           {formatCompact(prompt.prompt_tokens)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {prompt.cache_hit_rate == null
+                            ? '—'
+                            : `${(prompt.cache_hit_rate * 100).toFixed(1)}%`}
                         </td>
                         <td className="py-2 text-right tabular-nums">
                           {formatUsd(prompt.cost_usd)}

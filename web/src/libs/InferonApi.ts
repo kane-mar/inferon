@@ -54,6 +54,8 @@ export type Summary = {
   fallback_savings_usd: string;
   total_savings_usd: string;
   unreduced_cost_usd: string;
+  /** ITEM-063: requests that cache affinity re-targeted. */
+  cache_affinity_requests: number;
   truncated: number;
   truncated_rate: number | null;
   /** ITEM-057: failure counts by class (upstream_429, transport, ...). */
@@ -141,6 +143,10 @@ export type PromptRow = {
   system_prompt_hash: string;
   requests: number;
   prompt_tokens: number;
+  /** ITEM-063: cache hit rate for this prompt cluster (the affinity group). */
+  cached_prompt_tokens: number;
+  cache_savings_usd: string;
+  cache_hit_rate: number | null;
   cost_usd: string;
 };
 

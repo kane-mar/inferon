@@ -61,6 +61,7 @@ type SummaryRow = (
     Decimal,
     Decimal,
     Decimal,
+    i64,
 );
 
 /// `(ttft_p50, ttft_p95, ttft_p99, duration_p50, duration_p95, duration_p99)`.
@@ -326,7 +327,8 @@ async fn query_summary(
                     COUNT(*) FILTER (WHERE truncated),
                     COALESCE(SUM(savings_usd), 0),
                     COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'router'), 0),
-                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'fallback'), 0)
+                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'fallback'), 0),
+                    COUNT(*) FILTER (WHERE cache_affinity IS NOT NULL)
              FROM traces
              WHERE ($1::uuid IS NULL OR tenant_id = $1)
                AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -358,6 +360,7 @@ async fn query_summary(
         savings,
         router_savings,
         fallback_savings,
+        cache_affinity_requests,
     ) = row.unwrap_or((
         0,
         Decimal::ZERO,
@@ -374,6 +377,7 @@ async fn query_summary(
         Decimal::ZERO,
         Decimal::ZERO,
         Decimal::ZERO,
+        0,
     ));
     // ITEM-056: tail latency percentiles (NULL when there are no samples).
     let (
@@ -468,6 +472,8 @@ async fn query_summary(
         "router_savings_usd": router_savings.to_string(),
         "fallback_savings_usd": fallback_savings.to_string(),
         "total_savings_usd": (savings + cache_savings).to_string(),
+        // ITEM-063: how many requests cache affinity re-targeted.
+        "cache_affinity_requests": cache_affinity_requests,
         // What the request would have cost on the model the client asked for
         // (model-substitution axis; cache is a separate axis above).
         "unreduced_cost_usd": (total_cost + savings).to_string(),
@@ -524,9 +530,10 @@ async fn query_by_prompt(
     tenant: Option<uuid::Uuid>,
     window: &Window,
 ) -> Response {
-    let rows: Vec<(Option<String>, i64, i64, Decimal)> = match sqlx::query_as(
+    let rows: Vec<(Option<String>, i64, i64, Decimal, i64, Decimal)> = match sqlx::query_as(
         "SELECT system_prompt_hash, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
-                COALESCE(SUM(upstream_cost_usd), 0)
+                COALESCE(SUM(upstream_cost_usd), 0),
+                COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0)
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
            AND created_at >= NOW() - ($2 * INTERVAL '1 day')
@@ -544,11 +551,15 @@ async fn query_by_prompt(
 
     let prompts: Vec<Value> = rows
         .into_iter()
-        .map(|(hash, requests, prompt_tokens, cost)| {
+        .map(|(hash, requests, prompt_tokens, cost, cached_tokens, cache_savings)| {
             json!({
                 "system_prompt_hash": hash.unwrap_or_else(|| "(no system prompt)".to_string()),
                 "requests": requests,
                 "prompt_tokens": prompt_tokens,
+                "cached_prompt_tokens": cached_tokens,
+                "cache_savings_usd": cache_savings.to_string(),
+                // ITEM-063: cache-hit rate per prompt cluster (the affinity group).
+                "cache_hit_rate": rate(cached_tokens, prompt_tokens),
                 "cost_usd": cost.to_string(),
             })
         })
@@ -2516,6 +2527,7 @@ mod tests {
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
             accounts,

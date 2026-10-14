@@ -111,6 +111,7 @@ mod tests {
             error_class: None,
             savings_usd: rust_decimal::Decimal::ZERO,
             savings_kind: None,
+            cache_affinity: None,
         }
     }
 

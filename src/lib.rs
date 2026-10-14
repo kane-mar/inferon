@@ -4,6 +4,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod alerts;
+pub mod affinity;
 pub mod budget;
 pub mod guard;
 use guard::GuardReason;
@@ -75,6 +76,8 @@ pub struct AppState {
     /// failures. Empty = no chain (behaviour unchanged).
     pub routing_store: Arc<dyn routing::RoutingStore>,
     pub budget_store: Arc<dyn budget::BudgetStore>,
+    /// ITEM-063: per-prefix warm-target lookup for cache-affinity routing.
+    pub affinity_store: Arc<dyn affinity::AffinityStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
@@ -496,6 +499,7 @@ async fn proxy_chat_completions(
         raw_prompt: payload,
         routing_event: None,
         router_event: None,
+        cache_affinity: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
@@ -550,6 +554,21 @@ async fn proxy_chat_completions(
     // then the tenant's fallbacks, de-duped and with disabled models dropped
     // (ITEM-044). Loaded once per request; an empty chain changes nothing.
     let primary = model_override.take().map(|chosen| chosen.model).unwrap_or_else(|| meta.model.clone());
+    // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
+    let primary = match meta.system_prompt_hash.as_deref() {
+        Some(hash) => match state.affinity_store.warm_target(tenant_id, hash).await {
+            Ok(Some(warm)) if warm.model != primary && crate::affinity::keep_warm(&warm.model, &primary) => {
+                meta.cache_affinity = Some(json!({
+                    "from_model": primary,
+                    "to_model": warm.model,
+                    "reason": "cache_affinity",
+                }));
+                warm.model
+            }
+            _ => primary,
+        },
+        None => primary,
+    };
     let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
         Ok(models) => models,
         Err(e) => {
@@ -724,14 +743,14 @@ async fn proxy_messages(State(state): State<Arc<AppState>>, req: Request) -> Res
         raw_prompt: payload,
         routing_event: None,
         router_event: None,
+        cache_affinity: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
     };
     let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic).await {
         Ok(route) => route,
         Err(resp) => return resp,
-    };
-    meta.provider_id = route.provider_id;
+    };    meta.provider_id = route.provider_id;
     crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
 
@@ -901,6 +920,8 @@ struct RequestMeta {
     routing_event: Option<Value>,
     /// ITEM-054: set when the heuristic router downshifted the model.
     router_event: Option<Value>,
+    /// ITEM-063: set when cache affinity changed the serving model.
+    cache_affinity: Option<Value>,
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
@@ -963,6 +984,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         error_class: outcome.error_class,
         savings_usd: rust_decimal::Decimal::ZERO,
         savings_kind: None,
+        cache_affinity: meta.cache_affinity.clone(),
     }
 }
 
@@ -2003,6 +2025,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2046,6 +2069,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2121,6 +2145,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2185,6 +2210,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2211,6 +2237,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: mpsc::channel(1).0,
             operator_key: None,
             accounts: None,
@@ -2350,6 +2377,58 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[tokio::test]
+    async fn a_warm_prefix_keeps_its_model_over_the_router() {
+        // ITEM-063: the prefix is warm on deepseek-v4-pro, but the router would
+        // downshift to flash; keeping the warm cache is cheaper than the miss.
+        let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let system = "You are a terse assistant.";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let affinity = std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::with_target(
+            tenant,
+            &crate::sha256_hex(system),
+            "deepseek-v4-pro",
+            now,
+        ));
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            http_client: reqwest::Client::new(),
+            upstream_url: mock_upstream().await,
+            tenant_store: std::sync::Arc::new(seeded_store()),
+            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
+            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: affinity,
+            telemetry_tx: tx,
+            operator_key: None,
+            accounts: None,
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        });
+        let body = json!({
+            "model": "deepseek-v4-pro",
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": "hi"}
+            ]
+        })
+        .to_string();
+        let response = build_router(state)
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.request_model, "deepseek-v4-pro", "affinity kept the warm model");
+        let event = msg.cache_affinity.expect("affinity event recorded");
+        assert_eq!(event["from_model"], "deepseek-flash");
+        assert_eq!(event["to_model"], "deepseek-v4-pro");
+    }
+
+    #[tokio::test]
     async fn a_useful_completion_traces_ok() {
         let (response, mut rx) = traced_request(
             r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
@@ -2432,6 +2511,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2578,6 +2658,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             )),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2649,6 +2730,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2701,6 +2783,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             )),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2738,6 +2821,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 crate::routing::InMemoryRoutingStore::with_fallbacks(tenant.id, &["deepseek-chat"]),
             ),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2795,6 +2879,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             error_class: None,
             savings_usd: rust_decimal::Decimal::ZERO,
             savings_kind: None,
+            cache_affinity: None,
         }
     }
 
@@ -2895,6 +2980,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2919,6 +3005,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: state.budget_store.clone(),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             operator_key: state.operator_key.clone(),
             accounts: None,
             db: state.db.clone(),
@@ -3596,6 +3683,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3798,6 +3886,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3867,6 +3956,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -4181,6 +4271,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,

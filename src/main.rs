@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         model_store: Arc::new(inferon::models::PostgresModelStore::new(pool.clone())),
         routing_store: Arc::new(inferon::routing::PostgresRoutingStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
+        affinity_store: std::sync::Arc::new(inferon::affinity::InMemoryAffinityStore::default()),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
         accounts,

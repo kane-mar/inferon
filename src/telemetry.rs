@@ -59,6 +59,8 @@ pub struct TraceMessage {
     pub savings_usd: rust_decimal::Decimal,
     /// ITEM-058: what produced `savings_usd` ("router" | "fallback").
     pub savings_kind: Option<String>,
+    /// ITEM-063: set when cache affinity changed the serving model.
+    pub cache_affinity: Option<Value>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -84,6 +86,28 @@ impl PostgresTraceSink {
     pub fn new(pool: sqlx::PgPool) -> Self {
         Self { pool }
     }
+
+    /// Best-effort write of the warm-prefix targets (ITEM-063). Runs outside the
+    /// batch transaction so an affinity failure never rolls back traces.
+    async fn record_affinity(&self, hits: Vec<(Uuid, String, Option<Uuid>, String)>) {
+        for (tenant_id, hash, provider_id, model) in hits {
+            let result = sqlx::query(
+                "INSERT INTO prompt_affinity (tenant_id, system_prompt_hash, provider_id, model, last_hit_at)
+                 VALUES ($1, $2, $3, $4, NOW())
+                 ON CONFLICT (tenant_id, system_prompt_hash) DO UPDATE
+                   SET provider_id = EXCLUDED.provider_id, model = EXCLUDED.model, last_hit_at = NOW()",
+            )
+            .bind(tenant_id)
+            .bind(hash)
+            .bind(provider_id)
+            .bind(model)
+            .execute(&self.pool)
+            .await;
+            if let Err(e) = result {
+                tracing::warn!("prompt affinity upsert failed: {e}");
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -98,6 +122,7 @@ impl TraceSink for PostgresTraceSink {
                 return;
             }
         };
+        let mut affinity_hits: Vec<(Uuid, String, Option<Uuid>, String)> = Vec::new();
         for msg in batch.drain(..) {
             let result = sqlx::query(
                 r#"INSERT INTO traces (
@@ -106,8 +131,8 @@ impl TraceSink for PostgresTraceSink {
                     total_duration_ms, status_code, raw_prompt, raw_completion,
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
-                    outcome, error_class, savings_usd, savings_kind
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)"#,
+                    outcome, error_class, savings_usd, savings_kind, cache_affinity
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -134,6 +159,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.error_class.map(|class| class.as_str()))
             .bind(msg.savings_usd)
             .bind(msg.savings_kind.as_deref())
+            .bind(msg.cache_affinity.as_ref().map(Json))
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -153,6 +179,18 @@ impl TraceSink for PostgresTraceSink {
                 if let Err(e) = count_result {
                     tracing::error!("telemetry: count upsert failed, rolling back batch: {e}");
                     return;
+                }
+            }
+            // ITEM-063: when the provider served this prefix from cache, remember
+            // it as the warm target for the prefix (best-effort, after commit).
+            if let (Some(hash), Some(cached)) = (&msg.system_prompt_hash, msg.cached_prompt_tokens) {
+                if cached > 0 {
+                    affinity_hits.push((
+                        msg.tenant_id,
+                        hash.clone(),
+                        msg.provider_id,
+                        msg.request_model.clone(),
+                    ));
                 }
             }
             // Accrue actual spend toward the tenant budget (ITEM-016), same
@@ -179,6 +217,7 @@ impl TraceSink for PostgresTraceSink {
         } else {
             crate::metrics::count_persisted(total);
             crate::metrics::record_flush();
+            self.record_affinity(affinity_hits).await;
         }
     }
 }
