@@ -2083,9 +2083,11 @@ pub async fn tenant_provider_test(
             let status = response.status();
             // A successful probe is also a model sync: cache what the host
             // advertises so the dashboard and the proxy can route by model.
+            let mut models = 0usize;
             if status.is_success() {
                 if let Ok(body) = response.json::<Value>().await {
                     let ids = parse_model_ids(&body);
+                    models = ids.len();
                     if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
                         tracing::warn!("provider model sync failed for {provider_id}: {e}");
                     }
@@ -2098,6 +2100,9 @@ pub async fn tenant_provider_test(
             json_ok(json!({
                 "ok": status.is_success(),
                 "status": status.as_u16(),
+                "models": models,
+                // Diagnosis for a failure: the upstream's HTTP status.
+                "error": (!status.is_success()).then(|| format!("upstream returned {status}")),
             }))
         }
         Err(e) => {
@@ -2106,7 +2111,12 @@ pub async fn tenant_provider_test(
                 .provider_store
                 .record_check(tenant_id, provider_id, false)
                 .await;
-            json_ok(json!({ "ok": false, "status": null }))
+            json_ok(json!({
+                "ok": false,
+                "status": null,
+                "models": 0,
+                "error": format!("unreachable: {e}"),
+            }))
         }
     }
 }

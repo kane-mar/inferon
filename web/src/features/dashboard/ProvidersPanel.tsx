@@ -19,6 +19,37 @@ const DEFAULT_BASE: Record<string, string> = {
   'anthropic': 'https://api.anthropic.com/v1',
 };
 
+/**
+ * A distinct look per provider kind, so a list of providers is scannable at a
+ * glance: a coloured monogram plus a matching badge. Classes are literal so
+ * Tailwind keeps them.
+ */
+const KIND_STYLE: Record<string, { initials: string; monogram: string; badge: string }> = {
+  'deepseek': {
+    initials: 'DS',
+    monogram: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300',
+    badge: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-300',
+  },
+  'openai': {
+    initials: 'OA',
+    monogram: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
+    badge: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+  },
+  'anthropic': {
+    initials: 'AN',
+    monogram: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
+    badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+  },
+  'openai-compatible': {
+    initials: '··',
+    monogram: 'bg-slate-500/15 text-slate-600 dark:text-slate-300',
+    badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-300',
+  },
+};
+
+const openaiCompatible = KIND_STYLE['openai-compatible']!;
+const kindStyle = (kind: string) => KIND_STYLE[kind] ?? openaiCompatible;
+
 /** `Name: Value` per line → metadata headers; blank/malformed lines ignored. */
 const parseHeaders = (text: string): Record<string, string> => {
   const headers: Record<string, string> = {};
@@ -61,6 +92,71 @@ const formatDate = (value: string): string => {
 
 const EMPTY_DRAFT = { name: '', base_url: '', key: '', org: '', headers: '' };
 
+const Chip = (props: { children: React.ReactNode; className?: string; title?: string }) => (
+  <span
+    title={props.title}
+    className={cn('rounded-sm px-1.5 py-0.5 font-mono text-xs', props.className)}
+  >
+    {props.children}
+  </span>
+);
+
+/** The provider's kind, with its colour and monogram. */
+const KindMonogram = (props: { kind: string }) => {
+  const style = kindStyle(props.kind);
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        `
+          flex size-10 shrink-0 items-center justify-center rounded-lg font-mono
+          text-xs font-semibold
+        `,
+        style.monogram,
+      )}
+    >
+      {style.initials}
+    </span>
+  );
+};
+
+type HealthState = 'ok' | 'fail' | 'unknown' | 'pending';
+
+const HealthPill = (props: { state: HealthState; title?: string }) => {
+  const t = useTranslations('ProvidersPage');
+  const tone: Record<HealthState, string> = {
+    ok: 'text-emerald-600 dark:text-emerald-400',
+    fail: 'text-destructive',
+    unknown: 'text-muted-foreground',
+    pending: 'text-muted-foreground',
+  };
+  const label = props.state === 'ok'
+    ? t('connected')
+    : props.state === 'fail'
+      ? t('unreachable')
+      : props.state === 'pending'
+        ? t('testing')
+        : t('not_checked');
+  return (
+    <Chip className={tone[props.state]} title={props.title}>
+      {label}
+    </Chip>
+  );
+};
+
+const healthOf = (result: ProviderTest | 'pending' | undefined, lastCheckOk: boolean | null): HealthState => {
+  if (result === 'pending') {
+    return 'pending';
+  }
+  if (result) {
+    return result.ok ? 'ok' : 'fail';
+  }
+  if (lastCheckOk == null) {
+    return 'unknown';
+  }
+  return lastCheckOk ? 'ok' : 'fail';
+};
+
 export const ProvidersPanel = (props: {
   data: ProvidersResponse;
   role: 'owner' | 'member';
@@ -69,6 +165,7 @@ export const ProvidersPanel = (props: {
   const router = useRouter();
   const kinds = props.data.kinds.length > 0 ? props.data.kinds : ['deepseek'];
 
+  const [showAdd, setShowAdd] = useState(false);
   const [kind, setKind] = useState(kinds[0] as string);
   const [name, setName] = useState('');
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE[kinds[0] as string] ?? '');
@@ -101,6 +198,7 @@ export const ProvidersPanel = (props: {
       setKey('');
       setOrg('');
       setHeaders('');
+      setShowAdd(false);
       router.refresh();
     } catch (cause) {
       setError(errorMessage(cause, t('error')));
@@ -193,31 +291,187 @@ export const ProvidersPanel = (props: {
     } catch {
       setTested(previous => ({
         ...previous,
-        [providerId]: { ok: false, status: null },
+        [providerId]: { ok: false, status: null, error: t('probe_failed') },
       }));
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <ul className="overflow-hidden rounded-lg border bg-card">
-        {props.data.providers.length === 0
-          ? (
-              <li className="p-4 text-sm text-muted-foreground">{t('empty')}</li>
-            )
-          : (
-              props.data.providers.map((provider) => {
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="
+          font-mono text-xs font-medium tracking-wide text-muted-foreground
+          uppercase
+        "
+        >
+          {t('list_title', { count: props.data.providers.length })}
+        </h2>
+        {canEdit && (
+          <Button
+            size="sm"
+            variant={showAdd ? 'outline' : 'default'}
+            onClick={() => setShowAdd(current => !current)}
+          >
+            {showAdd ? t('cancel') : `+ ${t('add_title')}`}
+          </Button>
+        )}
+      </div>
+
+      {canEdit && showAdd && (
+        <form
+          onSubmit={add}
+          className="
+            grid gap-3 rounded-lg border bg-card p-4
+            sm:grid-cols-2
+          "
+        >
+          <label className="text-sm">
+            <span className="text-muted-foreground">{t('kind')}</span>
+            <select
+              value={kind}
+              className={FIELD_INPUT}
+              onChange={(event) => {
+                setKind(event.target.value);
+                setBaseUrl(DEFAULT_BASE[event.target.value] ?? '');
+              }}
+            >
+              {kinds.map(item => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-sm">
+            <span className="text-muted-foreground">{t('name')}</span>
+            <input
+              value={name}
+              className={FIELD_INPUT}
+              placeholder={t('name_placeholder')}
+              onChange={event => setName(event.target.value)}
+            />
+          </label>
+
+          <label className="
+            text-sm
+            sm:col-span-2
+          "
+          >
+            <span className="text-muted-foreground">{t('base_url')}</span>
+            <input
+              value={baseUrl}
+              className={MONO_FIELD_INPUT}
+              placeholder="https://api.deepseek.com/v1"
+              required
+              onChange={event => setBaseUrl(event.target.value)}
+            />
+          </label>
+
+          <label className="text-sm">
+            <span className="text-muted-foreground">{t('key')}</span>
+            <input
+              value={key}
+              type="password"
+              className={MONO_FIELD_INPUT}
+              placeholder="sk-…"
+              required
+              autoComplete="off"
+              onChange={event => setKey(event.target.value)}
+            />
+          </label>
+
+          <label className="text-sm">
+            <span className="text-muted-foreground">{t('org')}</span>
+            <input
+              value={org}
+              className={MONO_FIELD_INPUT}
+              placeholder={t('org_placeholder')}
+              onChange={event => setOrg(event.target.value)}
+            />
+          </label>
+
+          <label className="
+            text-sm
+            sm:col-span-2
+          "
+          >
+            <span className="text-muted-foreground">{t('headers')}</span>
+            <textarea
+              value={headers}
+              rows={2}
+              className={MONO_FIELD_INPUT}
+              placeholder="anthropic-version: 2023-06-01"
+              onChange={event => setHeaders(event.target.value)}
+            />
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {t('headers_note')}
+            </span>
+          </label>
+
+          <span className="
+            block text-xs text-muted-foreground
+            sm:col-span-2
+          "
+          >
+            {t('key_note')}
+          </span>
+
+          <div className="
+            flex flex-wrap items-center gap-3
+            sm:col-span-2
+          "
+          >
+            <Button type="submit" disabled={busy}>
+              {busy ? t('adding') : t('add')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || probe?.status === 'testing' || !baseUrl.trim() || !key.trim()}
+              onClick={testDraft}
+            >
+              {probe?.status === 'testing' ? t('testing') : t('test_connection')}
+            </Button>
+            {probe && probe.status !== 'testing' && (
+              <span
+                className={cn(
+                  'text-sm',
+                  probe.status === 'ok'
+                    ? `
+                      text-emerald-600
+                      dark:text-emerald-400
+                    `
+                    : 'text-destructive',
+                )}
+              >
+                {probe.message}
+              </span>
+            )}
+          </div>
+        </form>
+      )}
+
+      {props.data.providers.length === 0
+        ? (
+            <p className="text-sm text-muted-foreground">{t('empty')}</p>
+          )
+        : (
+            <ul className="space-y-3">
+              {props.data.providers.map((provider) => {
                 const result = tested[provider.id];
+                const style = kindStyle(provider.kind);
+                const updated = formatDate(provider.updated_at);
+
                 if (editing === provider.id) {
                   return (
                     <li
                       key={provider.id}
-                      className="
-                        border-b p-4
-                        last:border-0
-                      "
+                      className={cn(
+                        'rounded-lg border bg-card p-4',
+                        'border-l-4',
+                        style.monogram,
+                      )}
                     >
                       <form
                         onSubmit={event => saveEdit(event, provider.id)}
@@ -316,88 +570,48 @@ export const ProvidersPanel = (props: {
                     </li>
                   );
                 }
+
                 return (
                   <li
                     key={provider.id}
-                    className="
-                      border-b
-                      last:border-0
-                    "
+                    className={cn(
+                      'rounded-lg border bg-card',
+                      'border-l-4',
+                      style.monogram,
+                    )}
                   >
-                    <div className="
-                      flex flex-wrap items-center gap-3 px-4 py-3 text-sm
-                    "
-                    >
+                    <div className="flex items-start gap-3 p-4">
+                      <KindMonogram kind={provider.kind} />
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium">{provider.name}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{provider.name}</span>
+                          <Chip className={style.badge}>{provider.kind}</Chip>
+                          {provider.is_default && (
+                            <Chip className="bg-accent text-accent-foreground">
+                              {t('default')}
+                            </Chip>
+                          )}
+                          <HealthPill
+                            state={healthOf(result, provider.last_check_ok)}
+                            title={provider.last_check_at ?? undefined}
+                          />
+                        </div>
                         <div className="
-                          truncate font-mono text-xs text-muted-foreground
+                          mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs
+                          text-muted-foreground
                         "
                         >
-                          {provider.base_url}
+                          <span className="truncate font-mono">{provider.base_url}</span>
+                          <span className="font-mono">{provider.key_hint}</span>
+                          {updated && <span>{t('updated', { date: updated })}</span>}
                         </div>
                       </div>
-                      <span className="
-                        rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs
-                      "
-                      >
-                        {provider.kind}
-                      </span>
-                      {provider.is_default && (
-                        <span className="
-                          rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs
-                          text-accent-foreground
-                        "
-                        >
-                          {t('default')}
-                        </span>
-                      )}
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {provider.key_hint}
-                      </span>
-                      {formatDate(provider.updated_at) && (
-                        <span className="text-xs text-muted-foreground">
-                          {t('updated', { date: formatDate(provider.updated_at) })}
-                        </span>
-                      )}
-                      {result && result !== 'pending'
-                        ? (
-                            <span
-                              className={`
-                                font-mono text-xs
-                                ${
-                            result.ok
-                              ? `
-                                text-emerald-600
-                                dark:text-emerald-400
-                              `
-                              : 'text-destructive'
-                            }
-                              `}
-                            >
-                              {result.ok
-                                ? t('connected')
-                                : result.status == null
-                                  ? t('unreachable')
-                                  : `${t('failed')} (${result.status})`}
-                            </span>
-                          )
-                        : provider.last_check_ok != null && (
-                          <span
-                            title={provider.last_check_at ?? undefined}
-                            className={cn(
-                              'font-mono text-xs',
-                              provider.last_check_ok
-                                ? `
-                                  text-emerald-600
-                                  dark:text-emerald-400
-                                `
-                                : 'text-destructive',
-                            )}
-                          >
-                            {provider.last_check_ok ? t('connected') : t('unreachable')}
-                          </span>
-                        )}
+                    </div>
+
+                    <div className="
+                      flex flex-wrap items-center gap-1 border-t px-3 py-2
+                    "
+                    >
                       {canEdit && (
                         <Button
                           variant="ghost"
@@ -428,16 +642,6 @@ export const ProvidersPanel = (props: {
                           {t('edit')}
                         </Button>
                       )}
-                      {canEdit && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => remove(provider.id)}
-                        >
-                          {t('remove')}
-                        </Button>
-                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -447,167 +651,58 @@ export const ProvidersPanel = (props: {
                             [provider.id]: !current[provider.id],
                           }))}
                       >
-                        {modelsOpen[provider.id]
-                          ? t('hide_models')
-                          : t('show_models')}
+                        {modelsOpen[provider.id] ? t('hide_models') : t('show_models')}
                       </Button>
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto text-destructive"
+                          disabled={busy}
+                          onClick={() => remove(provider.id)}
+                        >
+                          {t('remove')}
+                        </Button>
+                      )}
                     </div>
+
+                    {result && result !== 'pending' && (
+                      <div
+                        className={cn(
+                          'border-t px-4 py-2 text-xs',
+                          result.ok
+                            ? `
+                              text-emerald-600
+                              dark:text-emerald-400
+                            `
+                            : 'text-destructive',
+                        )}
+                      >
+                        <span className="font-medium">
+                          {t('test_result')}
+                          :
+                          {' '}
+                        </span>
+                        {result.ok
+                          ? t('test_ok', { count: result.models ?? 0 })
+                          : t('test_failed', { error: result.error ?? t('unreachable') })}
+                      </div>
+                    )}
+
                     {modelsOpen[provider.id] && (
-                      <ProviderModels
-                        providerId={provider.id}
-                        canEdit={canEdit}
-                      />
+                      <div className="border-t p-4">
+                        <ProviderModels providerId={provider.id} canEdit={canEdit} />
+                      </div>
                     )}
                   </li>
                 );
-              })
-            )}
-      </ul>
-
-      {canEdit
-        ? (
-            <form
-              onSubmit={add}
-              className="
-                grid gap-3 rounded-lg border bg-card p-4
-                sm:grid-cols-2
-              "
-            >
-              <h2 className="
-                font-mono text-xs font-medium tracking-wide uppercase
-                sm:col-span-2
-              "
-              >
-                {t('add_title')}
-              </h2>
-
-              <label className="text-sm">
-                <span className="text-muted-foreground">{t('kind')}</span>
-                <select
-                  value={kind}
-                  className={FIELD_INPUT}
-                  onChange={(event) => {
-                    setKind(event.target.value);
-                    setBaseUrl(DEFAULT_BASE[event.target.value] ?? '');
-                  }}
-                >
-                  {kinds.map(item => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="text-sm">
-                <span className="text-muted-foreground">{t('name')}</span>
-                <input
-                  value={name}
-                  className={FIELD_INPUT}
-                  placeholder={t('name_placeholder')}
-                  onChange={event => setName(event.target.value)}
-                />
-              </label>
-
-              <label className="
-                text-sm
-                sm:col-span-2
-              "
-              >
-                <span className="text-muted-foreground">{t('base_url')}</span>
-                <input
-                  value={baseUrl}
-                  className={MONO_FIELD_INPUT}
-                  placeholder="https://api.deepseek.com/v1"
-                  required
-                  onChange={event => setBaseUrl(event.target.value)}
-                />
-              </label>
-
-              <label className="text-sm">
-                <span className="text-muted-foreground">{t('key')}</span>
-                <input
-                  value={key}
-                  type="password"
-                  className={MONO_FIELD_INPUT}
-                  placeholder="sk-…"
-                  required
-                  autoComplete="off"
-                  onChange={event => setKey(event.target.value)}
-                />
-              </label>
-
-              <label className="text-sm">
-                <span className="text-muted-foreground">{t('org')}</span>
-                <input
-                  value={org}
-                  className={MONO_FIELD_INPUT}
-                  placeholder={t('org_placeholder')}
-                  onChange={event => setOrg(event.target.value)}
-                />
-              </label>
-
-              <label className="
-                text-sm
-                sm:col-span-2
-              "
-              >
-                <span className="text-muted-foreground">{t('headers')}</span>
-                <textarea
-                  value={headers}
-                  rows={2}
-                  className={MONO_FIELD_INPUT}
-                  placeholder="anthropic-version: 2023-06-01"
-                  onChange={event => setHeaders(event.target.value)}
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  {t('headers_note')}
-                </span>
-              </label>
-
-              <span className="
-                block text-xs text-muted-foreground
-                sm:col-span-2
-              "
-              >
-                {t('key_note')}
-              </span>
-
-              <div className="
-                flex flex-wrap items-center gap-3
-                sm:col-span-2
-              "
-              >
-                <Button type="submit" disabled={busy}>
-                  {busy ? t('adding') : t('add')}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy || probe?.status === 'testing' || !baseUrl.trim() || !key.trim()}
-                  onClick={testDraft}
-                >
-                  {probe?.status === 'testing' ? t('testing') : t('test_connection')}
-                </Button>
-                {probe && probe.status !== 'testing' && (
-                  <span
-                    className={cn(
-                      'text-sm',
-                      probe.status === 'ok'
-                        ? `
-                          text-emerald-600
-                          dark:text-emerald-400
-                        `
-                        : 'text-destructive',
-                    )}
-                  >
-                    {probe.message}
-                  </span>
-                )}
-              </div>
-            </form>
-          )
-        : (
-            <p className="text-sm text-muted-foreground">{t('owner_only')}</p>
+              })}
+            </ul>
           )}
+
+      {!canEdit && (
+        <p className="text-sm text-muted-foreground">{t('owner_only')}</p>
+      )}
     </div>
   );
 };

@@ -299,7 +299,14 @@ export type UpdateProvider = {
   spend_limit_cents?: number;
 };
 
-export type ProviderTest = { ok: boolean; status: number | null };
+export type ProviderTest = {
+  ok: boolean;
+  status: number | null;
+  /** ITEM-061/UX: models discovered by a successful probe. */
+  models?: number;
+  /** Diagnosis when the probe failed (upstream status or transport error). */
+  error?: string | null;
+};
 
 /** A model a provider advertises, with that provider's flags + price. */
 export type ProviderModel = {
