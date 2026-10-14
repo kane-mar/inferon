@@ -51,3 +51,27 @@ and its control loop. Direct endpoint (A) is ITEM-051; the cloud edge connector
 **Source:** 2026-10-11 customer-hosted connectivity decision — see
 [raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md](../../raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md)
 and [wiki/llm-inference/customer-hosted-llms.md](../../wiki/llm-inference/customer-hosted-llms.md).
+
+## Close-out — cloud half (2026-10-14)
+
+- `edge_nodes` (migration 030): one revocable credential per node (hash only),
+  plus `last_seen_at` health. `EdgeNodeStore` seam (Postgres + in-memory double).
+- Enrollment: `POST /api/edge/nodes` (owner session) mints a token and returns it
+  **once**; `GET /api/edge/nodes` lists; `POST .../revoke` deletes (revocation is
+  immediate).
+- `GET /v1/edge/config` (node-authenticated with the edge token) returns a
+  **versioned** snapshot — client key **hashes**, routing fallbacks,
+  budget/guard/router controls, the active policy, and advertised model ids. No
+  provider secret ever leaves the cloud.
+- `POST /v1/edge/traces` (ITEM-052) now accepts an edge token as well as a tenant
+  key, and records the node heartbeat.
+- Web: `/dashboard/edge` (list, enroll, revoke; token shown once) + nav.
+- Rust **290 → 293** tests, clippy clean; tsc/eslint/i18n green. Commit `c418809`;
+  CI `38510007880` (test+web+deploy) green.
+- **Live**: enrolled a node → `GET /v1/edge/config` returned `version 77a1b837…`
+  with 1 key hash and 2 models → `POST /v1/edge/traces` with the node token
+  answered **202** and set `last_seen_at` → `revoke` → `GET /v1/edge/config`
+  answered **401**.
+- **Split**: the edge **runtime** (`--edge` binary mode: poll config, buffer/ship
+  telemetry, offline behaviour) is **ITEM-070**. This item is the cloud control
+  plane, as scoped.
