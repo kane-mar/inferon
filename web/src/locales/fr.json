@@ -66,6 +66,7 @@
     "providers": "Fournisseurs",
     "routing": "Routage",
     "quality": "Qualité",
+    "edge": "Edge",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur"
@@ -253,6 +254,22 @@
     "test_connection": "Tester la connexion",
     "probe_ok": "Connecté — {count} modèles",
     "probe_failed": "Fournisseur injoignable"
+  },
+  "EdgePage": {
+    "title_bar": "Nœuds périphériques",
+    "title_bar_description": "Exécutez le proxy à côté de votre propre modèle ; le cloud garde le plan de contrôle et la télémétrie.",
+    "nodes": "Nœuds",
+    "name": "Nom",
+    "name_placeholder": "ex. bureau-gpu",
+    "enroll": "Enrôler un nœud",
+    "token_once": "Copiez ce jeton de nœud maintenant — il n'est affiché qu'une fois.",
+    "no_nodes": "Aucun nœud périphérique enrôlé.",
+    "node": "Nœud",
+    "last_seen": "Dernière activité",
+    "never": "Jamais",
+    "revoke": "Révoquer",
+    "enroll_error": "Impossible d'enrôler le nœud",
+    "revoke_error": "Impossible de révoquer le nœud"
   },
   "QualityPage": {
     "title_bar": "Qualité",

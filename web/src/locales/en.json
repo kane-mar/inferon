@@ -66,6 +66,7 @@
     "providers": "Providers",
     "routing": "Routing",
     "quality": "Quality",
+    "edge": "Edge",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator"
@@ -253,6 +254,22 @@
     "test_connection": "Test connection",
     "probe_ok": "Connected — {count} models",
     "probe_failed": "Could not reach the provider"
+  },
+  "EdgePage": {
+    "title_bar": "Edge nodes",
+    "title_bar_description": "Run the proxy next to your own model; the cloud keeps the control plane and telemetry.",
+    "nodes": "Nodes",
+    "name": "Name",
+    "name_placeholder": "e.g. office-gpu",
+    "enroll": "Enroll node",
+    "token_once": "Copy this node token now — it is shown only once.",
+    "no_nodes": "No edge nodes enrolled yet.",
+    "node": "Node",
+    "last_seen": "Last seen",
+    "never": "Never",
+    "revoke": "Revoke",
+    "enroll_error": "Could not enroll the node",
+    "revoke_error": "Could not revoke the node"
   },
   "QualityPage": {
     "title_bar": "Quality",

@@ -81,6 +81,8 @@ pub struct AppState {
     pub affinity_store: Arc<dyn affinity::AffinityStore>,
     /// ITEM-064: the tenant's active adaptive policy (versioned).
     pub policy_store: Arc<dyn policy::PolicyStore>,
+    /// ITEM-065: enrolled edge nodes (control plane).
+    pub edge_store: Arc<dyn edge::EdgeNodeStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
@@ -97,6 +99,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/messages", post(proxy_messages))
         .route("/v1/edge/traces", post(edge::ingest))
+        .route("/v1/edge/config", get(edge::config))
         .route("/v1/quality", post(quality_signal))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
@@ -136,6 +139,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/by-provider", get(dashboard::by_provider))
         .route("/v1/dashboard/api/by-key", get(dashboard::by_key))
+        .route(
+            "/v1/dashboard/api/edge/nodes",
+            get(dashboard::tenant_edge_nodes).post(dashboard::tenant_edge_node_create),
+        )
+        .route(
+            "/v1/dashboard/api/edge/nodes/:node_id/revoke",
+            post(dashboard::tenant_edge_node_revoke),
+        )
         .route("/v1/dashboard/api/quality", get(dashboard::quality))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))
         .route("/v1/dashboard/api/timeseries", get(dashboard::timeseries))
@@ -2064,6 +2075,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store,
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2109,6 +2121,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2157,6 +2170,21 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
     #[tokio::test]
+    async fn edge_config_requires_a_node_credential() {
+        let response = build_router(test_state("http://127.0.0.1:1/v1/chat/completions"))
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/edge/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn edge_ingest_requires_a_key() {
         let (response, _rx) = edge_request(r#"{"traces":[]}"#, None).await;
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -2186,6 +2214,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2252,6 +2281,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store,
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2280,6 +2310,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: mpsc::channel(1).0,
             operator_key: None,
             accounts: None,
@@ -2445,6 +2476,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: affinity,
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2500,6 +2532,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store,
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2604,6 +2637,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2752,6 +2786,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2825,6 +2860,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2879,6 +2915,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -2918,6 +2955,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3079,6 +3117,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3105,6 +3144,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: state.budget_store.clone(),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             operator_key: state.operator_key.clone(),
             accounts: None,
             db: state.db.clone(),
@@ -3784,6 +3824,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -3988,6 +4029,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -4059,6 +4101,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,
@@ -4375,6 +4418,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts: None,

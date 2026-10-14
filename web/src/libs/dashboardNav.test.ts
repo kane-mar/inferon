@@ -9,6 +9,7 @@ describe('dashboardNav — role-aware menu', () => {
       '/dashboard/providers',
       '/dashboard/routing',
       '/dashboard/quality',
+      '/dashboard/edge',
       '/dashboard/keys',
       '/dashboard/members',
     ]);
@@ -23,6 +24,7 @@ describe('dashboardNav — role-aware menu', () => {
       '/dashboard/providers',
       '/dashboard/routing',
       '/dashboard/quality',
+      '/dashboard/edge',
       '/dashboard/keys',
       '/dashboard/members',
       '/dashboard/operator',
