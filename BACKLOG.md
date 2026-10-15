@@ -40,7 +40,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-068 | Metric-regression alerting (error rate, provider health, latency) | improvement | **done (2026-10-14)** — `ErrorSignal` (24h rate, min-sample gated) + `LatencySignal` (24h p95 vs preceding-24h baseline) through the ITEM-020 lifecycle; thresholds on `tenant_configurations` (migration 032). Live: fired at 60.6% errors. Per-provider → ITEM-071 |
 | ITEM-069 | Adaptive policy application (provider weights & task-cluster preference) | feature | **done — slice 1 (2026-10-14)** — per-provider health weights derived from telemetry (error rate + p95), stored in the policy (migration 033) and applied in `resolve_route` among providers owning a model. Live: the degrading provider demoted to 0.407. Task-cluster preference is ITEM-072 |
 | ITEM-070 | Edge runtime (`--edge` mode) | feature | **done (2026-10-15)** — edge node serves locally against a local provider, syncs `GET /v1/edge/config`, auths by synced key hashes, ships buffered telemetry to `/v1/edge/traces`, survives an unreachable cloud. Live: 200 via the local mock + trace reached the cloud |
-| ITEM-071 | Per-provider degradation alerting (ITEM-068 AC5) | improvement | **new** — per-provider error-rate/p95 signals fire `provider_error:<id>` / `provider_latency:<id>` through the ITEM-020 lifecycle; operator view labels the provider |
+| ITEM-071 | Per-provider degradation alerting (ITEM-068 AC5) | improvement | **done (2026-10-15)** — per-provider 24h error/latency signals fire `provider_error:<id>` / `provider_latency:<id>` through the ITEM-020 lifecycle (min-sample gated; clears on recovery); operator view labels the provider name. Live: fired for 95% errors, labelled "Deepseek" |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **new** — move the provider/model, key, member and edge-admin handlers into focused submodules; keep the shared plumbing in `mod.rs`. Deferred from the 2026-10-15 restructure |
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **new** — `#[cfg(test)] mod tests;` sibling files (lib.rs ~2,900 test lines; dashboard/auth/providers similar); same tests, relocated. Deferred from the 2026-10-15 restructure |
@@ -50,12 +50,11 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-15 (edge runtime done; observability cluster + hybrid data plane complete)_ —
-work the open set **top-down**: next **ITEM-071** (per-provider alerting),
-**ITEM-072** (task-cluster model preference), then the tech-debt items
-**ITEM-073** (split `dashboard/mod.rs`) and **ITEM-074** (tests to sibling
-files), then the staged OmniRouting cluster **029–032** (which ITEM-072 builds
-on).
+_Last updated: 2026-10-15 (edge runtime + per-provider alerting done)_ —
+work the open set **top-down**: next **ITEM-072** (task-cluster model preference),
+then the tech-debt items **ITEM-073** (split `dashboard/mod.rs`) and **ITEM-074**
+(tests to sibling files), then the staged OmniRouting cluster **029–032** (which
+ITEM-072 builds on).
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

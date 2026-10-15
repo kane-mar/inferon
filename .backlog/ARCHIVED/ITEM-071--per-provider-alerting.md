@@ -27,3 +27,19 @@ signals rather than the tenant's aggregate.
   do not conflate "reachable" with "healthy".
 
 **Source:** ITEM-061 AC3 → ITEM-068 → split 2026-10-14.
+
+## Close-out (2026-10-15)
+
+- `provider_health_alerts` aggregates **per provider** (24h requests/errors/p95 vs
+  the preceding 24h) and fires `provider_error:<id>` / `provider_latency:<id>`
+  through the ITEM-020 lifecycle, reusing the `ErrorSignal` / `LatencySignal`
+  thresholds (min-sample gated). `evaluate_provider_health` clears a provider's
+  episode when it recovers, mirroring `evaluate_limits`.
+- The operator alert view labels the provider by **name** (`alerts::class_entity`
+  + a providers lookup → `provider_name`) instead of only the uuid.
+- Rust **305 → 306** tests, clippy clean; tsc/eslint/i18n green. Commit `5d99f35`;
+  CI `38679822374` (test+web+deploy) green.
+- **Live**: provider `5c63dbbb` (63 requests / 60 errors = 95% over 24h) fired
+  `provider_error:5c63dbbb-…` — `{status: firing, detail: {errors_24h: 60,
+  requests_24h: 63}}` — and the operator alert view returned
+  `provider_name: "Deepseek"`.
