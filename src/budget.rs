@@ -317,12 +317,6 @@ pub async fn check_budget(
 /// Override the request model with `model` if it differs, returning the body
 /// bytes to forward (payload reserialized) — shared by the router downgrade
 /// and the budget fallback.
-pub fn apply_model_override(payload: &Value, model: &str) -> Result<Vec<u8>, serde_json::Error> {
-    let mut forwarded = payload.clone();
-    forwarded["model"] = serde_json::Value::String(model.to_string());
-    serde_json::to_vec(&forwarded)
-}
-
 /// The upstream body for `model` (ITEM-067): the client's payload with `model`
 /// set, and — when the target cannot honour a `json_schema` contract —
 /// `response_format` downgraded to `json_object`. The guard still holds the real
@@ -444,19 +438,6 @@ mod tests {
             .await
             .unwrap();
         assert!(store.budget_for(fresh).await.unwrap().is_some());
-    }
-
-    #[test]
-    fn model_override_reserializes_with_new_model() {
-        let payload = serde_json::json!({
-            "model": "gpt-4o",
-            "stream": false,
-            "messages": [{"role": "user", "content": "hi"}],
-        });
-        let bytes = apply_model_override(&payload, "gpt-4o-mini").unwrap();
-        let out: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(out["model"], "gpt-4o-mini");
-        assert_eq!(out["messages"], payload["messages"], "only model changes");
     }
 
     #[test]

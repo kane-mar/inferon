@@ -5,6 +5,7 @@
 //! the `users` store (upsert on GitHub id), the GitHub OAuth client seam, and
 //! the `/auth/*` handlers. Session tokens/cookies live in `session.rs`.
 
+use crate::clock::now_secs;
 use uuid::Uuid;
 
 use axum::{
@@ -681,13 +682,6 @@ pub fn encode_query(value: &str) -> String {
 // Sessions gate nothing yet (AC4): /v1/chat stays machine-key-authed and the
 // dashboard/operator views keep their bearer gates. These routes only create
 // and read a human session; ITEM-036/037 attach gates on top.
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 /// True when the request arrived over TLS. Caddy (the TLS edge) sets
 /// `X-Forwarded-Proto: https`; its absence means a plain-http hop (local dev

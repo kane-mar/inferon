@@ -5,6 +5,7 @@
 //! renders no HTML. Tenant views live under `/v1/dashboard/api/*`; platform-wide
 //! operator views under `/v1/dashboard/api/operator/*`.
 
+use crate::clock::now_secs;
 use crate::cost;
 use crate::AppState;
 use axum::{
@@ -116,13 +117,6 @@ fn unauthorized() -> Response {
         "invalid_api_key",
         "missing or invalid Authorization header",
     )
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 fn forbidden() -> Response {

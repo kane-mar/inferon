@@ -6,6 +6,7 @@
 //! per-prefix "warm target" (the provider/model that recently served the prefix
 //! from cache) and decides when to keep it instead of a marginally cheaper miss.
 
+use crate::clock::now_secs_i64;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -95,7 +96,7 @@ impl AffinityStore for InMemoryAffinityStore {
             .lock()
             .unwrap()
             .get(&(tenant_id, system_prompt_hash.to_string()))
-            .filter(|target| is_fresh(target.last_hit_at, now_secs()))
+            .filter(|target| is_fresh(target.last_hit_at, now_secs_i64()))
             .cloned())
     }
 
@@ -112,18 +113,11 @@ impl AffinityStore for InMemoryAffinityStore {
             WarmTarget {
                 provider_id,
                 model: model.to_string(),
-                last_hit_at: now_secs(),
+                last_hit_at: now_secs_i64(),
             },
         );
         Ok(())
     }
-}
-
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 /// Postgres-backed affinity (the production store).
@@ -219,7 +213,7 @@ mod tests {
         assert_eq!(target.model, "deepseek-flash");
         assert_eq!(*store.recorded.lock().unwrap(), 1);
         // An expired pin is not returned.
-        let stale = InMemoryAffinityStore::with_target(tenant, "old", "m", now_secs() - AFFINITY_TTL_SECS - 1);
+        let stale = InMemoryAffinityStore::with_target(tenant, "old", "m", now_secs_i64() - AFFINITY_TTL_SECS - 1);
         assert_eq!(stale.warm_target(tenant, "old").await.unwrap(), None);
     }
 }

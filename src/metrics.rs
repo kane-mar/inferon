@@ -10,7 +10,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub static TRACES_QUEUED: AtomicU64 = AtomicU64::new(0);
@@ -55,13 +54,6 @@ fn routed_json() -> serde_json::Value {
     serde_json::Value::Object(object)
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 static REQUEST_TIMES: OnceLock<Mutex<VecDeque<u64>>> = OnceLock::new();
 
 fn request_times() -> &'static Mutex<VecDeque<u64>> {
@@ -101,7 +93,7 @@ impl Drop for InFlightGuard {
 pub fn request_started() -> InFlightGuard {
     IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
     REQUESTS_TOTAL.fetch_add(1, Ordering::Relaxed);
-    let now = now_ms();
+    let now = crate::clock::now_ms();
     let mut times = request_times()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -136,7 +128,7 @@ pub fn count_unpriced() {
 
 /// Record a committed telemetry flush (ITEM-060: flush freshness).
 pub fn record_flush() {
-    LAST_FLUSH_MS.store(now_ms(), Ordering::Relaxed);
+    LAST_FLUSH_MS.store(crate::clock::now_ms(), Ordering::Relaxed);
 }
 
 /// A JSON snapshot for the operator endpoint (queue depth is added there, from
@@ -144,7 +136,7 @@ pub fn record_flush() {
 pub fn snapshot() -> serde_json::Value {
     let dropped_full = TRACES_DROPPED_FULL.load(Ordering::Relaxed);
     let dropped_closed = TRACES_DROPPED_CLOSED.load(Ordering::Relaxed);
-    let now = now_ms();
+    let now = crate::clock::now_ms();
     let last_flush = LAST_FLUSH_MS.load(Ordering::Relaxed);
     let last_flush_age_ms = (last_flush > 0).then(|| now.saturating_sub(last_flush));
     serde_json::json!({

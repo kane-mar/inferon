@@ -6,6 +6,7 @@
 pub mod alerts;
 pub mod affinity;
 pub mod budget;
+pub mod clock;
 pub mod guard;
 use guard::GuardReason;
 pub mod mock_github;
