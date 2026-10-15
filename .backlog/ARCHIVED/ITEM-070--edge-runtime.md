@@ -35,3 +35,25 @@ Split from ITEM-065 (2026-10-14): the cloud control plane is delivered
 
 **Source:** 2026-10-11 customer-hosted connectivity decision (option C);
 ITEM-065 split 2026-10-14.
+
+## Close-out (2026-10-15)
+
+- `inferon --edge --control-url … --node-token … --provider-url … --provider-key …`
+  (parsed in `main.rs`) runs the node; `edge_runtime::run` builds an edge
+  `AppState` and serves the existing `build_router`.
+- `EdgeState` (a `RwLock<EdgeConfig>`) implements the tenant, budget, routing,
+  model and policy stores over the **synced snapshot**, so local auth uses the
+  cloud's client-key hashes and routing/budget/guard/policy are the cloud's
+  config. The local provider credential is a local flag — never fetched.
+- A sync loop polls `GET /v1/edge/config` and re-applies on a version change; a
+  **401 (revoked) stops it**, and a failed poll keeps serving the last config.
+- Telemetry is buffered locally and shipped by `RemoteTraceSink` to
+  `POST /v1/edge/traces` (bounded, drop-oldest; a 401 clears the buffer). Only
+  small config/telemetry traffic leaves — **inference payloads never do**.
+- Rust **301 → 305** tests, clippy clean. Commit `d96d72f`; CI `38673276255`
+  (test+web+deploy) green.
+- **Live**: started an edge node against the cloud (tenant kane-mar) with the
+  in-image mock as its local provider. A request authenticated **locally**,
+  reached the mock, returned **200** (SSE), and the trace reached the cloud
+  (`local-llm | 200 | provider attributed`). The node and its client key were
+  revoked afterwards.
