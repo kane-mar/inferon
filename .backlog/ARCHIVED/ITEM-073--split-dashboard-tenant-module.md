@@ -28,3 +28,23 @@ CRUD, API-key management, member management, routing/config, and edge-node admin
   endpoints stay in one file.
 
 **Source:** 2026-10-15 codebase review — deferred structural candidate.
+
+## Close-out (2026-10-15)
+
+- `dashboard/mod.rs` keeps the **shared plumbing** (scope/session resolution,
+  `json_ok`/`internal`/`db_err`/`unauthorized`/`forbidden`, `owner_only`,
+  `Window`) and the tests; the handlers moved to focused submodules, each
+  re-exported (`pub use <mod>::*`) so router paths in `build_router` are
+  unchanged:
+  - `dashboard/providers.rs` — provider + model surface
+  - `dashboard/keys.rs` — tenant API-key surface
+  - `dashboard/members.rs` — membership surface
+  - `dashboard/edge_admin.rs` — edge-node enroll / list / revoke
+  - `dashboard/routing.rs` — routing + budget/config
+  - `dashboard/queries.rs` — aggregate queries and their read endpoints
+- `dashboard/mod.rs`: **3,684 → 1,828 lines**.
+- Rust **306** tests, clippy clean. Commit `7556f5f`; CI `38682056834`
+  (test+web+deploy) green.
+- **Live**: all 16 tenant endpoints (`providers`, `keys`, `routing`, `members`,
+  `edge/nodes`, `summary`/`by-*`/`waste`/`timeseries`/`guard`/`models`/`quality`/
+  `config`) and all 8 operator endpoints returned **200**.
