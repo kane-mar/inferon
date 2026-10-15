@@ -183,6 +183,21 @@ pub const LATENCY_REGRESSION: &str = "latency_regression";
 /// its own lifecycle.
 pub const KEY_SPEND_LIMIT: &str = "key_spend_limit";
 pub const PROVIDER_SPEND_LIMIT: &str = "provider_spend_limit";
+/// ITEM-071: per-provider health classes (`provider_error:<id>` /
+/// `provider_latency:<id>`), one episode per provider.
+pub const PROVIDER_ERROR: &str = "provider_error";
+pub const PROVIDER_LATENCY: &str = "provider_latency";
+
+/// The entity id embedded in a per-entity class (`kind:<uuid>`), if any.
+pub fn class_entity(class: &str, kind: &str) -> Option<uuid::Uuid> {
+    let (prefix, id) = class.split_once(':')?;
+    (prefix == kind).then(|| uuid::Uuid::parse_str(id).ok())?
+}
+
+/// The per-provider episode class.
+fn provider_class(kind: &str, id: uuid::Uuid) -> String {
+    format!("{kind}:{id}")
+}
 
 /// The per-entity episode class (kept long — `alerts.class` is TEXT).
 pub(crate) fn limit_class(kind: &str, id: uuid::Uuid) -> String {
@@ -516,6 +531,7 @@ pub async fn evaluate_tenant(
         }
     }
     evaluate_limits(pool, tenant_id, now_ms, &thresholds, &mut deliveries).await?;
+    evaluate_provider_health(pool, tenant_id, now_ms, &thresholds, &mut deliveries).await?;
     Ok(deliveries)
 }
 
@@ -582,6 +598,115 @@ async fn limit_breaches(
     }
 
     Ok(breaches)
+}
+
+/// ITEM-071: one provider that is degrading (error rate or latency), with the
+/// evidence and the per-entity class to fire.
+async fn provider_health_alerts(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+    thresholds: &AlertThresholds,
+) -> Result<Vec<LimitBreach>, Box<dyn std::error::Error + Send + Sync>> {
+    let rows: Vec<(uuid::Uuid, i64, i64, f64, f64)> = sqlx::query_as(
+        "SELECT t.provider_id,
+                COUNT(*) FILTER (WHERE t.created_at >= NOW() - INTERVAL '24 hours'),
+                COUNT(*) FILTER (WHERE t.created_at >= NOW() - INTERVAL '24 hours'
+                                   AND t.status_code >= 400),
+                COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY
+                    CASE WHEN t.created_at >= NOW() - INTERVAL '24 hours'
+                         THEN t.total_duration_ms END)::float8, 0),
+                COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY
+                    CASE WHEN t.created_at >= NOW() - INTERVAL '48 hours'
+                          AND t.created_at < NOW() - INTERVAL '24 hours'
+                         THEN t.total_duration_ms END)::float8, 0)
+         FROM traces t
+         WHERE t.tenant_id = $1 AND t.provider_id IS NOT NULL
+           AND t.created_at >= NOW() - INTERVAL '48 hours'
+         GROUP BY t.provider_id",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut breaches = Vec::new();
+    for (provider_id, requests, errors, p95_ms, baseline_p95_ms) in rows {
+        if (ErrorSignal {
+            requests_24h: requests,
+            errors_24h: errors,
+        })
+        .is_anomalous(thresholds)
+        {
+            breaches.push(LimitBreach {
+                class: provider_class(PROVIDER_ERROR, provider_id),
+                detail: serde_json::json!({
+                    "provider_id": provider_id.to_string(),
+                    "requests_24h": requests,
+                    "errors_24h": errors,
+                }),
+            });
+        }
+        if (LatencySignal {
+            p95_ms,
+            baseline_p95_ms,
+        })
+        .is_anomalous(thresholds)
+        {
+            breaches.push(LimitBreach {
+                class: provider_class(PROVIDER_LATENCY, provider_id),
+                detail: serde_json::json!({
+                    "provider_id": provider_id.to_string(),
+                    "p95_ms": p95_ms,
+                    "baseline_p95_ms": baseline_p95_ms,
+                }),
+            });
+        }
+    }
+    Ok(breaches)
+}
+
+/// Fire/re-fire a provider episode per degrading provider and clear episodes
+/// whose provider is healthy again (ITEM-071, mirroring `evaluate_limits`).
+async fn evaluate_provider_health(
+    pool: &sqlx::PgPool,
+    tenant_id: uuid::Uuid,
+    now_ms: i64,
+    thresholds: &AlertThresholds,
+    deliveries: &mut Vec<(String, i64)>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let breaches = provider_health_alerts(pool, tenant_id, thresholds).await?;
+    let active: std::collections::HashSet<String> =
+        breaches.iter().map(|b| b.class.clone()).collect();
+
+    for breach in &breaches {
+        if let Some(delivery) = apply_lifecycle(
+            pool,
+            tenant_id,
+            &breach.class,
+            now_ms,
+            true,
+            &breach.detail,
+            thresholds,
+        )
+        .await?
+        {
+            deliveries.push(delivery);
+        }
+    }
+
+    let open: Vec<(String,)> = sqlx::query_as(
+        "SELECT class FROM alerts
+         WHERE tenant_id = $1 AND status = 'firing'
+           AND (class LIKE 'provider_error:%' OR class LIKE 'provider_latency:%')",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    for (class,) in open {
+        if !active.contains(&class) {
+            clear_episode(pool, tenant_id, &class, now_ms).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Fire/re-fire an episode per breaching key/provider and clear episodes whose
@@ -842,6 +967,19 @@ mod tests {
             LatencySignal { p95_ms: 350.0, baseline_p95_ms: 100.0 }.is_anomalous(&t),
             "3.5x regresses"
         );
+    }
+
+    #[test]
+    fn class_entity_parses_per_entity_classes() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(
+            class_entity(&format!("provider_error:{id}"), PROVIDER_ERROR),
+            Some(id)
+        );
+        // A different kind, a bare class, or a malformed id all yield None.
+        assert_eq!(class_entity(&format!("provider_latency:{id}"), PROVIDER_ERROR), None);
+        assert_eq!(class_entity("spend_velocity", PROVIDER_ERROR), None);
+        assert_eq!(class_entity("provider_error:not-a-uuid", PROVIDER_ERROR), None);
     }
 
     #[test]

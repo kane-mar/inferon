@@ -228,7 +228,9 @@ export default async function OperatorPage(props: OperatorPageProps) {
                           "
                         >
                           <td className="py-2 font-mono text-xs">{alert.tenant_id}</td>
-                          <td className="py-2">{alert.class}</td>
+                          <td className="py-2">
+                            {alert.provider_name ?? alert.class}
+                          </td>
                           <td className="py-2">{alert.status}</td>
                           <td className="py-2">{alert.first_fired_at.slice(0, 16).replace('T', ' ')}</td>
                           <td className="py-2">{alert.last_fired_at.slice(0, 16).replace('T', ' ')}</td>

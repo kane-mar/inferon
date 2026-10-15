@@ -284,9 +284,28 @@ pub async fn operator_alerts(
         Ok(rows) => rows,
         Err(e) => return internal(&e.to_string()),
     };
+    // ITEM-071: label a per-provider alert with the provider's name.
+    let provider_ids: Vec<uuid::Uuid> = alerts
+        .iter()
+        .filter_map(|alert| provider_id_of(&alert.class))
+        .collect();
+    let provider_names: std::collections::HashMap<uuid::Uuid, String> = if provider_ids.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        sqlx::query_as::<_, (uuid::Uuid, String)>(
+            "SELECT id, name FROM providers WHERE id = ANY($1)",
+        )
+        .bind(&provider_ids)
+        .fetch_all(&state.db)
+        .await
+        .map(|rows| rows.into_iter().collect())
+        .unwrap_or_default()
+    };
     let items: Vec<Value> = alerts
         .into_iter()
         .map(|a| {
+            let provider_name = provider_id_of(&a.class)
+                .and_then(|id| provider_names.get(&id).cloned());
             json!({
                 "tenant_id": a.tenant_id.to_string(),
                 "class": a.class,
@@ -296,10 +315,17 @@ pub async fn operator_alerts(
                 "first_fired_at": a.first_fired_at,
                 "last_fired_at": a.last_fired_at,
                 "cleared_at": a.cleared_at,
+                "provider_name": provider_name,
             })
         })
         .collect();
     json_ok(json!({"alerts": items, "window_days": window.days()}))
+}
+
+/// The provider id in a `provider_error:<id>` / `provider_latency:<id>` class.
+fn provider_id_of(class: &str) -> Option<uuid::Uuid> {
+    crate::alerts::class_entity(class, crate::alerts::PROVIDER_ERROR)
+        .or_else(|| crate::alerts::class_entity(class, crate::alerts::PROVIDER_LATENCY))
 }
 
 /// GET /v1/dashboard/api/operator/guard?days=7 — platform-wide (ITEM-026 AC2).

@@ -412,6 +412,8 @@ export type OperatorAlertRow = {
   first_fired_at: string;
   last_fired_at: string;
   cleared_at: string | null;
+  /** ITEM-071: the provider's name for a `provider_error`/`provider_latency` alert. */
+  provider_name?: string | null;
 };
 
 export type OperatorAlerts = { alerts: OperatorAlertRow[]; window_days: number };
