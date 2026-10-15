@@ -349,6 +349,31 @@ async fn fetch_config(
     Ok((envelope.version, envelope.config))
 }
 
+/// The models the **local** provider actually serves (`GET <provider-url>/models`),
+/// falling back to the cloud catalog when the local server cannot be read — so an
+/// on-prem node serves its own models, not the cloud's (ITEM-070 follow-up).
+async fn local_models(
+    client: &reqwest::Client,
+    options: &EdgeOptions,
+    fallback: &[String],
+) -> Vec<String> {
+    let provider = crate::providers::ResolvedProvider {
+        id: Uuid::nil(),
+        kind: options.provider_kind.clone(),
+        base_url: options.provider_url.clone(),
+        api_key: options.provider_key.clone(),
+        metadata: Default::default(),
+    };
+    match crate::providers::fetch_models(client, &provider).await {
+        Ok(models) if !models.is_empty() => models,
+        Ok(_) => fallback.to_vec(),
+        Err(e) => {
+            tracing::warn!("edge local model discovery failed ({e}); using the cloud catalog");
+            fallback.to_vec()
+        }
+    }
+}
+
 /// Run the node: sync config, serve locally, ship telemetry. Never blocks on the
 /// cloud — an unreachable control plane leaves the node serving the last config.
 pub async fn run(options: EdgeOptions) -> Result<(), Box<dyn std::error::Error>> {
@@ -378,8 +403,9 @@ pub async fn run(options: EdgeOptions) -> Result<(), Box<dyn std::error::Error>>
         )
         .await
         .map_err(|e| e.to_string())?;
+    let models = local_models(&client, &options, &config.models).await;
     provider_store
-        .record_models(provider_id, &config.models)
+        .record_models(provider_id, &models)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -426,8 +452,9 @@ pub async fn run(options: EdgeOptions) -> Result<(), Box<dyn std::error::Error>>
                         if next_version == version {
                             continue;
                         }
+                        let models = local_models(&client, &options, &config.models).await;
                         provider_store
-                            .record_models(provider_id, &config.models)
+                            .record_models(provider_id, &models)
                             .await
                             .ok();
                         edge_state.replace(config);

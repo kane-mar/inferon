@@ -141,6 +141,62 @@ pub fn auth_headers(
     }
 }
 
+/// Model ids from an OpenAI-style `{data:[{id}]}`, a `{models:[{id|name}]}`, or a
+/// bare array — sorted and deduped.
+pub(crate) fn parse_model_ids(body: &serde_json::Value) -> Vec<String> {
+    let array = body
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| body.get("models").and_then(serde_json::Value::as_array))
+        .or_else(|| body.as_array());
+    let Some(array) = array else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = array
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| entry.get("name").and_then(serde_json::Value::as_str))
+                .or_else(|| entry.as_str())
+                .map(str::to_string)
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Read a provider's advertised models from `GET <base>/models` (the
+/// OpenAI-compatible list). Shared by the dashboard probe and the edge node, so
+/// an on-prem node discovers the models its local server actually serves rather
+/// than the cloud's catalog (ITEM-070 follow-up).
+pub(crate) async fn fetch_models(
+    client: &reqwest::Client,
+    provider: &ResolvedProvider,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
+    let mut request = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10));
+    for (header, value) in auth_headers(&provider.kind, &provider.api_key, &provider.metadata) {
+        request = request.header(header, value);
+    }
+    if let Some(org) = &provider.metadata.org {
+        request = request.header("OpenAI-Organization", org);
+    }
+    for (header, value) in &provider.metadata.headers {
+        request = request.header(header, value);
+    }
+    let response = request.send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("upstream returned {}", response.status()));
+    }
+    let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    Ok(parse_model_ids(&body))
+}
+
 /// `…` + the last 4 characters of a key, for display — never the whole key.
 pub fn key_hint(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();

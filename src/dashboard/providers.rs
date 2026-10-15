@@ -43,58 +43,12 @@ fn model_json(model_id: &str, settings: &[crate::models::ModelSetting]) -> Value
     })
 }
 
-/// Model ids from an OpenAI-style `{data:[{id}]}`, a `{models:[{id|name}]}`, or a
-/// bare array — sorted and deduped.
-pub(crate) fn parse_model_ids(body: &Value) -> Vec<String> {
-    let array = body
-        .get("data")
-        .and_then(Value::as_array)
-        .or_else(|| body.get("models").and_then(Value::as_array))
-        .or_else(|| body.as_array());
-    let Some(array) = array else {
-        return Vec::new();
-    };
-    let mut ids: Vec<String> = array
-        .iter()
-        .filter_map(|entry| {
-            entry
-                .get("id")
-                .and_then(Value::as_str)
-                .or_else(|| entry.get("name").and_then(Value::as_str))
-                .or_else(|| entry.as_str())
-                .map(str::to_string)
-        })
-        .collect();
-    ids.sort();
-    ids.dedup();
-    ids
-}
-
 /// Read a provider's advertised models from `GET <base>/models`.
 pub(crate) async fn fetch_provider_models(
     state: &Arc<AppState>,
     provider: &crate::providers::ResolvedProvider,
 ) -> Result<Vec<String>, String> {
-    let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
-    let mut request = state
-        .http_client
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(10));
-    for (header, value) in crate::providers::auth_headers(&provider.kind, &provider.api_key, &provider.metadata) {
-        request = request.header(header, value);
-    }
-    if let Some(org) = &provider.metadata.org {
-        request = request.header("OpenAI-Organization", org);
-    }
-    for (header, value) in &provider.metadata.headers {
-        request = request.header(header, value);
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("upstream returned {}", response.status()));
-    }
-    let body: Value = response.json().await.map_err(|e| e.to_string())?;
-    Ok(parse_model_ids(&body))
+    crate::providers::fetch_models(&state.http_client, provider).await
 }
 
 /// GET /v1/dashboard/api/providers (session-scoped) — masked provider list.
@@ -350,7 +304,7 @@ pub async fn tenant_provider_test(
             let mut models = 0usize;
             if status.is_success() {
                 if let Ok(body) = response.json::<Value>().await {
-                    let ids = parse_model_ids(&body);
+                    let ids = crate::providers::parse_model_ids(&body);
                     models = ids.len();
                     if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
                         tracing::warn!("provider model sync failed for {provider_id}: {e}");

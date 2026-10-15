@@ -294,3 +294,54 @@
         // Another tenant can never resolve it, even with the id.
         assert!(store.resolve_provider(other, id).await.expect("resolve").is_none());
     }
+
+    #[test]
+    fn parse_model_ids_accepts_openai_and_lenient_shapes() {
+        assert_eq!(parse_model_ids(&serde_json::json!({"data":[{"id":"a"},{"id":"b"}]})), vec!["a", "b"]);
+        assert_eq!(parse_model_ids(&serde_json::json!({"models":[{"name":"m"}]})), vec!["m"]);
+        assert_eq!(parse_model_ids(&serde_json::json!(["x", "y"])), vec!["x", "y"]);
+        assert_eq!(
+            parse_model_ids(&serde_json::json!({"data":[{"id":"b"},{"id":"a"},{"id":"a"}]})),
+            vec!["a", "b"],
+            "sorted and deduped"
+        );
+        assert!(parse_model_ids(&serde_json::json!({})).is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_models_reads_the_openai_list_with_auth() {
+        let host = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                let auth = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                axum::Json(serde_json::json!({
+                    "data": [{"id": "qwen2.5-7b-instruct"}],
+                    "auth": auth
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, host).await.unwrap() });
+
+        let provider = ResolvedProvider {
+            id: Uuid::nil(),
+            kind: "openai-compatible".to_string(),
+            base_url: format!("http://{addr}/v1"),
+            api_key: "sk-local".to_string(),
+            metadata: Default::default(),
+        };
+        let models = fetch_models(&reqwest::Client::new(), &provider).await.unwrap();
+        assert_eq!(models, vec!["qwen2.5-7b-instruct"]);
+
+        // A dead host is an error, not an empty list.
+        let dead = ResolvedProvider {
+            base_url: "http://127.0.0.1:1/v1".to_string(),
+            ..provider
+        };
+        assert!(fetch_models(&reqwest::Client::new(), &dead).await.is_err());
+    }

@@ -898,19 +898,6 @@
         assert_eq!(upstream_base_url("https://api.test/v1/"), "https://api.test/v1");
     }
 
-    #[test]
-    fn parse_model_ids_accepts_openai_and_lenient_shapes() {
-        assert_eq!(parse_model_ids(&json!({"data":[{"id":"a"},{"id":"b"}]})), vec!["a", "b"]);
-        assert_eq!(parse_model_ids(&json!({"models":[{"name":"m"}]})), vec!["m"]);
-        assert_eq!(parse_model_ids(&json!(["x", "y"])), vec!["x", "y"]);
-        assert_eq!(
-            parse_model_ids(&json!({"data":[{"id":"b"},{"id":"a"},{"id":"a"}]})),
-            vec!["a", "b"],
-            "sorted and deduped"
-        );
-        assert!(parse_model_ids(&json!({})).is_empty());
-    }
-
     #[tokio::test]
     async fn the_providers_response_never_exposes_a_platform_key() {
         // The platform's shared upstream connection is Inferon-private: it is

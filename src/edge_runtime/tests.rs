@@ -92,3 +92,42 @@
         assert!(batch.is_empty());
         assert_eq!(sink.pending.len(), 2, "unsent traces are buffered");
     }
+
+    fn options(provider_url: &str) -> EdgeOptions {
+        EdgeOptions {
+            control_url: String::new(),
+            node_token: String::new(),
+            provider_url: provider_url.to_string(),
+            provider_key: "sk-local".to_string(),
+            provider_kind: "openai-compatible".to_string(),
+            port: 0,
+            sync_interval: std::time::Duration::from_secs(1),
+        }
+    }
+
+    #[tokio::test]
+    async fn discovers_the_local_providers_models_and_falls_back() {
+        // A local server advertising its own model ids.
+        let host = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({"data":[{"id":"qwen2.5-7b-instruct"}]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, host).await.unwrap() });
+
+        let cloud = vec!["deepseek-flash".to_string()];
+        let client = reqwest::Client::new();
+        assert_eq!(
+            local_models(&client, &options(&format!("http://{addr}/v1")), &cloud).await,
+            vec!["qwen2.5-7b-instruct"],
+            "the node serves what the local server serves"
+        );
+        // No local server -> the cloud catalog is the fallback, not a failure.
+        assert_eq!(
+            local_models(&client, &options("http://127.0.0.1:1/v1"), &cloud).await,
+            cloud
+        );
+    }
