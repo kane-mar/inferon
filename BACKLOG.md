@@ -43,17 +43,18 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-071 | Per-provider degradation alerting (ITEM-068 AC5) | improvement | **done (2026-10-15)** — per-provider 24h error/latency signals fire `provider_error:<id>` / `provider_latency:<id>` through the ITEM-020 lifecycle (min-sample gated; clears on recovery); operator view labels the provider name. Live: fired for 95% errors, labelled "Deepseek" |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
-| ITEM-074 | Move bulk test modules out of production files | tech-debt | **new** — `#[cfg(test)] mod tests;` sibling files (lib.rs ~2,900 test lines; dashboard/auth/providers similar); same tests, relocated. Deferred from the 2026-10-15 restructure |
+| ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-15 (edge runtime + per-provider alerting + dashboard split done)_ —
-work the open set **top-down**: next **ITEM-074** (tests to sibling files), then
-**ITEM-072** (task-cluster model preference, blocked on the staged OmniRouting
-cluster **029–032**).
+_Last updated: 2026-10-15 (all pullable work done; only the staged OmniRouting cluster remains)_ —
+**all tech-debt and improvement items are closed.** The only open item is
+**ITEM-072** (task-cluster model preference), which is **blocked** on the staged
+OmniRouting cluster **ITEM-029–032** (needs ITEM-029 task centroids). Working the
+backlog top-down now means unparking that cluster (ITEM-029 first).
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

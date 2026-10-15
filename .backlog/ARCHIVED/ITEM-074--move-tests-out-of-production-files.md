@@ -26,3 +26,16 @@ and stay; they should live beside the module, not inside its production file.
 - Do it one file at a time with the test count checked between moves.
 
 **Source:** 2026-10-15 codebase review — deferred structural candidate.
+
+## Close-out (2026-10-15)
+
+- **26** inline `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs`
+  files (the crate root's went to `src/tests.rs`), each file replaced by a
+  one-line `#[cfg(test)] mod tests;`.
+- **No test changed**: the moved file is a child of the same module, so
+  `use super::*` still resolves and `cargo test` stayed at **306**.
+- Production files are now code + the one-line declaration, e.g. `lib.rs`
+  3,250 → **339**, `dashboard/mod.rs` 1,828 → **415**, `auth.rs` 1,893 → **1,061**,
+  `providers.rs` 1,109 → **812**, `guard.rs` 646 → **286**.
+- Rust **306** tests, clippy clean. Commit `f396c03`; CI `38683165345`
+  (test+web+deploy) green.
