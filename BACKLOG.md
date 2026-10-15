@@ -42,16 +42,20 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-070 | Edge runtime (`--edge` mode) | feature | **new** — the on-prem binary: local provider, poll `GET /v1/edge/config`, local auth by synced key hashes, buffered telemetry shipping with backoff, explicit offline behaviour. Split from ITEM-065 |
 | ITEM-071 | Per-provider degradation alerting (ITEM-068 AC5) | improvement | **new** — per-provider error-rate/p95 signals fire `provider_error:<id>` / `provider_latency:<id>` through the ITEM-020 lifecycle; operator view labels the provider |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
+| ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **new** — move the provider/model, key, member and edge-admin handlers into focused submodules; keep the shared plumbing in `mod.rs`. Deferred from the 2026-10-15 restructure |
+| ITEM-074 | Move bulk test modules out of production files | tech-debt | **new** — `#[cfg(test)] mod tests;` sibling files (lib.rs ~2,900 test lines; dashboard/auth/providers similar); same tests, relocated. Deferred from the 2026-10-15 restructure |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **staged** — unpark = backlog order (Slice 3, PO 2026-09-05) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-15 (adaptive policy application slice 1 done; observability cluster complete)_ —
+_Last updated: 2026-10-15 (adaptive policy application slice 1 done; observability cluster complete; 2026-10-15 restructure done)_ —
 work the open set **top-down**: next **ITEM-070** (edge runtime), **ITEM-071**
 (per-provider alerting), **ITEM-072** (task-cluster model preference), then the
-staged OmniRouting cluster **029–032** (which ITEM-072 builds on).
+tech-debt items **ITEM-073** (split `dashboard/mod.rs`) and **ITEM-074** (tests
+to sibling files), then the staged OmniRouting cluster **029–032** (which ITEM-072
+builds on).
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
