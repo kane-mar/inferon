@@ -48,6 +48,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // ITEM-070 edge mode: run the proxy next to the customer's own model. The
+    // cloud stays the control plane; the local provider credential is a secret
+    // held only here.
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.iter().any(|arg| arg == "--edge") {
+        let flag = |name: &str| -> Option<String> {
+            argv.iter()
+                .position(|arg| arg == name)
+                .and_then(|index| argv.get(index + 1))
+                .cloned()
+        };
+        let options = inferon::edge_runtime::EdgeOptions {
+            control_url: flag("--control-url").unwrap_or_default(),
+            node_token: flag("--node-token").unwrap_or_default(),
+            provider_url: flag("--provider-url").unwrap_or_default(),
+            provider_key: flag("--provider-key").unwrap_or_default(),
+            provider_kind: flag("--provider-kind")
+                .unwrap_or_else(|| "openai-compatible".to_string()),
+            port,
+            sync_interval: std::time::Duration::from_secs(30),
+        };
+        return inferon::edge_runtime::run(options).await;
+    }
+
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
     let pool = PgPoolOptions::new()
         .max_connections(5)

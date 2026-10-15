@@ -27,6 +27,7 @@
 pub mod auth;
 pub mod dashboard;
 pub mod edge;
+pub mod edge_runtime;
 // Data plane.
 pub mod proxy;
 // Routing intelligence.
