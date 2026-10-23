@@ -21,3 +21,19 @@ nothing marks a provider/model as locally hosted.
    versus the frontier can still be attributed.
 4. `unpriced` stays a distinct, visible counter for models that are genuinely
    unknown (not conflated with local, which is deliberately free).
+
+## Close-out (2026-10-23)
+
+- `providers::is_local(kind)` + a `local` provider kind; the data plane threads
+  locality `Route` → `RequestMeta` → `TraceMessage.is_local`.
+- The edge node sends `is_local: true` on every trace (its provider is on-prem by
+  definition); `EdgeTrace` propagates it into the cloud pipeline.
+- The telemetry worker costs a local trace at **zero**, zeroes cache savings,
+  still attributes the full counterfactual as savings, and **skips**
+  `warn_if_unpriced` — so `unpriced` stays a distinct signal for genuinely
+  unknown models (AC4).
+- `cost::trace_cost` / `trace_cache_savings` / `trace_savings` are unit-tested.
+- **Live** (edge → LM Studio, `huihui-deepseek-v4-flash-0731-abliterated`,
+  58 → 15 tokens): `upstream_cost_usd = 0.000000`, `cache_savings_usd = 0`,
+  `unpriced_models = 0` — previously the same call traced at the $3/$15 default.
+- Rust **310 → 312** tests, clippy clean. Commit `2002627`; CI `39922782240`.
