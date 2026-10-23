@@ -418,6 +418,25 @@ export type OperatorAlertRow = {
 
 export type OperatorAlerts = { alerts: OperatorAlertRow[]; window_days: number };
 
+/** ITEM-031: a drift-driven evolution job (queued -> ... -> promoted/failed). */
+export type OperatorEvolutionJob = {
+  id: string;
+  tenant_id: string;
+  adapter: string;
+  reason: string;
+  state: string;
+  evidence: {
+    requests?: number;
+    fallbacks?: number;
+    rate?: number;
+    window_hours?: number;
+  };
+  created_at: string;
+  updated_at: string;
+};
+
+export type OperatorEvolution = { jobs: OperatorEvolutionJob[] };
+
 type Options = { baseUrl?: string; fetchImpl?: FetchLike };
 
 const windowQuery = (days: number, extra: Record<string, number> = {}): string => {
@@ -654,6 +673,10 @@ export class InferonApi {
 
   operatorActivation(days: number, auth: Auth): Promise<OperatorActivation> {
     return this.request('GET', `/v1/dashboard/api/operator/activation${windowQuery(days)}`, undefined, auth);
+  }
+
+  operatorEvolution(auth: Auth): Promise<OperatorEvolution> {
+    return this.request('GET', '/v1/dashboard/api/operator/evolution', undefined, auth);
   }
 
   private async request<T>(

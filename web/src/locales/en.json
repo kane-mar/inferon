@@ -182,6 +182,11 @@
     "created_provider": "Created a provider",
     "first_request": "First request",
     "returned": "Returned",
+    "evolution": "Evolution jobs",
+    "adapter": "Adapter",
+    "state": "State",
+    "fallback_rate": "Fallback rate",
+    "detected_at": "Detected",
     "no_data": "No data for this window yet."
   },
   "OnboardingPage": {

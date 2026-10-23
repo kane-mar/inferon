@@ -48,12 +48,13 @@ export default async function OperatorPage(props: OperatorPageProps) {
   });
   const api = InferonApi.fromEnv();
   const auth = { cookie: session.cookie };
-  const [summary, tenants, guard, alerts, activation] = await Promise.all([
+  const [summary, tenants, guard, alerts, activation, evolution] = await Promise.all([
     api.operatorSummary(days, auth),
     api.operatorTenants(days, auth),
     api.operatorGuard(days, auth),
     api.operatorAlerts(days, auth),
     api.operatorActivation(days, auth),
+    api.operatorEvolution(auth),
   ]);
 
   return (
@@ -234,6 +235,51 @@ export default async function OperatorPage(props: OperatorPageProps) {
                           <td className="py-2">{alert.status}</td>
                           <td className="py-2">{alert.first_fired_at.slice(0, 16).replace('T', ' ')}</td>
                           <td className="py-2">{alert.last_fired_at.slice(0, 16).replace('T', ' ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+        </Card>
+
+        <Card title={t('evolution')}>
+          {evolution.jobs.length === 0
+            ? (
+                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+              )
+            : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="py-2 font-medium">{t('tenant')}</th>
+                        <th className="py-2 font-medium">{t('adapter')}</th>
+                        <th className="py-2 font-medium">{t('state')}</th>
+                        <th className="py-2 font-medium">{t('fallback_rate')}</th>
+                        <th className="py-2 font-medium">{t('detected_at')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {evolution.jobs.map(job => (
+                        <tr
+                          key={job.id}
+                          className="
+                            border-b
+                            last:border-0
+                          "
+                        >
+                          <td className="py-2 font-mono text-xs">{job.tenant_id}</td>
+                          <td className="py-2">{job.adapter}</td>
+                          <td className="py-2">{job.state}</td>
+                          <td className="py-2">
+                            {job.evidence.rate === undefined
+                              ? '—'
+                              : `${(job.evidence.rate * 100).toFixed(1)}%`}
+                          </td>
+                          <td className="py-2">
+                            {job.created_at.slice(0, 16).replace('T', ' ')}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

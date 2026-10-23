@@ -182,6 +182,11 @@
     "created_provider": "Fournisseur créé",
     "first_request": "Première requête",
     "returned": "Revenu",
+    "evolution": "Tâches d'évolution",
+    "adapter": "Adaptateur",
+    "state": "État",
+    "fallback_rate": "Taux de repli",
+    "detected_at": "Détecté",
     "no_data": "Aucune donnée pour cette fenêtre."
   },
   "OnboardingPage": {
