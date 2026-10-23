@@ -86,10 +86,24 @@ pub struct ResolvedProvider {
 /// Supported provider kinds. `anthropic` is served on its own Messages surface
 /// (`/v1/messages`, ITEM-050); the others are OpenAI-shaped
 /// (`/v1/chat/completions`).
-pub const PROVIDER_KINDS: [&str; 4] = ["deepseek", "openai", "openai-compatible", "anthropic"];
+pub const PROVIDER_KINDS: [&str; 5] = [
+    "deepseek",
+    "openai",
+    "openai-compatible",
+    "anthropic",
+    "local",
+];
 
 /// The native Anthropic Messages provider kind (ITEM-050).
 pub const ANTHROPIC: &str = "anthropic";
+
+/// A locally hosted provider (ITEM-077): inference costs nothing at the margin,
+/// so its traces are costed at zero rather than the unknown-model default.
+pub const LOCAL: &str = "local";
+
+pub fn is_local(kind: &str) -> bool {
+    kind == LOCAL
+}
 
 /// True for the Anthropic Messages surface (not OpenAI-shaped).
 pub fn is_anthropic(kind: &str) -> bool {

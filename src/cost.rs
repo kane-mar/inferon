@@ -145,6 +145,56 @@ pub fn savings_vs(
     (asked - served).max(Decimal::ZERO)
 }
 
+/// The upstream cost recorded on a trace. A locally hosted model costs nothing at
+/// the margin, whatever the price catalog says (ITEM-077).
+pub fn trace_cost(
+    model: &str,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i64,
+    local: bool,
+) -> Decimal {
+    if local {
+        Decimal::ZERO
+    } else {
+        calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
+    }
+}
+
+/// Cache savings on a trace: a local model pays no provider cache, so zero.
+pub fn trace_cache_savings(
+    model: &str,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i64,
+    local: bool,
+) -> Decimal {
+    if local {
+        Decimal::ZERO
+    } else {
+        cache_savings(model, prompt_tokens, completion_tokens, cached_tokens)
+    }
+}
+
+/// Savings versus the model the client asked for. A locally served model costs
+/// nothing, so the saving is the full counterfactual (ITEM-077 AC3).
+pub fn trace_savings(
+    counterfactual_model: &str,
+    served_model: &str,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    cached_tokens: i64,
+    local: bool,
+) -> Decimal {
+    let asked = calculate_cost(counterfactual_model, prompt_tokens, completion_tokens, cached_tokens);
+    let served = if local {
+        Decimal::ZERO
+    } else {
+        calculate_cost(served_model, prompt_tokens, completion_tokens, cached_tokens)
+    };
+    (asked - served).max(Decimal::ZERO)
+}
+
 /// Estimated saving if a gpt-4o-tier request had run on gpt-4o-mini
 /// (price delta applied to the actual token counts).
 pub fn savings_if_mini(prompt_tokens: i64, completion_tokens: i64) -> Decimal {

@@ -66,6 +66,9 @@ pub struct EdgeTrace {
     /// ITEM-057: the edge's own error class for a failed trace.
     #[serde(default)]
     pub error_class: Option<String>,
+    /// ITEM-077: served by a locally hosted model — costed at zero in the cloud.
+    #[serde(default)]
+    pub is_local: bool,
 }
 
 impl EdgeTrace {
@@ -94,6 +97,7 @@ impl EdgeTrace {
             router_event: self.router_event,
             provider_id: self.provider_id,
             api_key_id: self.api_key_id,
+            is_local: self.is_local,
             outcome: crate::quality::Outcome::from_db(self.outcome.as_deref())
                 .unwrap_or(if self.status_code >= 400 {
                     crate::quality::Outcome::Error

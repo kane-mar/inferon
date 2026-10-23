@@ -1434,6 +1434,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             routing_event: None,
             router_event: None,
             provider_id: None,
+            is_local: false,
             api_key_id: None,
             outcome: crate::quality::Outcome::Ok,
             error_class: None,

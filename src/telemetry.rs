@@ -47,6 +47,8 @@ pub struct TraceMessage {
     pub router_event: Option<Value>,
     /// ITEM-047: the provider that served the request (`None` = shared key).
     pub provider_id: Option<Uuid>,
+    /// ITEM-077: served by a locally hosted provider — costed at zero.
+    pub is_local: bool,
     /// ITEM-047: the API key that authenticated the request (`None` = legacy).
     pub api_key_id: Option<Uuid>,
     /// ITEM-055: whether the response was usable, derived from the status +
@@ -259,23 +261,29 @@ pub async fn telemetry_worker(
                     // Enrich off the hot path (ITEM-006): lint + cost. An
                     // unlisted model is costed at the default row — surface it
                     // once instead of silently over/under-charging.
-                    cost::warn_if_unpriced(&msg.request_model);
+                    // A locally hosted model is deliberately free — not an
+                    // unknown model, so it must not hit the unpriced default or
+                    // the unpriced counter (ITEM-077).
+                    if !msg.is_local {
+                        cost::warn_if_unpriced(&msg.request_model);
+                    }
                     msg.waste_detected = linter::lint(&msg, repeat_count);
                     // ITEM-053: cost with caching, and the saving vs no cache.
                     let cached = msg.cached_prompt_tokens.unwrap_or(0);
-                    let costed = cost::calculate_cost(
+                    msg.cache_savings_usd = cost::trace_cache_savings(
                         &msg.request_model,
                         msg.prompt_tokens,
                         msg.completion_tokens,
                         cached,
+                        msg.is_local,
                     );
-                    msg.cache_savings_usd = cost::cache_savings(
+                    msg.upstream_cost_usd = cost::trace_cost(
                         &msg.request_model,
                         msg.prompt_tokens,
                         msg.completion_tokens,
                         cached,
+                        msg.is_local,
                     );
-                    msg.upstream_cost_usd = costed;
                     // ITEM-058: what serving a cheaper model saved vs the model
                     // the client asked for (router downgrade or fallback).
                     let counterfactual = msg
@@ -284,12 +292,13 @@ pub async fn telemetry_worker(
                         .or(msg.routing_event.as_ref())
                         .and_then(|event| event["from_model"].as_str());
                     if let Some(asked) = counterfactual {
-                        msg.savings_usd = cost::savings_vs(
+                        msg.savings_usd = cost::trace_savings(
                             asked,
                             &msg.request_model,
                             msg.prompt_tokens,
                             msg.completion_tokens,
                             cached,
+                            msg.is_local,
                         );
                         msg.savings_kind = Some(
                             if msg.router_event.is_some() { "router" } else { "fallback" }

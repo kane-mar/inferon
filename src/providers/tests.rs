@@ -345,3 +345,11 @@
         };
         assert!(fetch_models(&reqwest::Client::new(), &dead).await.is_err());
     }
+
+    #[test]
+    fn local_is_a_supported_kind_and_is_marked() {
+        assert!(is_supported_kind("local"));
+        assert!(is_local("local"));
+        assert!(!is_local("openai"), "a cloud provider is not local");
+        assert!(!is_local("openai-compatible"));
+    }

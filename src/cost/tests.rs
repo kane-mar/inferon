@@ -219,3 +219,26 @@
             "names the default fallback: {output}"
         );
     }
+
+    #[test]
+    fn a_locally_hosted_model_costs_nothing_and_still_shows_savings() {
+        // No price row would mean the $3/$15 default — but local is free.
+        assert_eq!(
+            trace_cost("qwen/qwen3-coder-30b", 1_000_000, 1_000_000, 0, true),
+            Decimal::ZERO
+        );
+        assert_eq!(
+            trace_cache_savings("qwen/qwen3-coder-30b", 1_000_000, 0, 500_000, true),
+            Decimal::ZERO
+        );
+        // vs the asked frontier model, the whole counterfactual is saved.
+        assert_eq!(
+            trace_savings("deepseek-v4-pro", "qwen/qwen3-coder-30b", 1_000_000, 0, 0, true),
+            dec("0.66")
+        );
+        // Remote models are unchanged.
+        assert_eq!(
+            trace_cost("deepseek-flash", 0, 1_000_000, 0, false),
+            dec("0.66")
+        );
+    }

@@ -309,6 +309,7 @@ fn wire_trace(msg: &TraceMessage) -> Value {
         "router_event": msg.router_event,
         "provider_id": msg.provider_id,
         "api_key_id": msg.api_key_id,
+        "is_local": true,
         "outcome": msg.outcome.as_str(),
         "error_class": msg.error_class.map(|class| class.as_str()),
     })

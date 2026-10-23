@@ -140,6 +140,8 @@ pub(crate) struct Route {
     pub(crate) provider_id: Option<Uuid>,
     /// ITEM-050: the provider kind, which decides the upstream auth + surface.
     pub(crate) kind: String,
+    /// ITEM-077: a locally hosted provider — costed at zero.
+    pub(crate) is_local: bool,
 }
 
 /// The ingress→upstream surface (ITEM-050): OpenAI is the chat-completions
@@ -218,6 +220,7 @@ pub(crate) async fn resolve_route(
             }
             Ok(Route {
                 url: surface.endpoint(&provider.base_url),
+                is_local: providers::is_local(&provider.kind),
                 key: provider.api_key,
                 metadata: provider.metadata,
                 provider_id: Some(provider.id),
@@ -235,6 +238,7 @@ pub(crate) async fn resolve_route(
                     metadata: providers::ProviderMetadata::default(),
                     provider_id: None,
                     kind: "openai".to_string(),
+                    is_local: false,
                 }),
                 None => Err(json_error(
                     StatusCode::BAD_REQUEST,
@@ -386,6 +390,7 @@ pub(crate) async fn proxy_chat_completions(
         wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
+        is_local: false,
     };
     // ITEM-064/069: read the adaptive policy once — it supplies both the router
     // threshold and the provider health weights.
@@ -411,6 +416,7 @@ pub(crate) async fn proxy_chat_completions(
         Err(resp) => return resp,
     };
     meta.provider_id = route.provider_id;
+    meta.is_local = route.is_local;
     crate::metrics::request_routed(route.provider_id);
 
     let started = Instant::now();
@@ -669,11 +675,13 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
+        is_local: false,
     };
     let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic, None).await {
         Ok(route) => route,
         Err(resp) => return resp,
     };    meta.provider_id = route.provider_id;
+    meta.is_local = route.is_local;
     crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
 
@@ -857,6 +865,8 @@ struct RequestMeta {
     /// ITEM-047: provider + API key attribution for the trace.
     provider_id: Option<Uuid>,
     api_key_id: Option<Uuid>,
+    /// ITEM-077: served by a locally hosted provider — costed at zero.
+    is_local: bool,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -919,6 +929,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         cache_affinity: meta.cache_affinity.clone(),
         policy_version: meta.policy_version,
         proxy_ms: meta.proxy_ms,
+        is_local: meta.is_local,
     }
 }
 
