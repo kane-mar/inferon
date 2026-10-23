@@ -414,3 +414,71 @@ pub async fn operator_key_revoke(
         Err(e) => internal(&e.to_string()),
     }
 }
+
+/// One `evolution_jobs` row joined to its tenant name (id, tenant id, tenant
+/// name, adapter, reason, state, evidence, created, updated).
+type EvolutionRow = (String, String, String, String, String, String, Value, String, String);
+
+/// GET /v1/dashboard/api/operator/evolution — every tenant's evolution jobs
+/// (ITEM-031 AC4: drift detection and each later step are visible).
+pub async fn operator_evolution(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let rows: Vec<EvolutionRow> = sqlx::query_as(
+            "SELECT j.id::text, j.tenant_id::text, t.name, j.adapter, j.reason,
+                    j.state, j.evidence, j.created_at::text, j.updated_at::text
+               FROM evolution_jobs j
+               JOIN tenants t ON t.id = j.tenant_id
+              ORDER BY j.created_at DESC
+              LIMIT 200",
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+    let jobs: Vec<Value> = rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                tenant_id,
+                tenant_name,
+                adapter,
+                reason,
+                state,
+                evidence,
+                created_at,
+                updated_at,
+            )| {
+                json!({
+                    "id": id,
+                    "tenant_id": tenant_id,
+                    "tenant_name": tenant_name,
+                    "adapter": adapter,
+                    "reason": reason,
+                    "state": state,
+                    "evidence": evidence,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                })
+            },
+        )
+        .collect();
+    json_ok(json!({ "jobs": jobs }))
+}
+
+/// POST /v1/dashboard/api/operator/evolution/detect — run a drift pass now;
+/// the scheduled loop runs the same function every 15 minutes.
+pub async fn operator_evolution_detect(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    let queued = crate::evolution::run_evolution(&state.db).await;
+    json_ok(json!({ "queued": queued }))
+}

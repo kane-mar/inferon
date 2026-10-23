@@ -35,6 +35,7 @@ pub mod affinity;
 pub mod alerts;
 pub mod budget;
 pub mod cost;
+pub mod evolution;
 pub mod guard;
 pub mod linter;
 pub mod policy;
@@ -177,6 +178,14 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/operator/alerts", get(dashboard::operator_alerts))
         .route("/v1/dashboard/api/operator/guard", get(dashboard::operator_guard))
         .route("/v1/dashboard/api/operator/metrics", get(dashboard::operator_metrics))
+        .route(
+            "/v1/dashboard/api/operator/evolution",
+            get(dashboard::operator_evolution),
+        )
+        .route(
+            "/v1/dashboard/api/operator/evolution/detect",
+            post(dashboard::operator_evolution_detect),
+        )
         .route(
             "/v1/dashboard/api/operator/activation",
             get(dashboard::operator_activation),

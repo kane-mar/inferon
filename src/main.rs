@@ -21,6 +21,9 @@ const ALERT_EVAL_INTERVAL_SECS: u64 = 60;
 /// Adaptive policy cadence (ITEM-064): one bounded analysis pass. The first
 /// tick fires immediately, so a fresh deploy bootstraps a policy.
 const ADAPT_INTERVAL_SECS: u64 = 900;
+/// Evolution cadence (ITEM-031 slice 1): drift detection over the guard
+/// telemetry, queueing a deduped job per drifting model.
+const EVOLUTION_INTERVAL_SECS: u64 = 900;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -119,6 +122,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 ticker.tick().await;
                 inferon::policy::run_adaptation(&pool).await;
+            }
+        });
+    }
+
+    // ITEM-031 slice 1: drift detection -> evolution job queue.
+    {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(EVOLUTION_INTERVAL_SECS));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                inferon::evolution::run_evolution(&pool).await;
             }
         });
     }
