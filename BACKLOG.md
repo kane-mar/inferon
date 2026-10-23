@@ -42,6 +42,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-070 | Edge runtime (`--edge` mode) | feature | **done (2026-10-15)** — edge node serves locally against a local provider, syncs `GET /v1/edge/config`, auths by synced key hashes, ships buffered telemetry to `/v1/edge/traces`, survives an unreachable cloud. Live: 200 via the local mock + trace reached the cloud |
 | ITEM-071 | Per-provider degradation alerting (ITEM-068 AC5) | improvement | **done (2026-10-15)** — per-provider 24h error/latency signals fire `provider_error:<id>` / `provider_latency:<id>` through the ITEM-020 lifecycle (min-sample gated; clears on recovery); operator view labels the provider name. Live: fired for 95% errors, labelled "Deepseek" |
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **done — slice 1 (2026-10-15)** — drift detection from the guard fallback rate (5%, 20-sample floor, 24h) + a deduped `evolution_jobs` queue (migration 034) + operator panel. Live: 25/25 fallbacks queued one job, a repeat pass deduped. Train/test/hot-swap → ITEM-076 |
+| ITEM-077 | Local / edge models are priced at the cloud default | bug | **new (2026-10-23)** — a locally hosted model with no price row is costed at the $3/$15 default, so the dashboard reports phantom spend and budgets can trip. Mark local providers unpriced (cost 0); found on the first real edge run |
 | ITEM-075 | Edge serves the local provider's own models | bug | **done (2026-10-15)** — the node discovered `GET <provider-url>/models` on startup + sync (fallback to the cloud catalog); live edge run proved `/v1/models` = the local id and a local 200 with the trace in the cloud |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
@@ -52,12 +53,13 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **staged** — gated on the Slice 3 infra (S3 weights, vLLM, DPO dataset); consumes the `evolution_jobs` queue from ITEM-031 (the original ACs 2/3) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-23 (ITEM-031 slice 1 done — the evolution loop's detection/queue half is live)_ —
-**The pullable set is empty again.** Every remaining item is gated: **ITEM-076**
-(train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA serving) need the Slice 3
-infra (S3 adapter weights, vLLM, DPO dataset); **ITEM-072** needs ITEM-029's task
-centroids; **029/030** need the embedder/ort artifact and real task traffic.
-Unparking one is a PO decision — backlog order no longer implies pullability.
+_Last updated: 2026-10-23 (ITEM-031 slice 1 done; the first real edge node is live against LM Studio)_ —
+**Next pull is ITEM-077** — local/edge models are priced at the cloud default, so a
+self-hosted model reports phantom spend (found on the real edge run). Everything
+else is gated: **ITEM-076** (train / gold-set / hot-swap) and **ITEM-032**
+(PagedLoRA) need the Slice 3 infra; **ITEM-072** needs ITEM-029's task centroids;
+**029/030** need the embedder/ort artifact and real task traffic. Unparking one is
+a PO decision.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
