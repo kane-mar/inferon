@@ -54,12 +54,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **staged** — gated on the Slice 3 infra (S3 weights, vLLM, DPO dataset); consumes the `evolution_jobs` queue from ITEM-031 (the original ACs 2/3) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-23 (ITEM-031 slice 1 done; the first real edge node is live against LM Studio)_ —
-**The pullable set is empty again** (ITEM-077 closed). Everything remaining is
-gated: **ITEM-076** (train / gold-set / hot-swap) and **ITEM-032**
-(PagedLoRA) need the Slice 3 infra; **ITEM-072** needs ITEM-029's task centroids;
-**029/030** need the embedder/ort artifact and real task traffic. Unparking one is
-a PO decision.
+_Last updated: 2026-10-26 (ITEM-078 closed — the live edge node runs with file-based credentials)_ —
+**The pullable set is empty.** All five remaining items are gated — nothing here
+can be pulled without a PO decision:
+**ITEM-076** (train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA) need the
+Slice 3 infra; **ITEM-072** needs ITEM-029's task centroids; **029/030** need the
+embedder/ort artifact and real task traffic.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
