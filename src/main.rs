@@ -62,11 +62,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|index| argv.get(index + 1))
                 .cloned()
         };
+        let credential = |name: &str| -> String {
+            match inferon::edge_runtime::credential(
+                flag(name),
+                flag(&format!("{name}-file")),
+                name,
+            ) {
+                Ok(value) => value,
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(2);
+                }
+            }
+        };
         let options = inferon::edge_runtime::EdgeOptions {
             control_url: flag("--control-url").unwrap_or_default(),
-            node_token: flag("--node-token").unwrap_or_default(),
+            node_token: credential("--node-token"),
             provider_url: flag("--provider-url").unwrap_or_default(),
-            provider_key: flag("--provider-key").unwrap_or_default(),
+            provider_key: credential("--provider-key"),
             provider_kind: flag("--provider-kind")
                 .unwrap_or_else(|| "openai-compatible".to_string()),
             port,

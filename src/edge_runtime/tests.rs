@@ -132,3 +132,37 @@
             cloud
         );
     }
+
+    #[test]
+    fn a_credential_can_come_from_a_file_so_it_never_appears_in_argv() {
+        assert_eq!(
+            credential(Some("sk-argv".into()), None, "--provider-key").unwrap(),
+            "sk-argv"
+        );
+        let path = std::env::temp_dir().join(format!("inferon-key-{}", Uuid::new_v4()));
+        std::fs::write(&path, "sk-from-file\n").unwrap();
+        assert_eq!(
+            credential(
+                Some("sk-argv".into()),
+                Some(path.to_string_lossy().into_owned()),
+                "--provider-key",
+            )
+            .unwrap(),
+            "sk-from-file",
+            "the file wins, so a stale inline flag cannot shadow it"
+        );
+        assert!(credential(
+            None,
+            Some("/nonexistent/inferon-key".into()),
+            "--provider-key"
+        )
+        .is_err());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_missing_credential_names_both_forms() {
+        let error = credential(None, None, "--provider-key").unwrap_err();
+        assert!(error.contains("--provider-key"), "got {error}");
+        assert!(error.contains("--provider-key-file"), "got {error}");
+    }

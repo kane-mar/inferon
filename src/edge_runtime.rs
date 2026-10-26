@@ -315,6 +315,28 @@ fn wire_trace(msg: &TraceMessage) -> Value {
     })
 }
 
+/// Resolve a credential that may be given inline or read from a file. A file
+/// wins, so the secret need not appear in `ps` or shell history.
+pub fn credential(
+    value: Option<String>,
+    file: Option<String>,
+    flag: &str,
+) -> Result<String, String> {
+    let resolved = match file {
+        Some(path) => std::fs::read_to_string(&path)
+            .map_err(|e| format!("{flag}-file {path}: {e}"))?
+            .trim_end()
+            .to_string(),
+        None => value.unwrap_or_default(),
+    };
+    if resolved.is_empty() {
+        return Err(format!(
+            "edge mode needs {flag} <value> or {flag}-file <path>"
+        ));
+    }
+    Ok(resolved)
+}
+
 /// How to run the node.
 #[derive(Clone)]
 pub struct EdgeOptions {
