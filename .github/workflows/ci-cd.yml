@@ -45,6 +45,23 @@ jobs:
       - name: unit tests (vitest)
         run: npx vitest run --project unit
 
+  # The embedder is opt-in and needs a real artifact; run its gated tests
+  # (latency + semantics) on the real model so the feature cannot rot.
+  embedder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch the embedder artifact
+        run: ./scripts/fetch-embedder.sh > /dev/null
+      - name: Embedder tests (real model)
+        run: |
+          export EMBED_MODEL_PATH="$HOME/.cache/inferon/embedder/model_quantized.onnx"
+          export EMBED_TOKENIZER_PATH="$HOME/.cache/inferon/embedder/tokenizer.json"
+          export ORT_DYLIB_PATH="$(find "$HOME/.cache/inferon/embedder/ort/lib" -name 'libonnxruntime.so*' | head -1)"
+          cargo test --features embedder --release -- --include-ignored --nocapture embed_
+
   deploy:
     needs: [test, web]
     runs-on: ubuntu-latest
