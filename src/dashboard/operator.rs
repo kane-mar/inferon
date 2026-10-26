@@ -417,7 +417,7 @@ pub async fn operator_key_revoke(
 
 /// One `evolution_jobs` row (id, tenant id, adapter, reason, state, evidence,
 /// created, updated).
-type EvolutionRow = (String, String, String, String, String, Value, String, String);
+type EvolutionRow = (String, String, String, String, String, Value, String, String, Option<String>);
 
 /// GET /v1/dashboard/api/operator/evolution — every tenant's evolution jobs
 /// (ITEM-031 AC4: drift detection and each later step are visible).
@@ -430,7 +430,7 @@ pub async fn operator_evolution(
     }
     let rows: Vec<EvolutionRow> = match sqlx::query_as(
         "SELECT id::text, tenant_id::text, adapter, reason, state, evidence,
-                created_at::text, updated_at::text
+                created_at::text, updated_at::text, finished_at::text
            FROM evolution_jobs
           ORDER BY created_at DESC
           LIMIT 200",
@@ -444,7 +444,17 @@ pub async fn operator_evolution(
     let jobs: Vec<Value> = rows
         .into_iter()
         .map(
-            |(id, tenant_id, adapter, reason, state, evidence, created_at, updated_at)| {
+            |(
+                id,
+                tenant_id,
+                adapter,
+                reason,
+                state,
+                evidence,
+                created_at,
+                updated_at,
+                finished_at,
+            )| {
                 json!({
                     "id": id,
                     "tenant_id": tenant_id,
@@ -454,6 +464,7 @@ pub async fn operator_evolution(
                     "evidence": evidence,
                     "created_at": created_at,
                     "updated_at": updated_at,
+                    "finished_at": finished_at,
                 })
             },
         )

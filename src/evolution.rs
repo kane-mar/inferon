@@ -61,6 +61,131 @@ pub struct EvolutionJob {
     pub evidence: Value,
     pub created_at: String,
     pub updated_at: String,
+    /// Set when the job reached a terminal state (promoted / failed).
+    pub finished_at: Option<String>,
+}
+
+/// The job lifecycle (ITEM-076).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobState {
+    Queued,
+    Training,
+    Testing,
+    Promoting,
+    Promoted,
+    Failed,
+}
+
+impl JobState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            JobState::Queued => "queued",
+            JobState::Training => "training",
+            JobState::Testing => "testing",
+            JobState::Promoting => "promoting",
+            JobState::Promoted => "promoted",
+            JobState::Failed => "failed",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, JobState::Promoted | JobState::Failed)
+    }
+}
+
+/// A trained adapter candidate, produced by a [`Trainer`] and vetted by a [`Gate`]
+/// before a [`Promoter`] makes it live.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    pub adapter: String,
+}
+
+/// Produces a candidate adapter for a job. The real implementation (S3 + vLLM +
+/// the ITEM-026 DPO dataset) is gated on the Slice 3 infra; this seam keeps the
+/// loop testable without it.
+#[async_trait::async_trait]
+pub trait Trainer: Send + Sync {
+    async fn train(&self, job: &EvolutionJob) -> Result<Candidate, String>;
+}
+
+/// The held-out gold-set gate: a candidate may only be promoted when this passes.
+#[async_trait::async_trait]
+pub trait Gate: Send + Sync {
+    async fn passes(&self, job: &EvolutionJob, candidate: &Candidate) -> Result<bool, String>;
+}
+
+/// Issues the candidate (`load_lora_adapter`) without dropping in-flight requests.
+#[async_trait::async_trait]
+pub trait Promoter: Send + Sync {
+    async fn promote(&self, job: &EvolutionJob, candidate: &Candidate) -> Result<(), String>;
+}
+
+/// Advance **one** queued job through train → gate → promote, recording every
+/// transition so the operator view shows the whole path. Returns the terminal
+/// state, or `None` when the queue is idle.
+///
+/// Every failure is recorded on the job with the stage that produced it; a
+/// rejected candidate is never promoted.
+pub async fn process_one(
+    store: &dyn EvolutionStore,
+    trainer: &dyn Trainer,
+    gate: &dyn Gate,
+    promoter: &dyn Promoter,
+) -> Result<Option<JobState>, String> {
+    let Some(job) = store.claim().await? else {
+        return Ok(None);
+    };
+    // `claim` already moved the job to `training`.
+    let candidate = match trainer.train(&job).await {
+        Ok(candidate) => candidate,
+        Err(error) => return fail(store, &job, "training", &error).await,
+    };
+    store
+        .set_state(job.id, JobState::Testing, &json!({ "stage": "testing" }))
+        .await?;
+    match gate.passes(&job, &candidate).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return fail(
+                store,
+                &job,
+                "gate",
+                "the held-out gold set rejected the candidate",
+            )
+            .await
+        }
+        Err(error) => return fail(store, &job, "gate", &error).await,
+    }
+    store
+        .set_state(job.id, JobState::Promoting, &json!({ "stage": "promoting" }))
+        .await?;
+    if let Err(error) = promoter.promote(&job, &candidate).await {
+        return fail(store, &job, "promoting", &error).await;
+    }
+    store
+        .set_state(
+            job.id,
+            JobState::Promoted,
+            &json!({ "stage": "promoted", "adapter": candidate.adapter }),
+        )
+        .await?;
+    Ok(Some(JobState::Promoted))
+}
+
+async fn fail(
+    store: &dyn EvolutionStore,
+    job: &EvolutionJob,
+    stage: &str,
+    error: &str,
+) -> Result<Option<JobState>, String> {
+    store
+        .set_state(
+            job.id,
+            JobState::Failed,
+            &json!({ "stage": stage, "error": error }),
+        )
+        .await?;
+    Ok(Some(JobState::Failed))
 }
 
 #[async_trait::async_trait]
@@ -73,6 +198,17 @@ pub trait EvolutionStore: Send + Sync {
         evidence: &Value,
     ) -> Result<bool, String>;
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<EvolutionJob>, String>;
+    /// Take the oldest `queued` job and move it to `training` (exclusive, so two
+    /// workers never claim the same job). `None` when the queue is idle.
+    async fn claim(&self) -> Result<Option<EvolutionJob>, String>;
+    /// Record a transition, stamping `finished_at` for terminal states. False
+    /// when the id is unknown.
+    async fn set_state(
+        &self,
+        id: Uuid,
+        state: JobState,
+        evidence: &Value,
+    ) -> Result<bool, String>;
 }
 
 /// The live store.
@@ -111,33 +247,83 @@ impl EvolutionStore for PostgresEvolutionStore {
     }
 
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<EvolutionJob>, String> {
-        let rows: Vec<(Uuid, Uuid, String, String, String, Value, String, String)> =
-            sqlx::query_as(
-                "SELECT id, tenant_id, adapter, reason, state, evidence,
-                        created_at::text, updated_at::text
-                   FROM evolution_jobs
-                  WHERE tenant_id = $1
-                  ORDER BY created_at DESC",
-            )
-            .bind(tenant_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(rows
-            .into_iter()
-            .map(|(id, tenant_id, adapter, reason, state, evidence, created_at, updated_at)| {
-                EvolutionJob {
-                    id,
-                    tenant_id,
-                    adapter,
-                    reason,
-                    state,
-                    evidence,
-                    created_at,
-                    updated_at,
-                }
-            })
-            .collect())
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id, tenant_id, adapter, reason, state, evidence,
+                    created_at::text, updated_at::text, finished_at::text
+               FROM evolution_jobs
+              WHERE tenant_id = $1
+              ORDER BY created_at DESC",
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(rows.into_iter().map(job_from_row).collect())
+    }
+
+    async fn claim(&self) -> Result<Option<EvolutionJob>, String> {
+        // `FOR UPDATE SKIP LOCKED` + the state guard makes the claim exclusive:
+        // two workers ticking together take different jobs.
+        let row: Option<Row> = sqlx::query_as(
+            "UPDATE evolution_jobs
+                SET state = 'training', updated_at = now()
+              WHERE id = (
+                    SELECT id FROM evolution_jobs
+                     WHERE state = 'queued'
+                     ORDER BY created_at
+                     LIMIT 1
+                     FOR UPDATE SKIP LOCKED
+              )
+              RETURNING id, tenant_id, adapter, reason, state, evidence,
+                        created_at::text, updated_at::text, finished_at::text",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(row.map(job_from_row))
+    }
+
+    async fn set_state(
+        &self,
+        id: Uuid,
+        state: JobState,
+        evidence: &Value,
+    ) -> Result<bool, String> {
+        let result = sqlx::query(
+            "UPDATE evolution_jobs
+                SET state = $2,
+                    evidence = $3,
+                    updated_at = now(),
+                    finished_at = CASE WHEN $2 IN ('promoted', 'failed')
+                                       THEN now() ELSE finished_at END
+              WHERE id = $1",
+        )
+        .bind(id)
+        .bind(state.as_str())
+        .bind(evidence)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(result.rows_affected() > 0)
+    }
+}
+
+/// `evolution_jobs` columns as selected above: id, tenant, adapter, reason, state,
+/// evidence, created, updated, finished.
+type Row = (Uuid, Uuid, String, String, String, Value, String, String, Option<String>);
+
+fn job_from_row(row: Row) -> EvolutionJob {
+    let (id, tenant_id, adapter, reason, state, evidence, created_at, updated_at, finished_at) = row;
+    EvolutionJob {
+        id,
+        tenant_id,
+        adapter,
+        reason,
+        state,
+        evidence,
+        created_at,
+        updated_at,
+        finished_at,
     }
 }
 
@@ -172,6 +358,7 @@ impl EvolutionStore for InMemoryEvolutionStore {
             evidence: evidence.clone(),
             created_at: "now".to_string(),
             updated_at: "now".to_string(),
+            finished_at: None,
         });
         Ok(true)
     }
@@ -185,6 +372,33 @@ impl EvolutionStore for InMemoryEvolutionStore {
             .filter(|job| job.tenant_id == tenant_id)
             .cloned()
             .collect())
+    }
+
+    async fn claim(&self) -> Result<Option<EvolutionJob>, String> {
+        let mut jobs = self.jobs.lock().unwrap();
+        let Some(job) = jobs
+            .iter_mut()
+            .find(|job| job.state == JobState::Queued.as_str())
+        else {
+            return Ok(None);
+        };
+        job.state = JobState::Training.as_str().to_string();
+        job.updated_at = "now".to_string();
+        Ok(Some(job.clone()))
+    }
+
+    async fn set_state(&self, id: Uuid, state: JobState, evidence: &Value) -> Result<bool, String> {
+        let mut jobs = self.jobs.lock().unwrap();
+        let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
+            return Ok(false);
+        };
+        job.state = state.as_str().to_string();
+        job.evidence = evidence.clone();
+        job.updated_at = "now".to_string();
+        if state.is_terminal() {
+            job.finished_at = Some("now".to_string());
+        }
+        Ok(true)
     }
 }
 

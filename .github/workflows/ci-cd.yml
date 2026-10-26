@@ -54,7 +54,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Fetch the embedder artifact
-        run: ./scripts/fetch-embedder.sh > /dev/null
+        run: bash ./scripts/fetch-embedder.sh > /dev/null
       - name: Embedder tests (real model)
         run: |
           export EMBED_MODEL_PATH="$HOME/.cache/inferon/embedder/model_quantized.onnx"
