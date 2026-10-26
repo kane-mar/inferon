@@ -117,7 +117,10 @@ pub fn from_env() -> std::sync::Arc<dyn Embedder> {
     #[cfg(feature = "embedder")]
     if let (Some(model), Some(tokenizer)) = (model.clone(), tokenizer.clone()) {
         match ort_impl::OrtEmbedder::load(&model, &tokenizer) {
-            Ok(embedder) => return std::sync::Arc::new(embedder),
+            Ok(embedder) => {
+                tracing::info!("prompt embedder loaded from {model}");
+                return std::sync::Arc::new(embedder);
+            }
             Err(e) => tracing::warn!("embedder unavailable ({e}); using heuristics"),
         }
     }

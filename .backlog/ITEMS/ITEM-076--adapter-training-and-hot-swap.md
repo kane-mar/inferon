@@ -18,3 +18,25 @@ its detection/queue half shipped.
    upgraded without dropping in-flight requests.
 4. Every transition (training → testing → promoting → promoted) is written to the
    job row so the operator view shows it.
+
+## Slice 1 (2026-10-26) — the worker and its seams
+
+Delivered the part that needs no Slice 3 infra: the job lifecycle and the
+train → gate → promote loop behind seams.
+
+- `JobState` (queued/training/testing/promoting/promoted/failed) + `finished_at`.
+- `EvolutionStore::claim` — exclusive oldest-queued claim (Postgres
+  `FOR UPDATE SKIP LOCKED`, in-memory equivalent), so two workers never take the
+  same job.
+- `EvolutionStore::set_state` — records every transition with evidence and stamps
+  `finished_at` on terminal states.
+- `Trainer` / `Gate` / `Promoter` traits and `process_one`: a failure is recorded
+  with the stage that produced it, a rejected candidate can never be promoted,
+  and the outcome is a terminal state.
+- Operator payload exposes `finished_at`.
+- **6 new tests**: success, training failure, gate rejection, promotion failure,
+  idle queue, exclusive claim. Rust 314 → 320, clippy clean.
+
+**Remaining (gated on the Slice 3 infra):** the real `Trainer` (S3 + vLLM +
+ITEM-026's DPO dataset), the held-out gold-set corpus for `Gate`, and the
+`load_lora_adapter` `Promoter`.

@@ -52,7 +52,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
-| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **staged** — gated on the Slice 3 infra (S3 weights, vLLM, DPO dataset); consumes the `evolution_jobs` queue from ITEM-031 (the original ACs 2/3) |
+| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
 _Last updated: 2026-10-26 (ITEM-079 closed — the embedder artifact runs; ITEM-029's embedder gate is cleared)_ —
