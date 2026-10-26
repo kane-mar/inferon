@@ -131,6 +131,7 @@ pub fn from_env() -> std::sync::Arc<dyn Embedder> {
 #[cfg(feature = "embedder")]
 mod ort_impl {
     use super::{fit_to_model_window, l2_normalize, mean_pool, Embedder, EMBED_DIM, MAX_TOKENS};
+    use ort::session::builder::GraphOptimizationLevel;
     use ort::session::Session;
     use ort::value::Tensor;
 
@@ -144,9 +145,10 @@ mod ort_impl {
         pub fn load(model_path: &str, tokenizer_path: &str) -> Result<Self, String> {
             let session = Session::builder()
                 .map_err(|e| format!("session builder: {e}"))?
-                .with_optimization_level(
-                    ort::session::builder::GraphOptimizationLevel::Level3,
-                )
+                // ORT's "level 3 / all optimizations". The crate's `Level3` maps to
+                // ORT_ENABLE_LAYOUT, which only exists in ORT 1.21+; `All` is the
+                // same intent and valid on the macOS-11-compatible runtime (1.19).
+                .with_optimization_level(GraphOptimizationLevel::All)
                 .map_err(|e| format!("optimization level: {e}"))?
                 .with_intra_threads(4)
                 .map_err(|e| format!("intra threads: {e}"))?
@@ -191,6 +193,8 @@ mod ort_impl {
 
     #[cfg(test)]
     mod tests {
+        use super::*;
+
         /// Host-only latency bench (ITEM-028 AC2/measurement): needs the model
         /// + tokenizer + libonnxruntime on the Linux host.
         ///
@@ -215,6 +219,33 @@ mod ort_impl {
             let p50 = samples[runs / 2];
             let p95 = samples[(runs * 95) / 100];
             println!("embed_bench: mean {mean:.2}ms p50 {p50:.2}ms p95 {p95:.2}ms ({runs} runs)");
+        }
+
+        /// Real-model semantics: related prompts must be closer than unrelated
+        /// ones, and every vector is unit length. Artifact-gated like the bench:
+        ///
+        /// cargo test --features embedder --release -- --ignored --nocapture embed_semantics
+        #[test]
+        #[ignore = "needs the model artifact + ONNX Runtime; run on the host"]
+        fn embed_semantics() {
+            let embedder = crate::embed::from_env();
+            let related_a = embedder
+                .embed("Summarize this quarterly report into three bullets for an executive audience.")
+                .expect("embed a");
+            let related_b = embedder
+                .embed("Give me a three-bullet executive summary of the quarterly results.")
+                .expect("embed b");
+            let unrelated = embedder
+                .embed("Explain how to poach an egg.")
+                .expect("embed c");
+            let cosine = |x: &[f32; EMBED_DIM], y: &[f32; EMBED_DIM]| -> f32 {
+                x.iter().zip(y).map(|(p, q)| p * q).sum()
+            };
+            let near = cosine(&related_a, &related_b);
+            let far = cosine(&related_a, &unrelated);
+            assert!(near > far, "related {near:.3} should beat unrelated {far:.3}");
+            let norm = |v: &[f32; EMBED_DIM]| v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!((norm(&related_a) - 1.0).abs() < 1e-4, "unit norm, got {}", norm(&related_a));
         }
     }
 }

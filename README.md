@@ -291,6 +291,28 @@ parent zone's DNS (DNSimple for agilefederation.com) and
   provisions a disposable Vultr host; `scripts/smoke.sh` exercises healthz, the auth
   boundary, the dashboard, and the web surface inside the real stack.
 
+### Prompt embedder (optional, `embedder` feature)
+
+The task-aware router can embed prompts with a quantized BGE-micro ONNX model
+(384-d). It is an **opt-in build**: the default build and the local TDD loop never
+load ONNX Runtime.
+
+```bash
+./scripts/fetch-embedder.sh    # model + tokenizer + ONNX Runtime 1.19.2
+# it prints the env vars to export, then:
+cargo test --features embedder --release -- --ignored --nocapture embed_bench
+cargo test --features embedder --release -- --ignored --nocapture embed_semantics
+```
+
+- ONNX Runtime **1.19.2** is pinned (`ort` feature `api-19`): the newest release
+  that still ships macOS **x86_64** and targets macOS 11. Newer builds need
+  macOS 13 libc++ symbols.
+- Runtime-only: `ort` uses `load-dynamic`, so nothing links at build time;
+  `ORT_DYLIB_PATH` points at the downloaded library.
+- Measured on the dev Mac (128-token window, level-3/all optimizations, 4 intra
+  threads): **p50 ~8–10 ms**, p95 ~12–14 ms per embed — a task-level signal,
+  cached per system prompt, never per request.
+
 ## Project layout
 
 ```

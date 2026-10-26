@@ -44,22 +44,24 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-031 | OmniRouting: continuous evolution loop | feature | **done — slice 1 (2026-10-15)** — drift detection from the guard fallback rate (5%, 20-sample floor, 24h) + a deduped `evolution_jobs` queue (migration 034) + operator panel. Live: 25/25 fallbacks queued one job, a repeat pass deduped. Train/test/hot-swap → ITEM-076 |
 | ITEM-077 | Local / edge models are priced at the cloud default | bug | **done (2026-10-23)** — `local` provider kind + `TraceMessage.is_local`; a local trace costs 0, cache savings 0, full counterfactual still attributed, `unpriced` untouched. Live edge trace: `upstream_cost_usd = 0.000000` |
 | ITEM-078 | Edge credentials from files, not argv | hardening | **done (2026-10-26)** — `--provider-key-file` / `--node-token-file` (file wins, newline trimmed, fail-fast); `ps` shows paths only. Live restarted node + 200 |
+| ITEM-079 | Prompt-embedder artifact runs (macOS 11 x86_64) | hardening | **done (2026-10-26)** — `scripts/fetch-embedder.sh` + ORT 1.19.2 pinned (`api-19`, the newest with macOS x64/macOS 11); `All` optimization level; artifact tests `embed_bench` p50 ~8–10 ms + `embed_semantics` pass |
 | ITEM-075 | Edge serves the local provider's own models | bug | **done (2026-10-15)** — the node discovered `GET <provider-url>/models` on startup + sync (fallback to the cloud catalog); live edge run proved `/v1/models` = the local id and a local 200 with the trace in the cloud |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
-| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — with 028; needs real task traffic for centroids + the quality gate (see item file) |
+| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **staged** — gated on the Slice 3 infra (S3 weights, vLLM, DPO dataset); consumes the `evolution_jobs` queue from ITEM-031 (the original ACs 2/3) |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-26 (ITEM-078 closed — the live edge node runs with file-based credentials)_ —
-**The pullable set is empty.** All five remaining items are gated — nothing here
-can be pulled without a PO decision:
-**ITEM-076** (train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA) need the
-Slice 3 infra; **ITEM-072** needs ITEM-029's task centroids; **029/030** need the
-embedder/ort artifact and real task traffic.
+_Last updated: 2026-10-26 (ITEM-079 closed — the embedder artifact runs; ITEM-029's embedder gate is cleared)_ —
+**Still nothing pullable, but the analysis gate is half-open.** ITEM-029's
+prerequisite (a working embedder) is **done**; what remains is **real task
+traffic** to build meaningful centroids — ITEM-063/064's closed loop runs today
+without it. The other gates are unchanged: **ITEM-076** (train / gold-set /
+hot-swap) and **ITEM-032** (PagedLoRA) need the Slice 3 infra; **ITEM-072** needs
+ITEM-029; **030** needs 029.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.

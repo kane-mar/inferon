@@ -32,8 +32,13 @@ jsonschema = "0.54.0"
 chacha20poly1305 = "0.10"
 # Optional (feature `embedder`): ONNX Runtime + tokenizer for the prompt
 # embedder. `load-dynamic` keeps the crate link-free, so this type-checks on
-# any platform and only needs libonnxruntime at runtime (see src/embed.rs).
-ort = { version = "2.0.0-rc.13", optional = true, default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-27"] }
+# any platform and only loads libonnxruntime at runtime (see src/embed.rs).
+#
+# `api-19`, not the newest API: ONNX Runtime 1.19.2 is the newest macOS x86_64
+# build that still targets macOS 11 (newer ones need macOS 13 libc++ symbols), so
+# the dev loop runs the real artifact instead of only type-checking. Linux x64
+# ships 1.19.2 too. `scripts/fetch-embedder.sh` downloads it.
+ort = { version = "2.0.0-rc.13", optional = true, default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-19"] }
 tokenizers = { version = "0.21", optional = true, default-features = false, features = ["fancy-regex"] }
 
 [dev-dependencies]
