@@ -415,10 +415,6 @@ pub async fn operator_key_revoke(
     }
 }
 
-/// One `evolution_jobs` row (id, tenant id, adapter, reason, state, evidence,
-/// created, updated).
-type EvolutionRow = (String, String, String, String, String, Value, String, String, Option<String>);
-
 /// GET /v1/dashboard/api/operator/evolution — every tenant's evolution jobs
 /// (ITEM-031 AC4: drift detection and each later step are visible).
 pub async fn operator_evolution(
@@ -428,48 +424,27 @@ pub async fn operator_evolution(
     if let Err(resp) = operator_or(&state, &headers).await {
         return resp;
     }
-    let rows: Vec<EvolutionRow> = match sqlx::query_as(
-        "SELECT id::text, tenant_id::text, adapter, reason, state, evidence,
-                created_at::text, updated_at::text, finished_at::text
-           FROM evolution_jobs
-          ORDER BY created_at DESC
-          LIMIT 200",
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return internal(&e.to_string()),
+    let jobs = match crate::evolution::list_all(&state.db).await {
+        Ok(jobs) => jobs,
+        Err(e) => return internal(&e),
     };
-    let jobs: Vec<Value> = rows
+    let items: Vec<Value> = jobs
         .into_iter()
-        .map(
-            |(
-                id,
-                tenant_id,
-                adapter,
-                reason,
-                state,
-                evidence,
-                created_at,
-                updated_at,
-                finished_at,
-            )| {
-                json!({
-                    "id": id,
-                    "tenant_id": tenant_id,
-                    "adapter": adapter,
-                    "reason": reason,
-                    "state": state,
-                    "evidence": evidence,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "finished_at": finished_at,
-                })
-            },
-        )
+        .map(|job| {
+            json!({
+                "id": job.id.to_string(),
+                "tenant_id": job.tenant_id.to_string(),
+                "adapter": job.adapter,
+                "reason": job.reason,
+                "state": job.state,
+                "evidence": job.evidence,
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+                "finished_at": job.finished_at,
+            })
+        })
         .collect();
-    json_ok(json!({ "jobs": jobs }))
+    json_ok(json!({ "jobs": items }))
 }
 
 /// POST /v1/dashboard/api/operator/evolution/detect — run a drift pass now;

@@ -114,7 +114,7 @@ impl EdgeTrace {
     }
 }
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// A fresh edge-node credential (shown once; only its hash is stored).
 pub fn mint_edge_token() -> String {
@@ -441,7 +441,11 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
     .fetch_optional(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    let fallbacks = state.routing_store.fallbacks(tenant_id).await.unwrap_or_default();
+    let fallbacks = state
+        .routing_store
+        .fallbacks(tenant_id)
+        .await
+        .map_err(|e| e.to_string())?;
     let policy = state.policy_store.active(tenant_id).await.ok().flatten();
     let models: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT pm.model_id FROM provider_models pm
@@ -450,7 +454,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
     .bind(tenant_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "tenant_id": tenant_id.to_string(),
         "key_hashes": key_hashes,

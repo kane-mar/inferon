@@ -25,6 +25,25 @@ const ADAPT_INTERVAL_SECS: u64 = 900;
 /// telemetry, queueing a deduped job per drifting model.
 const EVOLUTION_INTERVAL_SECS: u64 = 900;
 
+/// Run an async task forever on a fixed cadence. The first tick fires
+/// immediately; missed ticks are skipped rather than burst-run, so a slow pass
+/// does not queue back-to-back follow-ups.
+fn spawn_periodic<F, Fut>(name: &'static str, period: std::time::Duration, task: F)
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(period);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            tracing::debug!("periodic task: {name}");
+            task().await;
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -106,52 +125,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Cost anomaly alerts (ITEM-020): one periodic evaluation pass; webhook
     // delivery is best-effort from a compose env var (no new infra, AC4).
-    {
-        let pool = pool.clone();
-        let http_client = Client::new();
-        let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
-            .ok()
-            .filter(|u| !u.is_empty());
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
-                ALERT_EVAL_INTERVAL_SECS,
-            ));
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                inferon::alerts::run_evaluation(&pool, webhook_url.as_deref(), &http_client).await;
+    let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
+        .ok()
+        .filter(|u| !u.is_empty());
+    let alert_client = Client::new();
+    let alerts_pool = pool.clone();
+    spawn_periodic(
+        "alerts",
+        std::time::Duration::from_secs(ALERT_EVAL_INTERVAL_SECS),
+        move || {
+            let pool = alerts_pool.clone();
+            let client = alert_client.clone();
+            let webhook = webhook_url.clone();
+            async move {
+                inferon::alerts::run_evaluation(&pool, webhook.as_deref(), &client).await;
             }
-        });
-    }
+        },
+    );
 
     // Adaptive policy loop (ITEM-064): derive a bounded policy from telemetry
     // and publish it; the hot path reads it on the next request.
-    {
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            let mut ticker =
-                tokio::time::interval(std::time::Duration::from_secs(ADAPT_INTERVAL_SECS));
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                inferon::policy::run_adaptation(&pool).await;
-            }
-        });
-    }
+    let adapt_pool = pool.clone();
+    spawn_periodic(
+        "adaptive-policy",
+        std::time::Duration::from_secs(ADAPT_INTERVAL_SECS),
+        move || {
+            let pool = adapt_pool.clone();
+            async move { inferon::policy::run_adaptation(&pool).await }
+        },
+    );
 
     // ITEM-031 slice 1: drift detection -> evolution job queue.
-    {
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            let mut ticker =
-                tokio::time::interval(std::time::Duration::from_secs(EVOLUTION_INTERVAL_SECS));
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
+    let evolution_pool = pool.clone();
+    spawn_periodic(
+        "evolution",
+        std::time::Duration::from_secs(EVOLUTION_INTERVAL_SECS),
+        move || {
+            let pool = evolution_pool.clone();
+            async move {
                 inferon::evolution::run_evolution(&pool).await;
             }
-        });
-    }
+        },
+    );
 
     // A connect timeout keeps an unreachable provider (e.g. a LAN model the
     // cloud host cannot route to) from hanging a request indefinitely; it

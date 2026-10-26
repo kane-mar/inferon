@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// Largest single-step threshold change (guardrail: no wild swings).
 pub const STEP: f64 = 0.05;

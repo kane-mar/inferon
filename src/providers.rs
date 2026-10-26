@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// Optional, non-secret provider configuration (ITEM-043 AC1): an OpenAI
 /// organization id and arbitrary upstream headers (e.g. `anthropic-version`

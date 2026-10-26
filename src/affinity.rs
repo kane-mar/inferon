@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// How long a warm target stays actionable. DeepSeek's prefix cache lives for
 /// minutes–hours; a stale pin must not block failover or healthy distribution.

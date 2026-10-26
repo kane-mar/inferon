@@ -23,6 +23,10 @@
 // ~10 signatures would only add noise.
 #![allow(clippy::result_large_err)]
 
+/// The shared store seam result: any `Send + Sync` error, so Postgres and
+/// in-memory implementations can satisfy the same trait.
+pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 // Control-plane surfaces.
 pub mod auth;
 pub mod dashboard;

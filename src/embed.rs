@@ -108,27 +108,33 @@ pub(crate) fn l2_normalize(mut v: [f32; EMBED_DIM]) -> [f32; EMBED_DIM] {
 /// Build the configured embedder. Feature off, paths unset, or model load
 /// failure → `NoEmbedder` (logged), so the proxy always starts (AC4).
 pub fn from_env() -> std::sync::Arc<dyn Embedder> {
-    let model = std::env::var("EMBED_MODEL_PATH")
-        .ok()
-        .filter(|p| !p.is_empty());
-    let tokenizer = std::env::var("EMBED_TOKENIZER_PATH")
-        .ok()
-        .filter(|p| !p.is_empty());
     #[cfg(feature = "embedder")]
-    if let (Some(model), Some(tokenizer)) = (model.clone(), tokenizer.clone()) {
-        match ort_impl::OrtEmbedder::load(&model, &tokenizer) {
-            Ok(embedder) => {
-                tracing::info!("prompt embedder loaded from {model}");
-                return std::sync::Arc::new(embedder);
+    {
+        let model = env_path("EMBED_MODEL_PATH");
+        let tokenizer = env_path("EMBED_TOKENIZER_PATH");
+        if let (Some(model), Some(tokenizer)) = (model, tokenizer) {
+            match ort_impl::OrtEmbedder::load(&model, &tokenizer) {
+                Ok(embedder) => {
+                    tracing::info!("prompt embedder loaded from {model}");
+                    return std::sync::Arc::new(embedder);
+                }
+                Err(e) => tracing::warn!("embedder unavailable ({e}); using heuristics"),
             }
-            Err(e) => tracing::warn!("embedder unavailable ({e}); using heuristics"),
+        } else {
+            tracing::info!(
+                "no embedder configured (EMBED_MODEL_PATH / EMBED_TOKENIZER_PATH) — routing stays heuristic"
+            );
         }
     }
-    let _ = (model, tokenizer);
-    if cfg!(feature = "embedder") {
-        tracing::info!("no embedder configured (EMBED_MODEL_PATH / EMBED_TOKENIZER_PATH) — routing stays heuristic");
-    }
+    #[cfg(not(feature = "embedder"))]
+    tracing::debug!("embedder feature is off — routing stays heuristic");
+
     std::sync::Arc::new(NoEmbedder)
+}
+
+#[cfg(feature = "embedder")]
+fn env_path(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
 #[cfg(feature = "embedder")]

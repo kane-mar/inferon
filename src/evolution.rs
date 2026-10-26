@@ -438,6 +438,22 @@ pub async fn detect_drift(
         .collect())
 }
 
+/// Every tenant's jobs, newest first — the operator view. One representation
+/// (`EvolutionJob`), so the operator endpoint does not re-map a tuple.
+pub async fn list_all(pool: &PgPool) -> Result<Vec<EvolutionJob>, String> {
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT id, tenant_id, adapter, reason, state, evidence,
+                created_at::text, updated_at::text, finished_at::text
+           FROM evolution_jobs
+          ORDER BY created_at DESC
+          LIMIT 200",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(job_from_row).collect())
+}
+
 /// One scheduled pass: detect drift per tenant and queue a deduped job.
 /// Returns the number of jobs queued.
 pub async fn run_evolution(pool: &PgPool) -> usize {

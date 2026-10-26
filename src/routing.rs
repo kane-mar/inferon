@@ -5,7 +5,7 @@
 
 use uuid::Uuid;
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// Failure classes that trigger the next chain step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

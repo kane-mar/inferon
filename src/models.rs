@@ -8,7 +8,7 @@
 
 use uuid::Uuid;
 
-pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use crate::StoreResult;
 
 /// One model's flags for a provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
