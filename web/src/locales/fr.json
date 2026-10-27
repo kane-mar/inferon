@@ -108,6 +108,7 @@
     "waste_cache_miss": "Cache manqué",
     "waste_model_misuse": "Mauvais modèle",
     "no_waste": "Aucune fuite de coût détectée sur {requests} requêtes.",
+    "hide_zero": "Masquer les lignes à 0,00 $",
     "no_data": "Aucune donnée pour cette fenêtre.",
     "compare": "Comparer",
     "usage_over_time": "Utilisation dans le temps",

@@ -135,3 +135,12 @@ export const avgTtftMs = (points: TimeseriesPoint[]): number | null => {
   const weighted = sum(points.map(point => (point.avg_ttft_ms ?? 0) * point.requests));
   return weighted / requests;
 };
+
+/**
+ * Drop zero-cost rows when the caller asked to hide them. Costs arrive as
+ * decimal strings, so compare numerically only for the zero test.
+ */
+export const spendRows = <T extends { cost_usd: string }>(
+  rows: T[],
+  hideZero: boolean,
+): T[] => (hideZero ? rows.filter(row => Number(row.cost_usd) > 0) : rows);

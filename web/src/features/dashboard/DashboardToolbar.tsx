@@ -6,6 +6,7 @@ export type DashboardView = {
   days: number;
   compare: boolean;
   metric: ChartMetric;
+  hideZero: boolean;
 };
 
 const RANGES = [7, 30, 90] as const;
@@ -17,6 +18,7 @@ const href = (view: DashboardView) => ({
     days: view.days,
     ...(view.compare ? { compare: 1 } : {}),
     ...(view.metric !== 'requests' ? { metric: view.metric } : {}),
+    ...(view.hideZero ? { hide_zero: 1 } : {}),
   },
 });
 

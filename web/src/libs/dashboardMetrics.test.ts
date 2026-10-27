@@ -12,6 +12,7 @@ import {
   formatMs,
   moneyDeltaPct,
   seriesTotals,
+  spendRows,
   spiked,
   trend,
 } from './dashboardMetrics';
@@ -146,5 +147,24 @@ describe('centsToUsd', () => {
     expect(centsToUsd(250)).toBe('2.50');
     expect(centsToUsd(5)).toBe('0.05');
     expect(centsToUsd(-125)).toBe('-1.25');
+  });
+});
+
+describe('spendRows', () => {
+  const rows = [
+    { name: 'free', cost_usd: '0.00' },
+    { name: 'paid', cost_usd: '0.0042' },
+  ];
+
+  it('keeps every row unless asked to hide zero spend', () => {
+    expect(spendRows(rows, false)).toHaveLength(2);
+  });
+
+  it('drops only the zero-cost rows', () => {
+    expect(spendRows(rows, true).map(row => row.name)).toEqual(['paid']);
+  });
+
+  it('keeps a sub-cent cost, which is still spend', () => {
+    expect(spendRows(rows, true)[0]?.cost_usd).toBe('0.0042');
   });
 });

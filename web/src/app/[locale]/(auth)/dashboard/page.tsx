@@ -4,6 +4,7 @@ import type { SpendBreakdownRow } from '@/features/dashboard/SpendBreakdown';
 import type { ChartMetric } from '@/libs/dashboardMetrics';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
@@ -13,6 +14,7 @@ import {
   MetricTabs,
   RangeSwitcher,
 } from '@/features/dashboard/DashboardToolbar';
+import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { LineChart } from '@/features/dashboard/LineChart';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
@@ -24,6 +26,7 @@ import {
   formatInt,
   formatMs,
   moneyDeltaPct,
+  spendRows,
 } from '@/libs/dashboardMetrics';
 import { Link } from '@/libs/I18nNavigation';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
@@ -40,7 +43,7 @@ const VALUE_FORMAT: Record<ChartMetric, ValueFormat> = {
   ttft: 'ms',
 };
 
-type SearchParams = { days?: string; compare?: string; metric?: string };
+type SearchParams = { days?: string; compare?: string; metric?: string; hide_zero?: string };
 
 const parseView = (params: SearchParams): DashboardView => {
   const days = Number(params.days) as DashboardView['days'];
@@ -50,6 +53,7 @@ const parseView = (params: SearchParams): DashboardView => {
     metric: METRICS.includes(params.metric as ChartMetric)
       ? (params.metric as ChartMetric)
       : 'requests',
+    hideZero: params.hide_zero === '1',
   };
 };
 
@@ -90,10 +94,16 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   // ITEM-047: match the current window's rows to the prior period by id (falling
   // back to the label for the shared/legacy rows) so each row can show a delta
   // and an inline spike badge (AC3).
+  // ITEM-047: `hide_zero` drops rows that cost nothing in this window, so the
+  // graph and the table stay readable when most traffic is free (local models).
+  const providers = spendRows(byProvider.providers, view.hideZero);
+  const keysRows = spendRows(byKey.keys, view.hideZero);
+  const models = spendRows(byModel.models, view.hideZero);
+
   const prevProviderCost = new Map(
     (prevByProvider?.providers ?? []).map(p => [p.provider_id ?? p.name, p.cost_usd]),
   );
-  const providerRows: SpendBreakdownRow[] = byProvider.providers.map(p => ({
+  const providerRows: SpendBreakdownRow[] = providers.map(p => ({
     id: p.provider_id,
     label: p.name,
     meta: p.kind === 'shared' ? undefined : p.kind,
@@ -107,7 +117,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   }));
 
   const prevKeyCost = new Map((prevByKey?.keys ?? []).map(k => [k.key_id ?? k.label, k.cost_usd]));
-  const keyRows: SpendBreakdownRow[] = byKey.keys.map(k => ({
+  const keyRows: SpendBreakdownRow[] = keysRows.map(k => ({
     id: k.key_id,
     label: k.label,
     costUsd: k.cost_usd,
@@ -178,6 +188,9 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         </p>
       </div>
       <div className="flex items-center gap-2">
+        <Suspense fallback={null}>
+          <HideZeroCheckbox checked={view.hideZero} label={t('hide_zero')} />
+        </Suspense>
         <RangeSwitcher {...view} />
         <CompareToggle {...view} label={t('compare')} />
       </div>
@@ -286,14 +299,14 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       >
         <Card title={t('by_model')}>
           <BarChart
-            rows={byModel.models.map(model => ({
+            rows={models.map(model => ({
               label: model.model,
               value: Number(model.cost_usd),
               display: formatUsd(model.cost_usd),
             }))}
             empty={t('no_data')}
           />
-          {byModel.models.length > 0 && (
+          {models.length > 0 && (
             <table className="mt-4 w-full text-left text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
@@ -334,7 +347,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                 </tr>
               </thead>
               <tbody>
-                {byModel.models.map(model => (
+                {models.map(model => (
                   <tr
                     key={model.model}
                     className="
@@ -407,7 +420,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       >
         <Card title={t('by_provider')}>
           <BarChart
-            rows={byProvider.providers.map(p => ({
+            rows={providers.map(p => ({
               label: p.name,
               value: Number(p.cost_usd),
               display: formatUsd(p.cost_usd),
@@ -428,7 +441,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
 
         <Card title={t('by_key')}>
           <BarChart
-            rows={byKey.keys.map(k => ({
+            rows={keysRows.map(k => ({
               label: k.label,
               value: Number(k.cost_usd),
               display: formatUsd(k.cost_usd),

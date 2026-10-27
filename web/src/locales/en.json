@@ -108,6 +108,7 @@
     "waste_cache_miss": "Cache miss",
     "waste_model_misuse": "Model misuse",
     "no_waste": "No cost leaks detected in {requests} requests.",
+    "hide_zero": "Hide $0.00 rows",
     "no_data": "No data for this window yet.",
     "compare": "Compare",
     "usage_over_time": "Usage over time",
