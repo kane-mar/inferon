@@ -12,6 +12,7 @@ export const dashboardNav = (isOperator: boolean): DashboardNavItem[] => [
   { href: '/dashboard/providers', labelKey: 'providers' },
   { href: '/dashboard/routing', labelKey: 'routing' },
   { href: '/dashboard/quality', labelKey: 'quality' },
+  { href: '/dashboard/leaks', labelKey: 'leaks' },
   { href: '/dashboard/edge', labelKey: 'edge' },
   { href: '/dashboard/keys', labelKey: 'keys' },
   { href: '/dashboard/members', labelKey: 'members' },

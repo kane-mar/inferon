@@ -69,7 +69,8 @@
     "edge": "Edge",
     "keys": "Clés API",
     "members": "Membres",
-    "operator": "Opérateur"
+    "operator": "Opérateur",
+    "leaks": "Rapport de fuites"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -338,5 +339,39 @@
     "saved": "Enregistré.",
     "owner_only": "Seul le propriétaire du tenant peut modifier ces réglages.",
     "error": "Impossible d'enregistrer — veuillez réessayer."
+  },
+  "LeaksPage": {
+    "title_bar": "Rapport de fuites",
+    "title_bar_description": "Ce que vos {days} derniers jours de trafic disent de vos coûts. Actualisé toutes les 15 secondes.",
+    "live": "En direct",
+    "no_traffic_title": "Aucun trafic sur cette fenêtre",
+    "no_traffic_body": "Pointez votre SDK vers le proxy Inferon : ce rapport se remplit à partir de vos propres requêtes.",
+    "no_traffic_cta": "Connecter votre SDK",
+    "requests": "Requêtes",
+    "spend": "Dépenses",
+    "recoverable": "Récupérable",
+    "router": "Routeur",
+    "fallback": "Repli",
+    "cache": "Cache de prompt",
+    "affinity_requests": "Requêtes à affinité de cache",
+    "top_model": "Premier modèle",
+    "top_provider": "Premier fournisseur",
+    "top_key": "Première clé",
+    "truncated_rate": "Tronquées",
+    "guard_fallback_rate": "Repli du garde",
+    "top_error_class": "Échec le plus fréquent",
+    "none": "Aucun",
+    "f1_title": "Sur-dimensionnement",
+    "f1_desc": "Des modèles frontière sur des requêtes minuscules (<100 tokens d'entrée / <50 de sortie) qu'un palier moins cher traite à l'identique.",
+    "f2_title": "Mauvais usage du modèle",
+    "f2_desc": "Des modèles frontière sur du texte simple — sans outils, schéma ni sortie structurée.",
+    "f3_title": "Prompt système non mis en cache",
+    "f3_desc": "Le même grand prompt répété sans que le cache du fournisseur ne prenne le relais.",
+    "f4_title": "Argent laissé sur la table",
+    "f4_desc": "Ce que le routeur et la chaîne de repli ont déjà récupéré par rapport au modèle frontière.",
+    "f5_title": "Attribution du choc de facture",
+    "f5_desc": "Quel modèle, fournisseur et clé ont réellement porté la dépense.",
+    "f6_title": "Qualité et échecs",
+    "f6_desc": "Les requêtes payées mais vides, refusées, tronquées ou en échec — et pourquoi."
   }
 }

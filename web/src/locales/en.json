@@ -69,7 +69,8 @@
     "edge": "Edge",
     "keys": "API keys",
     "members": "Members",
-    "operator": "Operator"
+    "operator": "Operator",
+    "leaks": "Leak report"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -338,5 +339,39 @@
     "saved": "Saved.",
     "owner_only": "Only the tenant owner can change these controls.",
     "error": "Could not save — please retry."
+  },
+  "LeaksPage": {
+    "title_bar": "Leak report",
+    "title_bar_description": "What your last {days} days of traffic say you are paying for. Refreshes every 15 seconds.",
+    "live": "Live",
+    "no_traffic_title": "No traffic in this window yet",
+    "no_traffic_body": "Point your SDK at the Inferon proxy and this report fills itself in from your own requests.",
+    "no_traffic_cta": "Connect your SDK",
+    "requests": "Requests",
+    "spend": "Spend",
+    "recoverable": "Recoverable",
+    "router": "Router",
+    "fallback": "Fallback",
+    "cache": "Prompt cache",
+    "affinity_requests": "Cache-affinity requests",
+    "top_model": "Top model",
+    "top_provider": "Top provider",
+    "top_key": "Top key",
+    "truncated_rate": "Truncated",
+    "guard_fallback_rate": "Guard fallback",
+    "top_error_class": "Most common failure",
+    "none": "None",
+    "f1_title": "Over-provisioning",
+    "f1_desc": "Frontier models handling tiny requests (<100 input / <50 output tokens) that a cheaper tier handles identically.",
+    "f2_title": "Model misuse",
+    "f2_desc": "Frontier models on plain unstructured text — no tools, schema or structured output.",
+    "f3_title": "Un-cached system prompt",
+    "f3_desc": "The same large prompt repeated without the provider cache paying off.",
+    "f4_title": "Money left on the table",
+    "f4_desc": "What the router and fallback chain already recovered versus running the frontier model.",
+    "f5_title": "Bill-shock attribution",
+    "f5_desc": "Which model, provider and key actually drove the spend.",
+    "f6_title": "Quality and failures",
+    "f6_desc": "Requests you pay for that are empty, refused, truncated or failing — and why."
   }
 }
