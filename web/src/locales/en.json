@@ -73,7 +73,8 @@
     "leaks": "Leak report",
     "reports": "Reports",
     "settings": "Settings",
-    "spend": "Spend"
+    "spend": "Spend",
+    "upstream": "API providers"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -403,9 +404,7 @@
     "keys_title": "API keys",
     "keys_body": "Create, inspect and revoke the keys your clients use.",
     "members_title": "Members",
-    "members_body": "Who can see and change this tenant.",
-    "edge_title": "Edge nodes",
-    "edge_body": "Run the proxy next to your own model; only telemetry leaves your network."
+    "members_body": "Who can see and change this tenant."
   },
   "SpendReportPage": {
     "title_bar": "Spend report",

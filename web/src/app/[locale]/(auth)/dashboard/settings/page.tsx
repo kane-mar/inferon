@@ -29,7 +29,6 @@ export default async function SettingsPage(props: {
       title: t('members_title'),
       body: t('members_body'),
     },
-    { href: '/dashboard/edge', title: t('edge_title'), body: t('edge_body') },
   ];
 
   return (

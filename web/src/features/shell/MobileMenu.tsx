@@ -1,14 +1,16 @@
 'use client';
 
+import type { DashboardNavEntry } from '@/libs/dashboardNav';
+import { Fragment } from 'react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Link } from '@/libs/I18nNavigation';
 
-/** The small-screen menu shared by the landing and dashboard headers. */
-export const MobileMenu = (props: {
-  menu: { href: string; label: string }[];
-  label: string;
-}) => (
+/**
+ * The small-screen menu. Sections list their details indented underneath, so
+ * the submenu is reachable on a phone.
+ */
+export const MobileMenu = (props: { menu: DashboardNavEntry[]; label: string }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
       <Button variant="ghost" size="icon" aria-label={props.label}>
@@ -28,11 +30,20 @@ export const MobileMenu = (props: {
     </DropdownMenuTrigger>
     <DropdownMenuContent>
       {props.menu.map(item => (
-        <DropdownMenuItem key={item.href} asChild>
-          {item.href.startsWith('http')
-            ? <a href={item.href}>{item.label}</a>
-            : <Link href={item.href}>{item.label}</Link>}
-        </DropdownMenuItem>
+        <Fragment key={item.href}>
+          <DropdownMenuItem asChild>
+            {item.href.startsWith('http')
+              ? <a href={item.href}>{item.label}</a>
+              : <Link href={item.href}>{item.label}</Link>}
+          </DropdownMenuItem>
+          {item.children?.map(child => (
+            <DropdownMenuItem key={child.href} asChild>
+              <Link href={child.href} className="pl-6 text-muted-foreground">
+                {child.label}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        </Fragment>
       ))}
     </DropdownMenuContent>
   </DropdownMenu>

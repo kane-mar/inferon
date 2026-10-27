@@ -24,6 +24,15 @@ describe('dashboardNav — five sections, details in submenus', () => {
     ]);
   });
 
+  it('keeps edge nodes with the providers — they are where inference runs', () => {
+    const providers = dashboardNav(false).find(item => item.href === '/dashboard/providers');
+
+    expect(hrefs(providers?.children ?? [])).toEqual([
+      '/dashboard/providers',
+      '/dashboard/edge',
+    ]);
+  });
+
   it('puts access and setup under Settings', () => {
     const settings = dashboardNav(false).find(item => item.href === '/dashboard/settings');
 
@@ -31,7 +40,6 @@ describe('dashboardNav — five sections, details in submenus', () => {
       '/dashboard/onboarding',
       '/dashboard/keys',
       '/dashboard/members',
-      '/dashboard/edge',
     ]);
   });
 

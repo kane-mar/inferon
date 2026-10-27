@@ -4,7 +4,7 @@ import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { Link } from '@/libs/I18nNavigation';
 import { Logo } from './Logo';
 import { MobileMenu } from './MobileMenu';
-import { NavLink } from './NavLink';
+import { NavList } from './NavList';
 
 /** The dashboard header: brand, section nav, locale + sign-out. */
 export const DashboardShell = (props: { menu: DashboardNavEntry[] }) => {
@@ -18,13 +18,7 @@ export const DashboardShell = (props: { menu: DashboardNavEntry[] }) => {
         </Link>
 
         <nav className="max-lg:hidden">
-          <ul className="flex flex-row items-center gap-x-1 text-sm font-medium">
-            {props.menu.map(item => (
-              <li key={item.href}>
-                <NavLink href={item.href}>{item.label}</NavLink>
-              </li>
-            ))}
-          </ul>
+          <NavList menu={props.menu} />
         </nav>
       </div>
 

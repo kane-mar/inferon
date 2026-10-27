@@ -73,7 +73,8 @@
     "leaks": "Rapport de fuites",
     "reports": "Rapports",
     "settings": "Paramètres",
-    "spend": "Dépenses"
+    "spend": "Dépenses",
+    "upstream": "Fournisseurs d'API"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -403,9 +404,7 @@
     "keys_title": "Clés d'API",
     "keys_body": "Créez, inspectez et révoquez les clés utilisées par vos clients.",
     "members_title": "Membres",
-    "members_body": "Qui peut voir et modifier ce locataire.",
-    "edge_title": "Nœuds de périphérie",
-    "edge_body": "Exécutez le proxy à côté de votre modèle ; seule la télémétrie quitte votre réseau."
+    "members_body": "Qui peut voir et modifier ce locataire."
   },
   "SpendReportPage": {
     "title_bar": "Rapport de dépenses",
