@@ -494,8 +494,12 @@ async fn query_waste(
     tenant: Option<uuid::Uuid>,
     window: &Window,
 ) -> Response {
-    let rows: Vec<(String, i64, i64, i64, Decimal)> = match sqlx::query_as(
-        "SELECT flag, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
+    // Grouped by the model pair so the estimate uses each row's own suggestion
+    // (`gpt-4o` -> mini, `deepseek-v4-pro` -> flash) rather than a fixed pair.
+    let rows: Vec<(String, String, String, i64, i64, i64, Decimal)> = match sqlx::query_as(
+        "SELECT flag, request_model,
+                COALESCE(waste_detected->>'suggested_model', '') AS suggested,
+                COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0)
          FROM traces
          CROSS JOIN LATERAL (VALUES
@@ -504,7 +508,7 @@ async fn query_waste(
             ('model_misuse', waste_detected->>'model_misuse')) AS f(flag, fired)
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
            AND created_at >= NOW() - ($2 * INTERVAL '1 day') AND f.fired = 'true'
-         GROUP BY flag",
+         GROUP BY flag, request_model, suggested",
     )
     .bind(tenant)
     .bind(window.days())
@@ -515,16 +519,38 @@ async fn query_waste(
         Err(e) => return db_err(e),
     };
 
-    let mut out = json!({});
-    for (flag, requests, prompt_tokens, completion_tokens, cost) in rows {
-        let savings = match flag.as_str() {
-            "cache_miss" => Decimal::ZERO, // real saving needs provider caching
-            _ => cost::savings_if_mini(prompt_tokens, completion_tokens),
+    #[derive(Default)]
+    struct Totals {
+        requests: i64,
+        spend: Decimal,
+        savings: Decimal,
+    }
+    let mut totals: std::collections::BTreeMap<String, Totals> = std::collections::BTreeMap::new();
+    for (flag, model, suggested, requests, prompt_tokens, completion_tokens, cost) in rows {
+        // A cache-miss saving needs provider caching to be real; leave it at 0.
+        let savings = if flag == "cache_miss" || suggested.is_empty() {
+            Decimal::ZERO
+        } else {
+            cost::savings_vs(
+                &model,
+                &suggested,
+                prompt_tokens.clamp(0, i64::from(i32::MAX)) as i32,
+                completion_tokens.clamp(0, i64::from(i32::MAX)) as i32,
+                0,
+            )
         };
+        let entry = totals.entry(flag).or_default();
+        entry.requests += requests;
+        entry.spend += cost;
+        entry.savings += savings;
+    }
+
+    let mut out = json!({});
+    for (flag, totals) in totals {
         out[flag] = json!({
-            "requests": requests,
-            "spend_usd": cost.to_string(),
-            "savings_est_usd": savings.to_string(),
+            "requests": totals.requests,
+            "spend_usd": totals.spend.to_string(),
+            "savings_est_usd": totals.savings.to_string(),
         });
     }
     json_ok(out)

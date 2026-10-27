@@ -101,14 +101,6 @@
     }
 
     #[test]
-    fn mini_savings_delta_matches_table() {
-        // 1000 prompt + 500 completion tokens on gpt-4o: cost difference vs
-        // mini = 1000*2.35/1M + 500*9.40/1M = 0.00235 + 0.00470 = 0.007050
-        assert_eq!(savings_if_mini(1000, 500), dec("0.007050"));
-        assert_eq!(savings_if_mini(0, 0), dec("0"));
-    }
-
-    #[test]
     fn only_listed_models_have_an_explicit_row() {
         for priced in [
             "deepseek-flash",

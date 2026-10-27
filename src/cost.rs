@@ -195,15 +195,6 @@ pub fn trace_savings(
     (asked - served).max(Decimal::ZERO)
 }
 
-/// Estimated saving if a gpt-4o-tier request had run on gpt-4o-mini
-/// (price delta applied to the actual token counts).
-pub fn savings_if_mini(prompt_tokens: i64, completion_tokens: i64) -> Decimal {
-    let per_million = Decimal::from(1_000_000);
-    // 2.50 - 0.15 = 2.35 ; 10.00 - 0.60 = 9.40
-    (Decimal::from(prompt_tokens) * dec("2.35") / per_million)
-        + (Decimal::from(completion_tokens) * dec("9.40") / per_million)
-}
-
 /// Round a USD cost up to whole cents (never undercount spend for budgets).
 pub fn cost_to_cents(cost: Decimal) -> i64 {
     let cents = (cost * Decimal::from(100)).ceil().round_dp(0);

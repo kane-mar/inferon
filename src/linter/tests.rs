@@ -133,3 +133,22 @@
         deepseek.raw_prompt = simple_prompt();
         assert!(lint(&deepseek, 1).is_none(), "rule C targets gpt-4o tier only");
     }
+
+    #[test]
+    fn rules_a_and_c_follow_the_router_pairs_not_just_gpt4o() {
+        // DeepSeek's pair is configured too, so the same leaks are detected.
+        let waste = lint(&trace("deepseek-v4-pro", 80, 20), 1).expect("flagged");
+        assert_eq!(waste["over_provisioned"], true);
+        assert_eq!(waste["suggested_model"], "deepseek-flash");
+
+        let mut msg = trace("deepseek-v4-pro", 300, 100);
+        msg.raw_prompt = simple_prompt();
+        let waste = lint(&msg, 1).expect("flagged");
+        assert_eq!(waste["model_misuse"], true);
+        assert_eq!(waste["suggested_model"], "deepseek-flash");
+
+        // The cheap member is not over-provisioned, and an unpaired model has no
+        // suggestion to offer.
+        assert!(lint(&trace("deepseek-flash", 80, 20), 1).is_none());
+        assert!(lint(&trace("qwen/qwen3.8-27b", 80, 20), 1).is_none());
+    }

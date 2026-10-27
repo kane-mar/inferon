@@ -366,7 +366,9 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         <Card title={t('waste')}>
           {wasteRows.length === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+                <p className="text-sm text-muted-foreground">
+                  {t('no_waste', { requests: formatInt(summary.requests) })}
+                </p>
               )
             : (
                 <ul className="space-y-3">
@@ -404,21 +406,45 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       "
       >
         <Card title={t('by_provider')}>
-          <SpendBreakdown
-            kind="provider"
-            rows={providerRows}
-            canEdit={canEdit}
-            emptyLabel={t('no_data')}
+          <BarChart
+            rows={byProvider.providers.map(p => ({
+              label: p.name,
+              value: Number(p.cost_usd),
+              display: formatUsd(p.cost_usd),
+            }))}
+            empty={t('no_data')}
           />
+          {providerRows.length > 0 && (
+            <div className="mt-4">
+              <SpendBreakdown
+                kind="provider"
+                rows={providerRows}
+                canEdit={canEdit}
+                emptyLabel={t('no_data')}
+              />
+            </div>
+          )}
         </Card>
 
         <Card title={t('by_key')}>
-          <SpendBreakdown
-            kind="key"
-            rows={keyRows}
-            canEdit={canEdit}
-            emptyLabel={t('no_data')}
+          <BarChart
+            rows={byKey.keys.map(k => ({
+              label: k.label,
+              value: Number(k.cost_usd),
+              display: formatUsd(k.cost_usd),
+            }))}
+            empty={t('no_data')}
           />
+          {keyRows.length > 0 && (
+            <div className="mt-4">
+              <SpendBreakdown
+                kind="key"
+                rows={keyRows}
+                canEdit={canEdit}
+                emptyLabel={t('no_data')}
+              />
+            </div>
+          )}
         </Card>
       </div>
 

@@ -2,13 +2,17 @@
 //! background batch worker, never on the hot path.
 //!
 //! Rules (source: backlog ACs + slice spec waste rules):
-//!   A. gpt-4o-tier request with <100 prompt and <50 completion tokens ->
-//!      over-provisioned; suggest gpt-4o-mini.
+//!   A. a **frontier model with a cheaper tier pair** (any `router::TIER_PAIRS`
+//!      member) handling <100 prompt and <50 completion tokens ->
+//!      over-provisioned; suggest the paired cheap model.
 //!   B. A system prompt that repeats (>=2 occurrences) at >=4000 prompt
 //!      tokens with no provider cache benefit (cached_tokens == 0) ->
 //!      cache-miss system prompt.
-//!   C. gpt-4o-tier used for simple unstructured text (no tools / functions /
-//!      response_format, short plain-string messages) -> model misuse.
+//!   C. a frontier model used for simple unstructured text (no tools / functions
+//!      / response_format, short plain-string messages) -> model misuse.
+//!
+//! A and C follow the router's configured pairs, so they cover DeepSeek traffic
+//! (`deepseek-v4-pro` -> `deepseek-flash`) as well as the original gpt-4o tier.
 
 use crate::TraceMessage;
 use serde_json::{json, Value};
@@ -16,12 +20,6 @@ use serde_json::{json, Value};
 /// Flag count thresholds for rule B (prompt tokens) and rule C (content chars).
 const RULE_B_MIN_PROMPT_TOKENS: i32 = 4000;
 const RULE_C_MAX_CONTENT_CHARS: usize = 3000;
-const MINI: &str = "gpt-4o-mini";
-
-/// gpt-4o tier but NOT gpt-4o-mini — shared with the router downgrade rule.
-fn is_gpt4o_full(model: &str) -> bool {
-    crate::router::is_gpt4o_tier(model)
-}
 
 /// Simple unstructured text: no tools/functions/response_format and every
 /// message is a plain string under the length cap.
@@ -52,15 +50,19 @@ pub fn lint(msg: &TraceMessage, repeat_count: u32) -> Option<Value> {
     let mut waste = json!({});
     let mut fired = false;
 
-    if is_gpt4o_full(&msg.request_model) {
+    // Rules A/C: a frontier model used for trivial work, where the router's
+    // configured pair names the cheaper model to suggest. The router normally
+    // downsizes these before serving, so this fires when the router is off or
+    // the model is unpaired.
+    if let Some(suggested) = crate::router::downgrade_target(&msg.request_model) {
         if msg.prompt_tokens < 100 && msg.completion_tokens < 50 {
             waste["over_provisioned"] = json!(true);
-            waste["suggested_model"] = json!(MINI);
+            waste["suggested_model"] = json!(suggested);
             fired = true;
         }
         if is_simple_text(&msg.raw_prompt) {
             waste["model_misuse"] = json!(true);
-            waste["suggested_model"] = json!(MINI);
+            waste["suggested_model"] = json!(suggested);
             fired = true;
         }
     }
