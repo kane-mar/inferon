@@ -1,3 +1,4 @@
+import type { DashboardNavEntry } from '@/libs/dashboardNav';
 import { useTranslations } from 'next-intl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { Link } from '@/libs/I18nNavigation';
@@ -6,12 +7,7 @@ import { MobileMenu } from './MobileMenu';
 import { NavLink } from './NavLink';
 
 /** The dashboard header: brand, section nav, locale + sign-out. */
-export const DashboardShell = (props: {
-  menu: {
-    href: string;
-    label: string;
-  }[];
-}) => {
+export const DashboardShell = (props: { menu: DashboardNavEntry[] }) => {
   const t = useTranslations('DashboardHeader');
 
   return (

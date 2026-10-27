@@ -1,34 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import { dashboardNav } from './dashboardNav';
 
-describe('dashboardNav — role-aware menu', () => {
-  it('gives tenants home, connect, providers, routing, quality, keys and members', () => {
-    expect(dashboardNav(false).map(item => item.href)).toEqual([
+const hrefs = (items: { href: string }[]): string[] => items.map(item => item.href);
+
+describe('dashboardNav — five sections, details in submenus', () => {
+  it('keeps the top level to five sections for tenants', () => {
+    expect(hrefs(dashboardNav(false))).toEqual([
       '/dashboard',
-      '/dashboard/onboarding',
       '/dashboard/providers',
       '/dashboard/routing',
-      '/dashboard/quality',
+      '/dashboard/reports',
+      '/dashboard/settings',
+    ]);
+  });
+
+  it('puts the spend, leak and quality reports under Reports', () => {
+    const reports = dashboardNav(false).find(item => item.href === '/dashboard/reports');
+
+    expect(hrefs(reports?.children ?? [])).toEqual([
+      '/dashboard/reports/spend',
       '/dashboard/leaks',
-      '/dashboard/edge',
+      '/dashboard/quality',
+    ]);
+  });
+
+  it('puts access and setup under Settings', () => {
+    const settings = dashboardNav(false).find(item => item.href === '/dashboard/settings');
+
+    expect(hrefs(settings?.children ?? [])).toEqual([
+      '/dashboard/onboarding',
       '/dashboard/keys',
       '/dashboard/members',
+      '/dashboard/edge',
     ]);
   });
 
   it('adds the operator console last for operators', () => {
     const nav = dashboardNav(true);
 
-    expect(nav.map(item => item.href)).toEqual([
+    expect(hrefs(nav)).toEqual([
       '/dashboard',
-      '/dashboard/onboarding',
       '/dashboard/providers',
       '/dashboard/routing',
-      '/dashboard/quality',
-      '/dashboard/leaks',
-      '/dashboard/edge',
-      '/dashboard/keys',
-      '/dashboard/members',
+      '/dashboard/reports',
+      '/dashboard/settings',
       '/dashboard/operator',
     ]);
     expect(nav.at(-1)?.labelKey).toBe('operator');

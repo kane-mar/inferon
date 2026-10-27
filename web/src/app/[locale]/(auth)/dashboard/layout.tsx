@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { DashboardShell } from '@/features/shell/DashboardShell';
+import { SectionNav } from '@/features/shell/SectionNav';
 import { dashboardNav } from '@/libs/dashboardNav';
 import { currentSession } from '@/libs/session';
 
@@ -38,19 +39,30 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
   });
   const labels = {
     home: t('home'),
-    connect: t('connect'),
     providers: t('providers'),
     routing: t('routing'),
-    quality: t('quality'),
+    reports: t('reports'),
+    settings: t('settings'),
+    spend: t('spend'),
     leaks: t('leaks'),
-    edge: t('edge'),
+    quality: t('quality'),
+    connect: t('connect'),
     keys: t('keys'),
     members: t('members'),
+    edge: t('edge'),
     operator: t('operator'),
   };
   const menu = dashboardNav(session.me.is_operator).map(item => ({
     href: item.href,
     label: labels[item.labelKey],
+    ...(item.children
+      ? {
+          children: item.children.map(child => ({
+            href: child.href,
+            label: labels[child.labelKey],
+          })),
+        }
+      : {}),
   }));
 
   return (
@@ -59,6 +71,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
         <div className="mx-auto flex max-w-7xl items-center justify-between p-3">
           <DashboardShell menu={menu} />
         </div>
+        <SectionNav menu={menu} />
       </header>
 
       <main className="min-h-[calc(100vh-57px)] bg-muted">

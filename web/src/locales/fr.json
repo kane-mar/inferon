@@ -70,7 +70,10 @@
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur",
-    "leaks": "Rapport de fuites"
+    "leaks": "Rapport de fuites",
+    "reports": "Rapports",
+    "settings": "Paramètres",
+    "spend": "Dépenses"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -98,7 +101,6 @@
     "empty_body": "Pointez votre SDK vers Inferon pour voir ici les dépenses, les répartitions et les plafonds.",
     "empty_connect": "Connectez votre SDK",
     "empty_provider": "Ajouter un fournisseur",
-    "empty_models": "Choisir les modèles",
     "by_prompt": "Dépenses par prompt système",
     "model": "Modèle",
     "prompt_hash": "Hachage du prompt système",
@@ -124,7 +126,16 @@
     "p95_ttft": "TTFT p95",
     "ttft": "TTFT",
     "current": "Période actuelle",
-    "previous": "Période précédente"
+    "previous": "Période précédente",
+    "top_spend": "Où va l'argent",
+    "view_spend": "Rapport de dépenses →",
+    "view_leaks": "Rapport de fuites →",
+    "view_quality": "Rapport de qualité →",
+    "quality_card": "Qualité des réponses",
+    "recoverable_over": "{requests} requêtes avec des économies récupérables",
+    "truncated": "Tronquées",
+    "top_failure": "Échec le plus fréquent",
+    "none": "Aucun"
   },
   "KeysPage": {
     "title_bar": "Clés API",
@@ -373,5 +384,31 @@
     "f5_desc": "Quel modèle, fournisseur et clé ont réellement porté la dépense.",
     "f6_title": "Qualité et échecs",
     "f6_desc": "Les requêtes payées mais vides, refusées, tronquées ou en échec — et pourquoi."
+  },
+  "ReportsPage": {
+    "title_bar": "Rapports",
+    "title_bar_description": "Le détail derrière le tableau de bord : où va l'argent, ce qui fuit, et comment les réponses se comportent.",
+    "spend_title": "Dépenses",
+    "spend_body": "Chaque dollar par modèle, fournisseur, clé d'API et prompt système — avec les taux de cache.",
+    "leaks_title": "Rapport de fuites",
+    "leaks_body": "Les six fuites de coût nommées, calculées à partir de votre trafic et actualisées en direct.",
+    "quality_title": "Qualité",
+    "quality_body": "Résultats, classes d'erreur, troncatures et pouces : ce que vous avez payé sans résultat."
+  },
+  "SettingsPage": {
+    "title_bar": "Paramètres",
+    "title_bar_description": "Connectez un client, gérez les accès et exécutez l'inférence sur votre propre matériel.",
+    "connect_title": "Connecter votre SDK",
+    "connect_body": "Créez une clé, pointez votre SDK vers le proxy et envoyez la première requête.",
+    "keys_title": "Clés d'API",
+    "keys_body": "Créez, inspectez et révoquez les clés utilisées par vos clients.",
+    "members_title": "Membres",
+    "members_body": "Qui peut voir et modifier ce locataire.",
+    "edge_title": "Nœuds de périphérie",
+    "edge_body": "Exécutez le proxy à côté de votre modèle ; seule la télémétrie quitte votre réseau."
+  },
+  "SpendReportPage": {
+    "title_bar": "Rapport de dépenses",
+    "title_bar_description": "Chaque dollar des {days} derniers jours — par modèle, fournisseur, clé d'API et prompt système."
   }
 }

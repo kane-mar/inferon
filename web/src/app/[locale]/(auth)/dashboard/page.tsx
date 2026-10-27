@@ -1,10 +1,8 @@
 import type { DashboardView } from '@/features/dashboard/DashboardToolbar';
 import type { LineSeries, ValueFormat } from '@/features/dashboard/LineChart';
-import type { SpendBreakdownRow } from '@/features/dashboard/SpendBreakdown';
 import type { ChartMetric } from '@/libs/dashboardMetrics';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
-import { Suspense } from 'react';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
@@ -14,10 +12,8 @@ import {
   MetricTabs,
   RangeSwitcher,
 } from '@/features/dashboard/DashboardToolbar';
-import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { LineChart } from '@/features/dashboard/LineChart';
-import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
 import {
   chartSeries,
   deltaPct,
@@ -26,7 +22,6 @@ import {
   formatInt,
   formatMs,
   moneyDeltaPct,
-  spendRows,
 } from '@/libs/dashboardMetrics';
 import { Link } from '@/libs/I18nNavigation';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
@@ -75,57 +70,27 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   const t = await getTranslations({ locale, namespace: 'DashboardIndexPage' });
 
   const api = InferonApi.fromEnv();
-  const [summary, previous, series, previousSeries, byModel, byPrompt, waste, keys, byProvider, prevByProvider, byKey, prevByKey] = await Promise.all([
+  const [summary, previous, series, previousSeries, waste, byProvider, quality] = await Promise.all([
     api.summary(view.days, 0, session.cookie),
     view.compare ? api.summary(view.days, view.days, session.cookie) : null,
     api.timeseries(view.days, 0, session.cookie),
     view.compare ? api.timeseries(view.days, view.days, session.cookie) : null,
-    api.byModel(view.days, session.cookie),
-    api.byPrompt(view.days, 10, session.cookie),
     api.waste(view.days, session.cookie),
-    api.keys(session.cookie),
     api.byProvider(view.days, 0, session.cookie),
-    view.compare ? api.byProvider(view.days, view.days, session.cookie) : null,
-    api.byKey(view.days, 0, session.cookie),
-    view.compare ? api.byKey(view.days, view.days, session.cookie) : null,
+    api.quality(view.days, session.cookie),
   ]);
-  const canEdit = keys.role === 'owner';
 
-  // ITEM-047: match the current window's rows to the prior period by id (falling
-  // back to the label for the shared/legacy rows) so each row can show a delta
-  // and an inline spike badge (AC3).
-  // ITEM-047: `hide_zero` drops rows that cost nothing in this window, so the
-  // graph and the table stay readable when most traffic is free (local models).
-  const providers = spendRows(byProvider.providers, view.hideZero);
-  const keysRows = spendRows(byKey.keys, view.hideZero);
-  const models = spendRows(byModel.models, view.hideZero);
-
-  const prevProviderCost = new Map(
-    (prevByProvider?.providers ?? []).map(p => [p.provider_id ?? p.name, p.cost_usd]),
+  // The overview is the headline: top spenders, what is leaking, how the
+  // responses behave. The full tables live in the spend report.
+  const topProviders = byProvider.providers
+    .filter(provider => Number(provider.cost_usd) > 0)
+    .slice(0, 3);
+  const recoverable = Object.values(waste).reduce(
+    (total, row) => total + Number(row.savings_est_usd),
+    0,
   );
-  const providerRows: SpendBreakdownRow[] = providers.map(p => ({
-    id: p.provider_id,
-    label: p.name,
-    meta: p.kind === 'shared' ? undefined : p.kind,
-    costUsd: p.cost_usd,
-    previousCostUsd: prevProviderCost.get(p.provider_id ?? p.name) ?? null,
-    requests: p.requests,
-    tokens: p.prompt_tokens + p.completion_tokens,
-    limitCents: p.spend_limit_cents,
-    errorRate: p.error_rate,
-    p95Ms: p.ttft_p95_ms,
-  }));
-
-  const prevKeyCost = new Map((prevByKey?.keys ?? []).map(k => [k.key_id ?? k.label, k.cost_usd]));
-  const keyRows: SpendBreakdownRow[] = keysRows.map(k => ({
-    id: k.key_id,
-    label: k.label,
-    costUsd: k.cost_usd,
-    previousCostUsd: prevKeyCost.get(k.key_id ?? k.label) ?? null,
-    requests: k.requests,
-    tokens: k.prompt_tokens + k.completion_tokens,
-    limitCents: k.spend_limit_cents,
-  }));
+  const leakRequests = Object.values(waste).reduce((total, row) => total + row.requests, 0);
+  const topFailure = Object.entries(quality.overall.errors_by_class).sort((a, b) => b[1] - a[1])[0];
 
   const tokens = summary.total_prompt_tokens + summary.total_completion_tokens;
   const previousTokens = previous
@@ -188,9 +153,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         </p>
       </div>
       <div className="flex items-center gap-2">
-        <Suspense fallback={null}>
-          <HideZeroCheckbox checked={view.hideZero} label={t('hide_zero')} />
-        </Suspense>
         <RangeSwitcher {...view} />
         <CompareToggle {...view} label={t('compare')} />
       </div>
@@ -213,12 +175,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                 className={buttonVariants({ variant: 'outline' })}
               >
                 {t('empty_provider')}
-              </Link>
-              <Link
-                href="/dashboard/models"
-                className={buttonVariants({ variant: 'outline' })}
-              >
-                {t('empty_models')}
               </Link>
             </div>
           </Card>
@@ -294,89 +250,38 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
 
       <div className="
         mt-4 grid grid-cols-1 gap-4
-        lg:grid-cols-2
+        lg:grid-cols-3
       "
       >
-        <Card title={t('by_model')}>
+        <Card
+          title={t('top_spend')}
+          action={(
+            <Link
+              href="/dashboard/reports/spend"
+              className="text-sm text-primary"
+            >
+              {t('view_spend')}
+            </Link>
+          )}
+        >
           <BarChart
-            rows={models.map(model => ({
-              label: model.model,
-              value: Number(model.cost_usd),
-              display: formatUsd(model.cost_usd),
+            rows={topProviders.map(provider => ({
+              label: provider.name,
+              value: Number(provider.cost_usd),
+              display: formatUsd(provider.cost_usd),
             }))}
             empty={t('no_data')}
           />
-          {models.length > 0 && (
-            <table className="mt-4 w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-muted-foreground">
-                  <th className="
-                    py-2 font-mono text-xs font-medium tracking-wide uppercase
-                  "
-                  >
-                    {t('model')}
-                  </th>
-                  <th className="
-                    py-2 text-right font-mono text-xs font-medium tracking-wide
-                    uppercase
-                  "
-                  >
-                    {t('requests')}
-                  </th>
-                  <th className="
-                    py-2 text-right font-mono text-xs font-medium tracking-wide
-                    uppercase
-                  "
-                  >
-                    {t('tokens')}
-                  </th>
-                  <th className="
-                    py-2 text-right font-mono text-xs font-medium tracking-wide
-                    uppercase
-                  "
-                  >
-                    {t('cached')}
-                  </th>
-                  <th className="
-                    py-2 text-right font-mono text-xs font-medium tracking-wide
-                    uppercase
-                  "
-                  >
-                    {t('cost')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map(model => (
-                  <tr
-                    key={model.model}
-                    className="
-                      border-b
-                      last:border-0
-                    "
-                  >
-                    <td className="py-2">{model.model}</td>
-                    <td className="py-2 text-right tabular-nums">{formatInt(model.requests)}</td>
-                    <td className="py-2 text-right tabular-nums">
-                      {formatCompact(model.prompt_tokens + model.completion_tokens)}
-                    </td>
-                    <td className="
-                      py-2 text-right text-muted-foreground tabular-nums
-                    "
-                    >
-                      {model.prompt_tokens > 0
-                        ? `${Math.round((model.cached_prompt_tokens / model.prompt_tokens) * 100)}%`
-                        : '—'}
-                    </td>
-                    <td className="py-2 text-right tabular-nums">{formatUsd(model.cost_usd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
         </Card>
 
-        <Card title={t('waste')}>
+        <Card
+          title={t('waste')}
+          action={(
+            <Link href="/dashboard/leaks" className="text-sm text-primary">
+              {t('view_leaks')}
+            </Link>
+          )}
+        >
           {wasteRows.length === 0
             ? (
                 <p className="text-sm text-muted-foreground">
@@ -384,161 +289,62 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                 </p>
               )
             : (
-                <ul className="space-y-3">
-                  {wasteRows.map(([flag, row]) => (
-                    <li
-                      key={flag}
-                      className="
-                        flex items-center justify-between gap-4 text-sm
-                      "
-                    >
-                      <span className="font-medium">{wasteLabels[flag] ?? flag}</span>
-                      <span className="text-muted-foreground">
-                        {t('requests')}
-                        {': '}
-                        {formatInt(row.requests)}
-                      </span>
-                      <span className="tabular-nums">{formatUsd(row.spend_usd)}</span>
-                      <span className="
-                        text-emerald-600 tabular-nums
-                        dark:text-emerald-400
-                      "
+                <>
+                  <p className="text-2xl font-semibold tabular-nums">
+                    {formatUsd(recoverable.toFixed(6))}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t('recoverable_over', { requests: formatInt(leakRequests) })}
+                  </p>
+                  <ul className="mt-3 space-y-1.5 text-sm">
+                    {wasteRows.map(([flag, row]) => (
+                      <li
+                        key={flag}
+                        className="flex items-center justify-between gap-3"
                       >
-                        {`−${formatUsd(row.savings_est_usd)}`}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-        </Card>
-      </div>
-
-      <div className="
-        mt-4 grid grid-cols-1 gap-4
-        lg:grid-cols-2
-      "
-      >
-        <Card title={t('by_provider')}>
-          <BarChart
-            rows={providers.map(p => ({
-              label: p.name,
-              value: Number(p.cost_usd),
-              display: formatUsd(p.cost_usd),
-            }))}
-            empty={t('no_data')}
-          />
-          {providerRows.length > 0 && (
-            <div className="mt-4">
-              <SpendBreakdown
-                kind="provider"
-                rows={providerRows}
-                canEdit={canEdit}
-                emptyLabel={t('no_data')}
-              />
-            </div>
-          )}
-        </Card>
-
-        <Card title={t('by_key')}>
-          <BarChart
-            rows={keysRows.map(k => ({
-              label: k.label,
-              value: Number(k.cost_usd),
-              display: formatUsd(k.cost_usd),
-            }))}
-            empty={t('no_data')}
-          />
-          {keyRows.length > 0 && (
-            <div className="mt-4">
-              <SpendBreakdown
-                kind="key"
-                rows={keyRows}
-                canEdit={canEdit}
-                emptyLabel={t('no_data')}
-              />
-            </div>
-          )}
-        </Card>
-      </div>
-
-      <div className="mt-4">
-        <Card title={t('by_prompt')}>
-          {byPrompt.prompts.length === 0
-            ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
-              )
-            : (
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="
-                        py-2 font-mono text-xs font-medium tracking-wide
-                        uppercase
-                      "
-                      >
-                        {t('prompt_hash')}
-                      </th>
-                      <th className="
-                        py-2 text-right font-mono text-xs font-medium
-                        tracking-wide uppercase
-                      "
-                      >
-                        {t('requests')}
-                      </th>
-                      <th className="
-                        py-2 text-right font-mono text-xs font-medium
-                        tracking-wide uppercase
-                      "
-                      >
-                        {t('prompt_tokens')}
-                      </th>
-                      <th className="
-                        py-2 text-right font-mono text-xs font-medium
-                        tracking-wide uppercase
-                      "
-                      >
-                        {t('cached')}
-                      </th>
-                      <th className="
-                        py-2 text-right font-mono text-xs font-medium
-                        tracking-wide uppercase
-                      "
-                      >
-                        {t('cost')}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {byPrompt.prompts.map(prompt => (
-                      <tr
-                        key={prompt.system_prompt_hash}
-                        className="
-                          border-b
-                          last:border-0
-                        "
-                      >
-                        <td className="py-2 font-mono text-xs">
-                          {prompt.system_prompt_hash}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatInt(prompt.requests)}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatCompact(prompt.prompt_tokens)}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {prompt.cache_hit_rate == null
-                            ? '—'
-                            : `${(prompt.cache_hit_rate * 100).toFixed(1)}%`}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatUsd(prompt.cost_usd)}
-                        </td>
-                      </tr>
+                        <span className="text-muted-foreground">
+                          {wasteLabels[flag] ?? flag}
+                        </span>
+                        <span className="tabular-nums">
+                          {formatUsd(row.savings_est_usd)}
+                        </span>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
+                  </ul>
+                </>
               )}
+        </Card>
+
+        <Card
+          title={t('quality_card')}
+          action={(
+            <Link href="/dashboard/quality" className="text-sm text-primary">
+              {t('view_quality')}
+            </Link>
+          )}
+        >
+          <dl className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted-foreground">{t('error_rate')}</dt>
+              <dd className="tabular-nums">
+                {errorRate == null ? '—' : `${errorRate.toFixed(1)}%`}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted-foreground">{t('truncated')}</dt>
+              <dd className="tabular-nums">
+                {quality.overall.truncated_rate == null
+                  ? '—'
+                  : `${(quality.overall.truncated_rate * 100).toFixed(1)}%`}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted-foreground">{t('top_failure')}</dt>
+              <dd className="truncate text-right tabular-nums">
+                {topFailure ? `${topFailure[0]} · ${formatInt(topFailure[1])}` : t('none')}
+              </dd>
+            </div>
+          </dl>
         </Card>
       </div>
     </>

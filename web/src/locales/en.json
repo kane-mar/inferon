@@ -70,7 +70,10 @@
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator",
-    "leaks": "Leak report"
+    "leaks": "Leak report",
+    "reports": "Reports",
+    "settings": "Settings",
+    "spend": "Spend"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -98,7 +101,6 @@
     "empty_body": "Point your SDK at Inferon to see spend, breakdowns and limits here.",
     "empty_connect": "Connect your SDK",
     "empty_provider": "Add a provider",
-    "empty_models": "Choose models",
     "by_prompt": "Spend by system prompt",
     "model": "Model",
     "prompt_hash": "System prompt hash",
@@ -124,7 +126,16 @@
     "p95_ttft": "P95 TTFT",
     "ttft": "TTFT",
     "current": "Current",
-    "previous": "Previous"
+    "previous": "Previous",
+    "top_spend": "Where the money goes",
+    "view_spend": "Spend report →",
+    "view_leaks": "Leak report →",
+    "view_quality": "Quality report →",
+    "quality_card": "Response quality",
+    "recoverable_over": "{requests} requests with recoverable spend",
+    "truncated": "Truncated",
+    "top_failure": "Most common failure",
+    "none": "None"
   },
   "KeysPage": {
     "title_bar": "API keys",
@@ -373,5 +384,31 @@
     "f5_desc": "Which model, provider and key actually drove the spend.",
     "f6_title": "Quality and failures",
     "f6_desc": "Requests you pay for that are empty, refused, truncated or failing — and why."
+  },
+  "ReportsPage": {
+    "title_bar": "Reports",
+    "title_bar_description": "The detail behind the dashboard: where the money goes, what is leaking, and how the responses behave.",
+    "spend_title": "Spend",
+    "spend_body": "Every dollar by model, provider, API key and system prompt — with cache hit rates.",
+    "leaks_title": "Leak report",
+    "leaks_body": "The six named cost leaks computed from your traffic, refreshed live.",
+    "quality_title": "Quality",
+    "quality_body": "Outcomes, error classes, truncation and thumbs: what you paid for that did not work."
+  },
+  "SettingsPage": {
+    "title_bar": "Settings",
+    "title_bar_description": "Connect a client, manage access, and run inference on your own hardware.",
+    "connect_title": "Connect your SDK",
+    "connect_body": "Mint a key, point your SDK at the proxy, and send the first request.",
+    "keys_title": "API keys",
+    "keys_body": "Create, inspect and revoke the keys your clients use.",
+    "members_title": "Members",
+    "members_body": "Who can see and change this tenant.",
+    "edge_title": "Edge nodes",
+    "edge_body": "Run the proxy next to your own model; only telemetry leaves your network."
+  },
+  "SpendReportPage": {
+    "title_bar": "Spend report",
+    "title_bar_description": "Every dollar over the last {days} days — by model, provider, API key and system prompt."
   }
 }
