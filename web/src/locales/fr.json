@@ -66,7 +66,7 @@
     "providers": "Fournisseurs",
     "routing": "Routage",
     "quality": "Qualité",
-    "edge": "Edge",
+    "edge": "Nœuds de périphérie",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur",
