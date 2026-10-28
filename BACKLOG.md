@@ -46,6 +46,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-078 | Edge credentials from files, not argv | hardening | **done (2026-10-26)** — `--provider-key-file` / `--node-token-file` (file wins, newline trimmed, fail-fast); `ps` shows paths only. Live restarted node + 200 |
 | ITEM-079 | Prompt-embedder artifact runs (macOS 11 x86_64) | hardening | **done (2026-10-26)** — `scripts/fetch-embedder.sh` + ORT 1.19.2 pinned (`api-19`, the newest with macOS x64/macOS 11); `All` optimization level; artifact tests `embed_bench` p50 ~8–10 ms + `embed_semantics` pass |
 | ITEM-075 | Edge serves the local provider's own models | bug | **done (2026-10-15)** — the node discovered `GET <provider-url>/models` on startup + sync (fallback to the cloud catalog); live edge run proved `/v1/models` = the local id and a local 200 with the trace in the cloud |
+| ITEM-080 | Edge hybrid fallback (local first, explicit remote fallback) | feature | **new (2026-10-28)** — the edge is local-only; a dead local endpoint is a 502 with no failover. Add an explicit, off-by-default second provider, retryable-only trigger, and leg-aware tracing (`is_local: false` + which leg served) |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
@@ -55,13 +56,12 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 
-_Last updated: 2026-10-26 (ITEM-079 closed — the embedder artifact runs; ITEM-029's embedder gate is cleared)_ —
-**Still nothing pullable, but the analysis gate is half-open.** ITEM-029's
-prerequisite (a working embedder) is **done**; what remains is **real task
-traffic** to build meaningful centroids — ITEM-063/064's closed loop runs today
-without it. The other gates are unchanged: **ITEM-076** (train / gold-set /
-hot-swap) and **ITEM-032** (PagedLoRA) need the Slice 3 infra; **ITEM-072** needs
-ITEM-029; **030** needs 029.
+_Last updated: 2026-10-28 (ITEM-080 captured — edge hybrid fallback)_ —
+**Next pull is ITEM-080** (edge hybrid fallback: local first, explicit remote
+fallback) — the only pullable item. Everything else stays gated: **ITEM-029**
+needs real task traffic for centroids (its embedder gate is cleared); **030/072**
+need 029; **ITEM-076** (train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA)
+need the Slice 3 infra.
 ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
 closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
 governance (versioning, bound, kill switch), it does not replace them.
