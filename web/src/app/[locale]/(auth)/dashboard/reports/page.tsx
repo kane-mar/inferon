@@ -23,7 +23,7 @@ export default async function ReportsPage(props: {
       title: t('spend_title'),
       body: t('spend_body'),
     },
-    { href: '/dashboard/leaks', title: t('leaks_title'), body: t('leaks_body') },
+    { href: '/dashboard/audit', title: t('audit_title'), body: t('audit_body') },
     {
       href: '/dashboard/quality',
       title: t('quality_title'),

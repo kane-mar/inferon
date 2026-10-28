@@ -66,15 +66,13 @@
     "providers": "Providers",
     "routing": "Routing",
     "quality": "Quality",
-    "edge": "Edge nodes",
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator",
-    "leaks": "Leak report",
     "reports": "Reports",
     "settings": "Settings",
     "spend": "Spend",
-    "upstream": "API providers"
+    "audit": "Cost audit"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -130,13 +128,13 @@
     "previous": "Previous",
     "top_spend": "Where the money goes",
     "view_spend": "Spend report →",
-    "view_leaks": "Leak report →",
     "view_quality": "Quality report →",
     "quality_card": "Response quality",
     "recoverable_over": "{requests} requests with recoverable spend",
     "truncated": "Truncated",
     "top_failure": "Most common failure",
-    "none": "None"
+    "none": "None",
+    "view_audit": "Cost audit →"
   },
   "KeysPage": {
     "title_bar": "API keys",
@@ -278,12 +276,11 @@
     "make_default": "Make default",
     "test_connection": "Test connection",
     "probe_ok": "Connected — {count} models",
-    "probe_failed": "Could not reach the provider"
+    "probe_failed": "Could not reach the provider",
+    "edge_nodes": "Edge nodes",
+    "edge_hint": "Run the proxy next to your own model — inference stays on your network; only telemetry leaves it."
   },
   "EdgePage": {
-    "title_bar": "Edge nodes",
-    "title_bar_description": "Run the proxy next to your own model; the cloud keeps the control plane and telemetry.",
-    "nodes": "Nodes",
     "name": "Name",
     "name_placeholder": "e.g. office-gpu",
     "enroll": "Enroll node",
@@ -352,9 +349,33 @@
     "owner_only": "Only the tenant owner can change these controls.",
     "error": "Could not save — please retry."
   },
-  "LeaksPage": {
-    "title_bar": "Leak report",
-    "title_bar_description": "What your last {days} days of traffic say you are paying for. Refreshes every 15 seconds.",
+  "ReportsPage": {
+    "title_bar": "Reports",
+    "title_bar_description": "The detail behind the dashboard: where the money goes, what is leaking, and how the responses behave.",
+    "spend_title": "Spend",
+    "spend_body": "Every dollar by model, provider, API key and system prompt — with cache hit rates.",
+    "quality_title": "Quality",
+    "quality_body": "Outcomes, error classes, truncation and thumbs: what you paid for that did not work.",
+    "audit_title": "Cost audit",
+    "audit_body": "The six named cost findings computed from your traffic, refreshed live."
+  },
+  "SettingsPage": {
+    "title_bar": "Settings",
+    "title_bar_description": "Connect a client, manage access, and run inference on your own hardware.",
+    "connect_title": "Connect your SDK",
+    "connect_body": "Mint a key, point your SDK at the proxy, and send the first request.",
+    "keys_title": "API keys",
+    "keys_body": "Create, inspect and revoke the keys your clients use.",
+    "members_title": "Members",
+    "members_body": "Who can see and change this tenant."
+  },
+  "SpendReportPage": {
+    "title_bar": "Spend report",
+    "title_bar_description": "Every dollar over the last {days} days — by model, provider, API key and system prompt."
+  },
+  "AuditPage": {
+    "title_bar": "Cost audit",
+    "title_bar_description": "Six findings computed from your last {days} days of traffic. Refreshes every 15 seconds.",
     "live": "Live",
     "no_traffic_title": "No traffic in this window yet",
     "no_traffic_body": "Point your SDK at the Inferon proxy and this report fills itself in from your own requests.",
@@ -384,30 +405,22 @@
     "f5_title": "Bill-shock attribution",
     "f5_desc": "Which model, provider and key actually drove the spend.",
     "f6_title": "Quality and failures",
-    "f6_desc": "Requests you pay for that are empty, refused, truncated or failing — and why."
-  },
-  "ReportsPage": {
-    "title_bar": "Reports",
-    "title_bar_description": "The detail behind the dashboard: where the money goes, what is leaking, and how the responses behave.",
-    "spend_title": "Spend",
-    "spend_body": "Every dollar by model, provider, API key and system prompt — with cache hit rates.",
-    "leaks_title": "Leak report",
-    "leaks_body": "The six named cost leaks computed from your traffic, refreshed live.",
-    "quality_title": "Quality",
-    "quality_body": "Outcomes, error classes, truncation and thumbs: what you paid for that did not work."
-  },
-  "SettingsPage": {
-    "title_bar": "Settings",
-    "title_bar_description": "Connect a client, manage access, and run inference on your own hardware.",
-    "connect_title": "Connect your SDK",
-    "connect_body": "Mint a key, point your SDK at the proxy, and send the first request.",
-    "keys_title": "API keys",
-    "keys_body": "Create, inspect and revoke the keys your clients use.",
-    "members_title": "Members",
-    "members_body": "Who can see and change this tenant."
-  },
-  "SpendReportPage": {
-    "title_bar": "Spend report",
-    "title_bar_description": "Every dollar over the last {days} days — by model, provider, API key and system prompt."
+    "f6_desc": "Requests you pay for that are empty, refused, truncated or failing — and why.",
+    "share_title": "Share this audit",
+    "share_body": "Create a read-only link. It shows the six findings — never prompts, keys or completions — and you can revoke it at any time.",
+    "share_create": "Create link",
+    "share_once": "Copy this link now — it is shown once.",
+    "share_copy": "Copy",
+    "share_copied": "Copied",
+    "share_revoke": "Revoke",
+    "share_revoked": "Revoked",
+    "share_none": "No links yet.",
+    "share_link": "Audit link",
+    "share_error": "Could not create the link",
+    "share_revoke_error": "Could not revoke the link",
+    "public_title": "Cost audit",
+    "public_body": "A read-only report generated from live traffic. Refreshes every 15 seconds.",
+    "invalid_title": "This link is not available",
+    "invalid_body": "It may have been revoked, or the address is wrong."
   }
 }

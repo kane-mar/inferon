@@ -1,4 +1,4 @@
-# The Inferon Leak Report — what we can *see* and *hand back* before any pitch
+# The Inferon Cost Audit — what we can *see* and *hand back* before any pitch
 
 This is the "value-first" artifact: the concrete, honest thing Inferon can
 extract from a founder's LLM traffic and hand to them as a free, personalized
@@ -135,7 +135,7 @@ the router."
 
 ## What this means operationally
 
-The leak report is not a document you *send*. It is a **menu of six named
+The cost audit is not a document you *send*. It is a **menu of six named
 findings**, each a single-sentence, attributed, dollar-tied claim. The value-
 first opener is:
 

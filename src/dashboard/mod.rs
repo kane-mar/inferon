@@ -11,11 +11,13 @@ pub use queries::*;
 mod providers;
 mod keys;
 mod members;
+mod audit_admin;
 mod edge_admin;
 mod routing;
 pub use providers::*;
 pub use keys::*;
 pub use members::*;
+pub use audit_admin::*;
 pub use edge_admin::*;
 pub use routing::*;
 

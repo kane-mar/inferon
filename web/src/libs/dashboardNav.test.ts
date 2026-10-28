@@ -19,18 +19,15 @@ describe('dashboardNav — five sections, details in submenus', () => {
 
     expect(hrefs(reports?.children ?? [])).toEqual([
       '/dashboard/reports/spend',
-      '/dashboard/leaks',
+      '/dashboard/audit',
       '/dashboard/quality',
     ]);
   });
 
-  it('keeps edge nodes with the providers — they are where inference runs', () => {
+  it('renders providers as a single page (edge nodes live inside it)', () => {
     const providers = dashboardNav(false).find(item => item.href === '/dashboard/providers');
 
-    expect(hrefs(providers?.children ?? [])).toEqual([
-      '/dashboard/providers',
-      '/dashboard/edge',
-    ]);
+    expect(providers?.children).toBeUndefined();
   });
 
   it('puts access and setup under Settings', () => {

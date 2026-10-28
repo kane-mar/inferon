@@ -36,6 +36,7 @@ pub mod edge_runtime;
 pub mod proxy;
 // Routing intelligence.
 pub mod affinity;
+pub mod audit;
 pub mod alerts;
 pub mod budget;
 pub mod cost;
@@ -163,6 +164,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))
         .route("/v1/dashboard/api/by-provider", get(dashboard::by_provider))
         .route("/v1/dashboard/api/by-key", get(dashboard::by_key))
+        .route("/v1/public/audit/:token", get(audit::public_report))
+        .route(
+            "/v1/dashboard/api/audit/shares",
+            get(dashboard::tenant_audit_shares).post(dashboard::tenant_audit_share_create),
+        )
+        .route(
+            "/v1/dashboard/api/audit/shares/:id/revoke",
+            post(dashboard::tenant_audit_share_revoke),
+        )
         .route(
             "/v1/dashboard/api/edge/nodes",
             get(dashboard::tenant_edge_nodes).post(dashboard::tenant_edge_node_create),

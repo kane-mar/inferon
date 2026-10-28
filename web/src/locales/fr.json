@@ -66,15 +66,13 @@
     "providers": "Fournisseurs",
     "routing": "Routage",
     "quality": "Qualité",
-    "edge": "Nœuds de périphérie",
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur",
-    "leaks": "Rapport de fuites",
     "reports": "Rapports",
     "settings": "Paramètres",
     "spend": "Dépenses",
-    "upstream": "Fournisseurs d'API"
+    "audit": "Audit de coûts"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -130,13 +128,13 @@
     "previous": "Période précédente",
     "top_spend": "Où va l'argent",
     "view_spend": "Rapport de dépenses →",
-    "view_leaks": "Rapport de fuites →",
     "view_quality": "Rapport de qualité →",
     "quality_card": "Qualité des réponses",
     "recoverable_over": "{requests} requêtes avec des économies récupérables",
     "truncated": "Tronquées",
     "top_failure": "Échec le plus fréquent",
-    "none": "Aucun"
+    "none": "Aucun",
+    "view_audit": "Audit de coûts →"
   },
   "KeysPage": {
     "title_bar": "Clés API",
@@ -278,12 +276,11 @@
     "make_default": "Définir par défaut",
     "test_connection": "Tester la connexion",
     "probe_ok": "Connecté — {count} modèles",
-    "probe_failed": "Fournisseur injoignable"
+    "probe_failed": "Fournisseur injoignable",
+    "edge_nodes": "Nœuds de périphérie",
+    "edge_hint": "Exécutez le proxy à côté de votre modèle — l'inférence reste sur votre réseau ; seule la télémétrie en sort."
   },
   "EdgePage": {
-    "title_bar": "Nœuds périphériques",
-    "title_bar_description": "Exécutez le proxy à côté de votre propre modèle ; le cloud garde le plan de contrôle et la télémétrie.",
-    "nodes": "Nœuds",
     "name": "Nom",
     "name_placeholder": "ex. bureau-gpu",
     "enroll": "Enrôler un nœud",
@@ -352,9 +349,33 @@
     "owner_only": "Seul le propriétaire du tenant peut modifier ces réglages.",
     "error": "Impossible d'enregistrer — veuillez réessayer."
   },
-  "LeaksPage": {
-    "title_bar": "Rapport de fuites",
-    "title_bar_description": "Ce que vos {days} derniers jours de trafic disent de vos coûts. Actualisé toutes les 15 secondes.",
+  "ReportsPage": {
+    "title_bar": "Rapports",
+    "title_bar_description": "Le détail derrière le tableau de bord : où va l'argent, ce qui fuit, et comment les réponses se comportent.",
+    "spend_title": "Dépenses",
+    "spend_body": "Chaque dollar par modèle, fournisseur, clé d'API et prompt système — avec les taux de cache.",
+    "quality_title": "Qualité",
+    "quality_body": "Résultats, classes d'erreur, troncatures et pouces : ce que vous avez payé sans résultat.",
+    "audit_title": "Audit de coûts",
+    "audit_body": "Les six constats de coût nommés, calculés à partir de votre trafic et actualisés en direct."
+  },
+  "SettingsPage": {
+    "title_bar": "Paramètres",
+    "title_bar_description": "Connectez un client, gérez les accès et exécutez l'inférence sur votre propre matériel.",
+    "connect_title": "Connecter votre SDK",
+    "connect_body": "Créez une clé, pointez votre SDK vers le proxy et envoyez la première requête.",
+    "keys_title": "Clés d'API",
+    "keys_body": "Créez, inspectez et révoquez les clés utilisées par vos clients.",
+    "members_title": "Membres",
+    "members_body": "Qui peut voir et modifier ce locataire."
+  },
+  "SpendReportPage": {
+    "title_bar": "Rapport de dépenses",
+    "title_bar_description": "Chaque dollar des {days} derniers jours — par modèle, fournisseur, clé d'API et prompt système."
+  },
+  "AuditPage": {
+    "title_bar": "Audit de coûts",
+    "title_bar_description": "Six constats calculés sur vos {days} derniers jours de trafic. Actualisé toutes les 15 secondes.",
     "live": "En direct",
     "no_traffic_title": "Aucun trafic sur cette fenêtre",
     "no_traffic_body": "Pointez votre SDK vers le proxy Inferon : ce rapport se remplit à partir de vos propres requêtes.",
@@ -384,30 +405,22 @@
     "f5_title": "Attribution du choc de facture",
     "f5_desc": "Quel modèle, fournisseur et clé ont réellement porté la dépense.",
     "f6_title": "Qualité et échecs",
-    "f6_desc": "Les requêtes payées mais vides, refusées, tronquées ou en échec — et pourquoi."
-  },
-  "ReportsPage": {
-    "title_bar": "Rapports",
-    "title_bar_description": "Le détail derrière le tableau de bord : où va l'argent, ce qui fuit, et comment les réponses se comportent.",
-    "spend_title": "Dépenses",
-    "spend_body": "Chaque dollar par modèle, fournisseur, clé d'API et prompt système — avec les taux de cache.",
-    "leaks_title": "Rapport de fuites",
-    "leaks_body": "Les six fuites de coût nommées, calculées à partir de votre trafic et actualisées en direct.",
-    "quality_title": "Qualité",
-    "quality_body": "Résultats, classes d'erreur, troncatures et pouces : ce que vous avez payé sans résultat."
-  },
-  "SettingsPage": {
-    "title_bar": "Paramètres",
-    "title_bar_description": "Connectez un client, gérez les accès et exécutez l'inférence sur votre propre matériel.",
-    "connect_title": "Connecter votre SDK",
-    "connect_body": "Créez une clé, pointez votre SDK vers le proxy et envoyez la première requête.",
-    "keys_title": "Clés d'API",
-    "keys_body": "Créez, inspectez et révoquez les clés utilisées par vos clients.",
-    "members_title": "Membres",
-    "members_body": "Qui peut voir et modifier ce locataire."
-  },
-  "SpendReportPage": {
-    "title_bar": "Rapport de dépenses",
-    "title_bar_description": "Chaque dollar des {days} derniers jours — par modèle, fournisseur, clé d'API et prompt système."
+    "f6_desc": "Les requêtes payées mais vides, refusées, tronquées ou en échec — et pourquoi.",
+    "share_title": "Partager cet audit",
+    "share_body": "Créez un lien en lecture seule. Il montre les six constats — jamais les prompts, clés ou réponses — et vous pouvez le révoquer à tout moment.",
+    "share_create": "Créer un lien",
+    "share_once": "Copiez ce lien maintenant — il n'est affiché qu'une fois.",
+    "share_copy": "Copier",
+    "share_copied": "Copié",
+    "share_revoke": "Révoquer",
+    "share_revoked": "Révoqué",
+    "share_none": "Aucun lien pour l'instant.",
+    "share_link": "Lien d'audit",
+    "share_error": "Impossible de créer le lien",
+    "share_revoke_error": "Impossible de révoquer le lien",
+    "public_title": "Audit de coûts",
+    "public_body": "Un rapport en lecture seule généré à partir du trafic réel. Actualisé toutes les 15 secondes.",
+    "invalid_title": "Ce lien n'est pas disponible",
+    "invalid_body": "Il a peut-être été révoqué, ou l'adresse est incorrecte."
   }
 }

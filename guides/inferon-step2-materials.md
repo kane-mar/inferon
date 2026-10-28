@@ -2,7 +2,7 @@
 
 This is the operating kit for turning the Step 1 leads (HN Ask HN threads,
 r/SaaS posts, X handles once logged in) into real conversations — leading with
-the leak report as *value*, never with a pitch.
+the cost audit as *value*, never with a pitch.
 
 ---
 
@@ -10,7 +10,7 @@ the leak report as *value*, never with a pitch.
 
 **The rule:** your first message must give something concrete and specific *about
 them*, not ask for something. Every opener below leads with one named finding
-from the leak report and ends with an *answerable* question, not a link.
+from the cost audit and ends with an *answerable* question, not a link.
 
 ### Template 1 — reply on an "Ask HN / cost-help" thread (highest ROI)
 
@@ -22,7 +22,7 @@ from the leak report and ends with an *answerable* question, not a link.
 > un-cached system prompt on every request.
 >
 > If you're open to it, point your SDK at a base URL + key for a couple days and
-> I'll send back a one-page leak report showing exactly where it's going — free,
+> I'll send back a one-page cost audit showing exactly where it's going — free,
 > no obligation. You keep the report either way."
 
 **Why it works:** it *demonstrates* the linter (names over-provisioning + cache
@@ -44,7 +44,7 @@ generality, gives value (the audit) with zero commitment.
 > "Saw your post about [their specific bill/frustration]. I spend a lot of time
 > inside LLM traffic and the leak is almost never where founders think it is —
 > it's usually an un-cached system prompt or GPT-4o on simple tasks. Want a free
-> leak report? Point me at your proxy for a day and I'll show you the exact line
+> cost audit? Point me at your proxy for a day and I'll show you the exact line
 > item. No product, no pitch — just the report."
 
 **Why it works:** references *their* post (peer, not vendor), leads with a
@@ -58,7 +58,7 @@ true — the report *is* the value.
 These test the *refined* hypothesis from Step 1:
 
 > **"A founder with an LLM SaaS wrapper gets bill shock they can't explain, and
-> will pay for the leak-report → then the cost-reduction."**
+> will pay for the cost-audit → then the cost-reduction."**
 
 And the counter-hypothesis:
 
@@ -96,7 +96,7 @@ And the counter-hypothesis:
 
 | Signal | Meaning |
 |---|---|
-| They can't name where spend goes | Strong Finding 5 fit — lead with the leak report |
+| They can't name where spend goes | Strong Finding 5 fit — lead with the cost audit |
 | They *can* name it and downgraded already | Counter-hypothesis — they may not be your buyer |
 | They react to "un-cached system prompt" with "wait, what?" | Finding 3 education gap — high value |
 | They ask "but will quality drop?" | Finding 6 trust objection — counter with the error/outcome data |
@@ -120,7 +120,7 @@ And the counter-hypothesis:
 
 **Weeks 3–4:**
 - Keep interviewing to ~20 conversations; point the warm ones at the live proxy
-  for a real leak-report audit (Step 3 — it already exists).
+  for a real cost-audit audit (Step 3 — it already exists).
 
 ---
 

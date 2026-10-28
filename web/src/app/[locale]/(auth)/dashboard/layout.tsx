@@ -40,17 +40,15 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
   const labels = {
     home: t('home'),
     providers: t('providers'),
-    upstream: t('upstream'),
     routing: t('routing'),
     reports: t('reports'),
     settings: t('settings'),
     spend: t('spend'),
-    leaks: t('leaks'),
+    audit: t('audit'),
     quality: t('quality'),
     connect: t('connect'),
     keys: t('keys'),
     members: t('members'),
-    edge: t('edge'),
     operator: t('operator'),
   };
   const menu = dashboardNav(session.me.is_operator).map(item => ({

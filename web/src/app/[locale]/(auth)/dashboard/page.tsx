@@ -277,8 +277,8 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         <Card
           title={t('waste')}
           action={(
-            <Link href="/dashboard/leaks" className="text-sm text-primary">
-              {t('view_leaks')}
+            <Link href="/dashboard/audit" className="text-sm text-primary">
+              {t('view_audit')}
             </Link>
           )}
         >

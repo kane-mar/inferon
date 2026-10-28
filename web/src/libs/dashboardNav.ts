@@ -21,21 +21,14 @@ export type DashboardNavEntry = {
  */
 export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
   { href: '/dashboard', labelKey: 'home' },
-  {
-    href: '/dashboard/providers',
-    labelKey: 'providers',
-    children: [
-      { href: '/dashboard/providers', labelKey: 'upstream' },
-      { href: '/dashboard/edge', labelKey: 'edge' },
-    ],
-  },
+  { href: '/dashboard/providers', labelKey: 'providers' },
   { href: '/dashboard/routing', labelKey: 'routing' },
   {
     href: '/dashboard/reports',
     labelKey: 'reports',
     children: [
       { href: '/dashboard/reports/spend', labelKey: 'spend' },
-      { href: '/dashboard/leaks', labelKey: 'leaks' },
+      { href: '/dashboard/audit', labelKey: 'audit' },
       { href: '/dashboard/quality', labelKey: 'quality' },
     ],
   },

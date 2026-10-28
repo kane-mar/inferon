@@ -211,6 +211,45 @@ export type WasteFlag = {
 
 export type Waste = Record<string, WasteFlag>;
 
+/** A read-only cost-audit share link (the token is shown only at creation). */
+export type AuditShare = {
+  id: string;
+  label: string;
+  created_at: string;
+  last_viewed_at: string | null;
+  revoked_at: string | null;
+};
+
+export type AuditShares = { shares: AuditShare[] };
+
+/** The public read model behind a shared audit link. */
+export type PublicAudit = {
+  window_days: number;
+  summary: {
+    requests: number;
+    errors: number;
+    total_cost_usd: string;
+    total_savings_usd: string;
+    router_savings_usd: string;
+    fallback_savings_usd: string;
+    cache_savings_usd: string;
+    truncated: number;
+    cache_affinity_requests: number;
+  };
+  waste: Record<string, WasteFlag>;
+  top: {
+    model: { name: string; cost_usd: string } | null;
+    provider: { name: string; cost_usd: string } | null;
+    key: { name: string; cost_usd: string } | null;
+  };
+  quality: {
+    error_rate: number | null;
+    truncated_rate: number | null;
+    guard_fallback_rate: number | null;
+    errors_by_class: Record<string, number>;
+  };
+};
+
 export type TimeseriesPoint = {
   /** `YYYY-MM-DD` (server-side daily bucket). */
   date: string;
@@ -581,6 +620,22 @@ export class InferonApi {
 
   revokeEdgeNode(id: string, cookie?: string): Promise<{ removed: boolean }> {
     return this.request('POST', `/v1/dashboard/api/edge/nodes/${id}/revoke`, {}, { cookie });
+  }
+
+  auditShares(cookie?: string): Promise<AuditShares> {
+    return this.request<AuditShares>('GET', '/v1/dashboard/api/audit/shares', undefined, { cookie });
+  }
+
+  createAuditShare(cookie?: string): Promise<{ id: string; token: string }> {
+    return this.request('POST', '/v1/dashboard/api/audit/shares', { label: '' }, { cookie });
+  }
+
+  revokeAuditShare(id: string, cookie?: string): Promise<{ id: string; revoked: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/audit/shares/${id}/revoke`, {}, { cookie });
+  }
+
+  publicAudit(token: string, days = 30): Promise<PublicAudit> {
+    return this.request<PublicAudit>('GET', `/v1/public/audit/${token}?days=${days}`);
   }
 
   createProvider(body: NewProvider, cookie?: string): Promise<{ id: string }> {
