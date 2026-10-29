@@ -163,3 +163,49 @@ Captured as **ITEM-049** (type: tech-debt), ranked after the control-plane items
 (043–048) since it is consistency housekeeping, not new capability. One item
 covers both because they're the same "own all the surfaces" cleanup: exit the
 template, and leave one operator console (JSON APIs for machines unchanged).
+
+## 2026-10-28 — Connectivity decision: three profiles, ITEM-080 dropped, 081–084 captured
+
+PO review of customer-hosted connectivity. The framing question was whether
+Inferon routes cloud traffic to an on-prem model, and the answer is that it
+cannot without the prompt transiting the cloud — so the option space is three
+profiles, not two, and one proposed item was pointing the wrong way.
+
+**The three recognised profiles**
+1. **Self-hosted** — the whole stack on the customer's Docker (same image, same
+   compose). Firewall mode. Already works; needs distribution polish (ITEM-083).
+2. **Cloud + reachable endpoint** — an on-prem model published behind TLS and
+   registered as a provider. Already built: ITEM-051 (pre-add probe, persisted
+   reachability, discovery) + ITEM-077 (`local` kind priced $0 with the
+   counterfactual still attributed). Needs the five-minute flow (ITEM-082) and a
+   router axis that can point at it (ITEM-081).
+3. **Edge node** — clients talk to it, prompts never leave the network. Keep for
+   privacy customers; it is *not* a routing target for cloud traffic.
+
+**Dropped: ITEM-080 (edge hybrid fallback).** A local-first-then-remote fallback
+on the node reproduces exactly the failure mode it was meant to fix — "local
+until it silently isn't" — and breaks the privacy promise that is the only
+reason to run an edge node. If a tenant wants cloud models, they should be a
+cloud tenant with a reachable endpoint (profile 2), not an edge node with a
+backdoor.
+
+**Captured**
+- **ITEM-081 per-tenant tier pairs** — the actual "cheaper option": the tenant
+  names the cheap model (including its own `local` one) instead of living with
+  the hardcoded `TIER_PAIRS` const.
+- **ITEM-082 attach an on-prem model as a provider** — keyless `local`, a real
+  badge/hint, periodic reachability so a dark box is visible before a request
+  fails.
+- **ITEM-083 self-hosted distribution** — compose profile, install/upgrade/
+  air-gapped guide, CI smoke of the documented path, plain support boundary.
+  Mostly docs; no licence enforcement, no phone-home.
+- **ITEM-084 connector / reverse tunnel** — **staged**. Unpark only if a
+  customer refuses both a reachable endpoint and Docker.
+
+**Centre of gravity: cloud.** Evidence: there is no licence, no billing, no
+support or upgrade channel (so self-hosting as the *product* would mean building
+those instead of product); every delivered differentiator (cost audit, router,
+budget guard, savings attribution, adaptive policy) is cross-provider and
+cloud-side; and the only real traffic evidence (ITEM-018) is cloud-side. So
+ITEM-081 → 082 → 083. If that ever inverts, ITEM-083 moves to the top and the
+other two do not change.

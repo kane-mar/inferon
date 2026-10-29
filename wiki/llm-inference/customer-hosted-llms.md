@@ -95,6 +95,25 @@ records authenticated as its tenant; the cloud writes them through the existing
 sink so the dashboard/billing/alerts light up. Everything else (edge mode,
 config sync) builds on it.
 
+## Decision (2026-10-28) — three profiles, no cloud→on-prem routing
+
+There is no profile in which the cloud routes to an on-prem model and the prompt
+stays off the cloud: routing through the cloud *is* sending the prompt through
+the cloud. So the option space is three profiles, and each has a different
+customer cost:
+
+| Profile | Customer setup | Prompts transit cloud | Backlog |
+|---|---|---|---|
+| **Self-hosted** (full stack on their Docker) | Docker on their host | **No** | ITEM-083 |
+| **Cloud + reachable endpoint** | Publish the model behind TLS | Yes (one extra hop) | ITEM-051/077 built; ITEM-082 UX, ITEM-081 cheap tier |
+| **Edge node** (privacy only) | Run the node; clients talk to it | **No** (telemetry only) | ITEM-070 delivered |
+
+The **edge node is not a cloud fallback target**. A node that silently falls
+back to a cloud provider is the worst outcome available — local until it isn't —
+and it breaks the privacy promise that is the only reason to run a node. That
+proposal (ITEM-080) was dropped. The connector (option B / ITEM-084) stays
+staged until a customer refuses both a reachable endpoint and Docker.
+
 ## Economics & performance
 
 | Path | Inference hops | Cloud egress | Latency |
@@ -105,10 +124,14 @@ config sync) builds on it.
 
 ## Status
 
-- **ITEM-051** — customer-hosted endpoint (A): recipe + reachability.
+- **ITEM-051** — customer-hosted endpoint (A): recipe + reachability. Built.
 - **ITEM-052** — hybrid data plane (C): the control/data split, edge mode,
-  config sync, telemetry ingest.
-- B (edge connector) is deferred in the backlog record, not built.
+  config sync, telemetry ingest. Built.
+- **ITEM-082** — the five-minute attach flow for A (keyless `local`, badge,
+  periodic reachability). Captured 2026-10-28.
+- **ITEM-083** — self-hosted distribution of the full stack. Captured 2026-10-28.
+- B (edge connector) is **staged** as ITEM-084, not built, and the edge node is
+  explicitly not a cloud fallback.
 
 ## See Also
 
