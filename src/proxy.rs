@@ -1198,9 +1198,10 @@ async fn fallback_to_frontier(
             );
         }
     };
-    let replay = provider_request(&state.http_client, &route).body(replay_body)
-    .send()
-    .await;
+    let replay = provider_request(&state.http_client, route)
+        .body(replay_body)
+        .send()
+        .await;
     let guarded_model = guard_emit.meta.model.clone();
     match replay {
         Err(e) => {
