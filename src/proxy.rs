@@ -460,11 +460,15 @@ pub(crate) async fn proxy_chat_completions(
         {
             model_override = None;
         } else if chosen.reason == budget::ROUTER_REASON {
-            meta.router_event = Some(json!({
+            let mut event = json!({
                 "from_model": meta.model,
                 "to_model": chosen.model,
                 "reason": chosen.reason,
-            }));
+            });
+            if let Some(source) = chosen.pair_source {
+                event["pair_source"] = json!(source.label());
+            }
+            meta.router_event = Some(event);
         }
     }
     // ITEM-045: the ordered chain — the primary (after any router/budget override),

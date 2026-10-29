@@ -159,6 +159,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(dashboard::tenant_provider_models),
         )
         .route("/v1/dashboard/api/routing", get(dashboard::tenant_routing).post(dashboard::tenant_routing_set))
+        .route(
+            "/v1/dashboard/api/routing/tier-pairs",
+            post(dashboard::tenant_tier_pairs_set),
+        )
         .route("/v1/dashboard/api/config", get(dashboard::tenant_config).post(dashboard::tenant_config_set))
         .route("/v1/dashboard/api/by-model", get(dashboard::by_model))
         .route("/v1/dashboard/api/by-prompt", get(dashboard::by_prompt))

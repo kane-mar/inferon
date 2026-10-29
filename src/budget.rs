@@ -27,6 +27,8 @@ pub struct TenantBudget {
     /// ITEM-046: the heuristic router's controls.
     pub router_enabled: bool,
     pub router_threshold: f64,
+    /// ITEM-081: the tenant's own downshift rules (empty = built-in only).
+    pub tier_pairs: Vec<crate::router::TierPair>,
 }
 
 /// ITEM-046: the tenant's routing/budget controls, as submitted from the UI.
@@ -64,6 +66,18 @@ pub(crate) fn enforce_budget(budget: &TenantBudget) -> BudgetVerdict {
     BudgetVerdict::Allow
 }
 
+/// The `tenant_configurations` row as both the hot path and the edge config sync
+/// read it (ITEM-015/027/046/081).
+pub(crate) type ConfigRow = (
+    i64,
+    i64,
+    Option<String>,
+    bool,
+    bool,
+    f64,
+    sqlx::types::Json<Vec<crate::router::TierPair>>,
+);
+
 /// Lookup seam: budget config per tenant. `None` = no config = unlimited.
 #[async_trait::async_trait]
 pub trait BudgetStore: Send + Sync {
@@ -91,6 +105,16 @@ pub trait BudgetStore: Send + Sync {
         _update: &ConfigUpdate,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err("this budget store does not support configuration".into())
+    }
+
+    /// ITEM-081: replace the tenant's own downshift pairs (empty clears them).
+    /// The hot path reads them from the same row `budget_for` already loads.
+    async fn set_tier_pairs(
+        &self,
+        _tenant_id: Uuid,
+        _pairs: &[crate::router::TierPair],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("this budget store does not support tier pairs".into())
     }
 }
 
@@ -127,6 +151,10 @@ impl BudgetStore for InMemoryBudgetStore {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut rows = self.rows();
         let spent_cents = rows.get(&tenant_id).map(|b| b.spent_cents).unwrap_or(0);
+        let tier_pairs = rows
+            .get(&tenant_id)
+            .map(|budget| budget.tier_pairs.clone())
+            .unwrap_or_default();
         rows.insert(
             tenant_id,
             TenantBudget {
@@ -136,6 +164,7 @@ impl BudgetStore for InMemoryBudgetStore {
                 guard_enabled: update.guard_enabled,
                 router_enabled: update.router_enabled,
                 router_threshold: update.router_threshold,
+                tier_pairs,
             },
         );
         Ok(())
@@ -146,6 +175,26 @@ impl BudgetStore for InMemoryBudgetStore {
         tenant_id: Uuid,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.rows().get(&tenant_id).map_or(true, |b| b.guard_enabled))
+    }
+
+    async fn set_tier_pairs(
+        &self,
+        tenant_id: Uuid,
+        pairs: &[crate::router::TierPair],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut rows = self.rows();
+        let mut budget = rows.remove(&tenant_id).unwrap_or(TenantBudget {
+            limit_cents: 0,
+            spent_cents: 0,
+            cheap_fallback_model: None,
+            guard_enabled: true,
+            router_enabled: true,
+            router_threshold: crate::router::DOWNGRADE_THRESHOLD,
+            tier_pairs: Vec::new(),
+        });
+        budget.tier_pairs = pairs.to_vec();
+        rows.insert(tenant_id, budget);
+        Ok(())
     }
 }
 
@@ -165,17 +214,17 @@ impl BudgetStore for PostgresBudgetStore {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
-        let row: Option<(i64, i64, Option<String>, bool, bool, f64)> = sqlx::query_as(
+        let row: Option<ConfigRow> = sqlx::query_as(
             "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model,
                     COALESCE(guard_enabled, TRUE), COALESCE(router_enabled, TRUE),
-                    COALESCE(router_threshold, 0.35)
+                    COALESCE(router_threshold, 0.35), tier_pairs
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs)| {
                 TenantBudget {
                     limit_cents,
                     spent_cents,
@@ -183,6 +232,7 @@ impl BudgetStore for PostgresBudgetStore {
                     guard_enabled,
                     router_enabled,
                     router_threshold,
+                    tier_pairs: tier_pairs.0,
                 }
             },
         ))
@@ -200,6 +250,22 @@ impl BudgetStore for PostgresBudgetStore {
         .fetch_optional(&self.pool)
         .await?;
         Ok(enabled.unwrap_or(true))
+    }
+
+    async fn set_tier_pairs(
+        &self,
+        tenant_id: Uuid,
+        pairs: &[crate::router::TierPair],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        sqlx::query(
+            "INSERT INTO tenant_configurations (tenant_id, tier_pairs) VALUES ($1, $2)
+             ON CONFLICT (tenant_id) DO UPDATE SET tier_pairs = $2",
+        )
+        .bind(tenant_id)
+        .bind(sqlx::types::Json(pairs))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn update_config(
@@ -252,11 +318,13 @@ pub async fn check_cap(state: &Arc<AppState>, tenant_id: Uuid) -> Result<(), Res
 pub const ROUTER_REASON: &str = "heuristic_router";
 pub const BUDGET_REASON: &str = "budget";
 
-/// A model override chosen on the hot path, with its reason.
+/// A model override chosen on the hot path, with its reason (and, for the
+/// heuristic router, which tier-pair table chose the target).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelOverride {
     pub model: String,
     pub reason: &'static str,
+    pub pair_source: Option<crate::router::PairSource>,
 }
 
 /// The tenant's budget row, or the typed 500 response when the lookup fails.
@@ -272,6 +340,31 @@ async fn load_budget(
             "budget lookup failed",
         )
     })
+}
+
+/// ITEM-081 AC3: a tenant pair is only usable while its cheap model is still
+/// routable. Write-time validation cannot see a model disabled later, so the hot
+/// path keeps the client's model instead of asking for a model nothing serves.
+async fn pair_is_routable(state: &Arc<AppState>, tenant_id: Uuid, cheap: &str) -> bool {
+    let Ok(providers) = state
+        .provider_store
+        .providers_for_model(tenant_id, cheap)
+        .await
+    else {
+        return true; // a store hiccup must not silently switch routing off
+    };
+    if !providers.is_empty() {
+        return true;
+    }
+    // No provider advertises it: fine only when the tenant has no providers at
+    // all, where the shared platform key accepts any model.
+    state
+        .provider_store
+        .resolve_for(tenant_id, None)
+        .await
+        .ok()
+        .flatten()
+        .is_none()
 }
 
 /// Apply the breaker AND the heuristic router on the hot path, before
@@ -294,22 +387,36 @@ pub async fn check_budget(
         return Ok(chosen.map(|model| ModelOverride {
             model,
             reason: ROUTER_REASON,
+            pair_source: Some(crate::router::PairSource::Global),
         }));
     };
     match enforce_budget(&budget) {
-        BudgetVerdict::Allow => Ok(if budget.router_enabled {
+        BudgetVerdict::Allow => {
+            if !budget.router_enabled {
+                return Ok(None);
+            }
             let threshold = policy_threshold.unwrap_or(budget.router_threshold);
-            crate::router::maybe_downgrade_with(payload, threshold).map(|model| ModelOverride {
-                model,
+            let Some(chosen) =
+                crate::router::maybe_downgrade_with_pairs(payload, threshold, &budget.tier_pairs)
+            else {
+                return Ok(None);
+            };
+            if chosen.source == crate::router::PairSource::Tenant
+                && !pair_is_routable(state, tenant_id, &chosen.model).await
+            {
+                return Ok(None);
+            }
+            Ok(Some(ModelOverride {
+                model: chosen.model,
                 reason: ROUTER_REASON,
-            })
-        } else {
-            None
-        }),
+                pair_source: Some(chosen.source),
+            }))
+        }
         BudgetVerdict::Reject => Err(reject_response()),
         BudgetVerdict::DowngradeTo(model) => Ok(Some(ModelOverride {
             model,
             reason: BUDGET_REASON,
+            pair_source: None,
         })),
     }
 }

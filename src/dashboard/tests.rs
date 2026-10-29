@@ -1397,3 +1397,142 @@
             .unwrap();
         assert_eq!(remove.status(), axum::http::StatusCode::FORBIDDEN);
     }
+// --- ITEM-081: per-tenant tier pairs ------------------------------------
+
+/// Seed a provider advertising `models`, all enabled, for the seeded tenant.
+async fn seed_models(state: &std::sync::Arc<crate::AppState>, models: &[&str]) -> uuid::Uuid {
+    let tenant_id = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+    let provider_id = state
+        .provider_store
+        .insert(
+            tenant_id,
+            &crate::providers::NewProvider {
+                kind: "local".to_string(),
+                name: "lab".to_string(),
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
+                key: String::new(),
+                metadata: crate::providers::ProviderMetadata::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .expect("provider seeded");
+    let advertised: Vec<String> = models.iter().map(|model| model.to_string()).collect();
+    state
+        .provider_store
+        .record_models(provider_id, &advertised)
+        .await
+        .expect("models recorded");
+    provider_id
+}
+
+async fn json_of(response: axum::response::Response) -> Value {
+    serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_owner_sets_tier_pairs_and_the_response_says_which_are_live() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["gpt-4o", "qwen3:8b"]).await;
+    let router = crate::build_router(state);
+
+    let empty = router
+        .clone()
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    assert_eq!(empty.status(), axum::http::StatusCode::OK);
+
+    let saved = router
+        .clone()
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing/tier-pairs",
+            &token,
+            r#"{"tier_pairs":[{"frontier":"gpt-4o","cheap":"qwen3:8b"}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), axum::http::StatusCode::OK);
+    let saved = json_of(saved).await;
+    assert_eq!(saved["tier_pairs"][0]["frontier"], "gpt-4o");
+    assert_eq!(saved["tier_pairs"][0]["cheap"], "qwen3:8b");
+    assert_eq!(saved["tier_pairs"][0]["active"], true);
+
+    let listed = router
+        .clone()
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    assert_eq!(listed["tier_pairs"][0]["cheap"], "qwen3:8b");
+    assert_eq!(listed["tier_pairs"][0]["active"], true);
+}
+
+#[tokio::test]
+async fn a_pair_naming_a_model_the_tenant_cannot_route_to_is_refused() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["gpt-4o"]).await;
+    let router = crate::build_router(state);
+    let response = router
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing/tier-pairs",
+            &token,
+            r#"{"tier_pairs":[{"frontier":"gpt-4o","cheap":"qwen3:8b"}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = json_of(response).await;
+    assert_eq!(body["error"]["type"], "tier_pair_unknown_model");
+}
+
+#[tokio::test]
+async fn a_disabled_cheap_model_makes_the_pair_inactive_not_silent() {
+    let (state, token) = tenant_role_session("owner").await;
+    let provider_id = seed_models(&state, &["gpt-4o", "qwen3:8b"]).await;
+    state
+        .budget_store
+        .set_tier_pairs(
+            uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(),
+            &[crate::router::TierPair {
+                frontier: "gpt-4o".into(),
+                cheap: "qwen3:8b".into(),
+            }],
+        )
+        .await
+        .unwrap();
+    state
+        .model_store
+        .set_enabled(provider_id, "qwen3:8b", false)
+        .await
+        .unwrap();
+    let listed = crate::build_router(state)
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    assert_eq!(
+        listed["tier_pairs"][0]["active"], false,
+        "reported, never dropped"
+    );
+}
+
+#[tokio::test]
+async fn a_member_cannot_change_tier_pairs() {
+    let (state, token) = tenant_role_session("member").await;
+    seed_models(&state, &["gpt-4o", "qwen3:8b"]).await;
+    let response = crate::build_router(state)
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing/tier-pairs",
+            &token,
+            r#"{"tier_pairs":[{"frontier":"gpt-4o","cheap":"qwen3:8b"}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+}

@@ -126,3 +126,111 @@
         assert_eq!(downgrade_target("gpt-4o-mini"), None);
         assert_eq!(downgrade_target("deepseek-flash"), None);
     }
+#[test]
+fn a_tenant_pair_overrides_the_builtin_table() {
+    // The tenant runs its own small model and wants the simple traffic
+    // there, not on the built-in mini.
+    let pairs = vec![TierPair {
+        frontier: "gpt-4o".into(),
+        cheap: "qwen3:8b".into(),
+    }];
+    let chosen =
+        maybe_downgrade_with_pairs(&payload("gpt-4o", serde_json::json!({})), 0.35, &pairs)
+            .expect("a simple gpt-4o request is downgraded");
+    assert_eq!(chosen.model, "qwen3:8b");
+    assert_eq!(chosen.source, PairSource::Tenant);
+}
+
+#[test]
+fn builtin_pairs_still_apply_to_models_the_tenant_did_not_pair() {
+    let pairs = vec![TierPair {
+        frontier: "gpt-4o".into(),
+        cheap: "qwen3:8b".into(),
+    }];
+    let chosen = maybe_downgrade_with_pairs(
+        &payload("deepseek-v4-pro", serde_json::json!({})),
+        0.35,
+        &pairs,
+    )
+    .expect("the built-in DeepSeek pair still applies");
+    assert_eq!(chosen.model, "deepseek-flash");
+    assert_eq!(chosen.source, PairSource::Global);
+}
+
+fn knows_all(_: &str) -> bool {
+    true
+}
+
+#[test]
+fn a_pair_must_name_two_different_models() {
+    let same = vec![TierPair {
+        frontier: "gpt-4o".into(),
+        cheap: "gpt-4o".into(),
+    }];
+    assert_eq!(validate_pairs(&same, knows_all), Err(PairIssue::SameModel));
+}
+
+#[test]
+fn a_pair_must_name_models_the_tenant_can_actually_route_to() {
+    let knows = |model: &str| model == "gpt-4o";
+    let unknown_cheap = vec![TierPair {
+        frontier: "gpt-4o".into(),
+        cheap: "qwen3:8b".into(),
+    }];
+    assert_eq!(
+        validate_pairs(&unknown_cheap, knows),
+        Err(PairIssue::UnknownModel("qwen3:8b".to_string()))
+    );
+    let unknown_frontier = vec![TierPair {
+        frontier: "my-frontier".into(),
+        cheap: "gpt-4o".into(),
+    }];
+    assert_eq!(
+        validate_pairs(&unknown_frontier, knows),
+        Err(PairIssue::UnknownModel("my-frontier".to_string()))
+    );
+}
+
+#[test]
+fn a_pair_that_closes_a_loop_is_refused() {
+    // The tenant would hand the router a cycle through the built-in pair:
+    // flash -> pro (tenant) and pro -> flash (global).
+    let cycle = vec![TierPair {
+        frontier: "deepseek-flash".into(),
+        cheap: "deepseek-v4-pro".into(),
+    }];
+    assert_eq!(validate_pairs(&cycle, knows_all), Err(PairIssue::Cycle));
+}
+
+#[test]
+fn a_pair_cannot_shadow_another_frontier() {
+    let duplicate = vec![
+        TierPair {
+            frontier: "gpt-4o".into(),
+            cheap: "qwen3:8b".into(),
+        },
+        TierPair {
+            frontier: "gpt-4o".into(),
+            cheap: "llama3:8b".into(),
+        },
+    ];
+    assert_eq!(
+        validate_pairs(&duplicate, knows_all),
+        Err(PairIssue::Duplicate)
+    );
+}
+
+#[test]
+fn a_valid_pair_set_is_accepted() {
+    let pairs = vec![
+        TierPair {
+            frontier: "gpt-4o".into(),
+            cheap: "qwen3:8b".into(),
+        },
+        TierPair {
+            frontier: "deepseek-v4-pro".into(),
+            cheap: "llama3:70b".into(),
+        },
+    ];
+    assert_eq!(validate_pairs(&pairs, knows_all), Ok(()));
+}

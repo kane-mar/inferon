@@ -373,7 +373,14 @@ export type ProviderModelsGroup = {
 
 export type ModelsResponse = { providers: ProviderModelsGroup[]; role: Role };
 
-export type RoutingResponse = { fallbacks: string[]; role: Role };
+export type TierPair = { frontier: string; cheap: string };
+export type ActiveTierPair = TierPair & { active: boolean };
+
+export type RoutingResponse = {
+  fallbacks: string[];
+  tier_pairs: ActiveTierPair[];
+  role: Role;
+};
 
 export type TenantConfig = {
   budget_limit_cents: number;
@@ -701,6 +708,10 @@ export class InferonApi {
 
   setRouting(fallbacks: string[], cookie?: string): Promise<{ fallbacks: string[] }> {
     return this.request('POST', '/v1/dashboard/api/routing', { fallbacks }, { cookie });
+  }
+
+  setTierPairs(pairs: TierPair[], cookie?: string): Promise<{ tier_pairs: ActiveTierPair[] }> {
+    return this.request('POST', '/v1/dashboard/api/routing/tier-pairs', { tier_pairs: pairs }, { cookie });
   }
 
   config(cookie?: string): Promise<TenantConfig> {

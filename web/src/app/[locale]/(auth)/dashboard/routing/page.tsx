@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
+import { TierPairsPanel } from '@/features/dashboard/TierPairsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
@@ -43,6 +44,16 @@ export default async function RoutingPage(props: RoutingPageProps) {
       <Card title={t('chain')}>
         <RoutingPanel data={data} modelIds={modelIds} />
       </Card>
+
+      <div className="mt-4">
+        <Card title={t('tier_pairs')}>
+          <TierPairsPanel
+            pairs={data.tier_pairs}
+            modelIds={modelIds}
+            canEdit={data.role === 'owner'}
+          />
+        </Card>
+      </div>
 
       <div className="mt-4">
         <Card title={t('controls')}>

@@ -222,3 +222,25 @@ describe('formatUsd — decimal strings, never floats', () => {
     expect(formatUsd(input)).toBe(expected);
   });
 });
+
+describe('InferonApi — tenant tier pairs (ITEM-081)', () => {
+  it('posts the full pair list to the tier-pairs endpoint', async () => {
+    const fetchImpl = vi.fn(async () =>
+      json({ tier_pairs: [{ frontier: 'gpt-4o', cheap: 'qwen3:8b', active: true }] }),
+    );
+    const saved = await makeApi(fetchImpl).setTierPairs(
+      [{ frontier: 'gpt-4o', cheap: 'qwen3:8b' }],
+      'inferon_session=abc',
+    );
+
+    expect(saved.tier_pairs[0]?.active).toBe(true);
+
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+
+    expect(url).toBe('http://proxy:8080/v1/dashboard/api/routing/tier-pairs');
+    expect(new Headers(init.headers).get('cookie')).toBe('inferon_session=abc');
+    expect(JSON.parse(String(init.body))).toEqual({
+      tier_pairs: [{ frontier: 'gpt-4o', cheap: 'qwen3:8b' }],
+    });
+  });
+});

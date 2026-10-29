@@ -330,7 +330,16 @@
     "saved": "Saved.",
     "owner_only": "Only the tenant owner can change routing.",
     "error": "Could not save routing — please retry.",
-    "controls": "Controls"
+    "controls": "Controls",
+    "tier_pairs": "Tier pairs",
+    "tier_pairs_help": "Send simple traffic on a frontier model to the cheap model you name — your own local model included. Your pairs win over the built-in ones.",
+    "tier_pairs_empty": "No pairs — the built-in table applies (gpt-4o → gpt-4o-mini, deepseek-v4-pro → deepseek-flash).",
+    "tier_pairs_frontier": "Frontier model",
+    "tier_pairs_cheap": "Cheap model",
+    "tier_pairs_select": "Select a model…",
+    "tier_pairs_add": "Add pair",
+    "tier_pairs_inactive": "inactive — a model is not enabled",
+    "tier_pairs_error": "Could not save tier pairs — please retry."
   },
   "ControlsPage": {
     "budget": "Monthly budget (USD)",

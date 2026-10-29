@@ -387,6 +387,11 @@ pub struct RoutingBody {
     fallbacks: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct TierPairsBody {
+    tier_pairs: Vec<crate::router::TierPair>,
+}
+
 
 
 // --- Tenant controls (ITEM-046) ---------------------------------------------

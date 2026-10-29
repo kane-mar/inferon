@@ -62,6 +62,10 @@ pub struct EdgeBudget {
     pub router_enabled: bool,
     #[serde(default = "default_threshold")]
     pub router_threshold: f64,
+    /// ITEM-081: the tenant's tier pairs, synced so the node routes like the
+    /// cloud does.
+    #[serde(default)]
+    pub tier_pairs: Vec<crate::router::TierPair>,
 }
 
 fn default_threshold() -> f64 {
@@ -159,6 +163,7 @@ impl BudgetStore for EdgeState {
             guard_enabled: budget.guard_enabled,
             router_enabled: budget.router_enabled,
             router_threshold: budget.router_threshold,
+            tier_pairs: budget.tier_pairs,
         }))
     }
 

@@ -330,7 +330,16 @@
     "saved": "Enregistré.",
     "owner_only": "Seul le propriétaire du tenant peut modifier le routage.",
     "error": "Impossible d'enregistrer le routage — veuillez réessayer.",
-    "controls": "Réglages"
+    "controls": "Réglages",
+    "tier_pairs": "Paires de paliers",
+    "tier_pairs_help": "Envoyez le trafic simple d'un modèle frontière vers le modèle économique que vous nommez — y compris votre propre modèle local. Vos paires priment sur celles intégrées.",
+    "tier_pairs_empty": "Aucune paire — la table intégrée s'applique (gpt-4o → gpt-4o-mini, deepseek-v4-pro → deepseek-flash).",
+    "tier_pairs_frontier": "Modèle frontière",
+    "tier_pairs_cheap": "Modèle économique",
+    "tier_pairs_select": "Sélectionner un modèle…",
+    "tier_pairs_add": "Ajouter la paire",
+    "tier_pairs_inactive": "inactive — un modèle n'est pas activé",
+    "tier_pairs_error": "Impossible d'enregistrer les paires — veuillez réessayer."
   },
   "ControlsPage": {
     "budget": "Budget mensuel (USD)",

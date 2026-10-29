@@ -1,4 +1,5 @@
     use super::*;
+    use crate::providers::ProviderStore;
     use crate::proxy::{resolve_route, Surface};
     use crate::usage::system_prompt_hash;
     use serde_json::{json, Value};
@@ -784,6 +785,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             guard_enabled: true,
             router_enabled: true,
             router_threshold: 0.35,
+            tier_pairs: Vec::new(),
         };
         let store = std::sync::Arc::new(budget::InMemoryBudgetStore::new(
             [(
@@ -1637,6 +1639,124 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         assert_eq!(event["reason"], "heuristic_router");
     }
 
+#[tokio::test]
+async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
+    // ITEM-081: the tenant names the cheap target, so simple traffic lands
+    // on its own model instead of the built-in mini.
+    let mut budgets = HashMap::new();
+    budgets.insert(
+        uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+        budget::TenantBudget {
+            limit_cents: 0,
+            spent_cents: 0,
+            cheap_fallback_model: None,
+            guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
+            tier_pairs: vec![crate::router::TierPair {
+                frontier: "gpt-4o".into(),
+                cheap: "qwen3:8b".into(),
+            }],
+        },
+    );
+    let (response, mut rx) = traced_request_with_budget(
+        r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
+        Some(CLIENT_KEY),
+        std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+    )
+    .await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(
+        json["model"], "qwen3:8b",
+        "upstream sees the tenant's model"
+    );
+    let msg = rx.recv().await.unwrap();
+    assert_eq!(msg.request_model, "qwen3:8b");
+    let event = msg.router_event.expect("router event recorded");
+    assert_eq!(event["from_model"], "gpt-4o");
+    assert_eq!(event["to_model"], "qwen3:8b");
+    assert_eq!(
+        event["pair_source"], "tenant",
+        "the trace names the pair's source"
+    );
+}
+
+#[tokio::test]
+async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
+    // ITEM-081 AC3: the pair was valid when saved; the model is no longer
+    // advertised. The router must keep the client's model rather than send
+    // the request to a model nothing serves.
+    let upstream = mock_upstream().await;
+    let base = upstream.trim_end_matches("/chat/completions").to_string();
+    let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+    let provider_store = crate::providers::InMemoryProviderStore::default();
+    let provider_id = provider_store
+        .insert(
+            tenant_id,
+            &crate::providers::NewProvider {
+                kind: "openai-compatible".to_string(),
+                name: "lab".to_string(),
+                base_url: base,
+                key: "sk-lab".to_string(),
+                metadata: crate::providers::ProviderMetadata::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+    provider_store
+        .record_models(provider_id, &["gpt-4o".to_string()])
+        .await
+        .unwrap();
+    let mut budgets = HashMap::new();
+    budgets.insert(
+        tenant_id,
+        budget::TenantBudget {
+            limit_cents: 0,
+            spent_cents: 0,
+            cheap_fallback_model: None,
+            guard_enabled: true,
+            router_enabled: true,
+            router_threshold: 0.35,
+            tier_pairs: vec![crate::router::TierPair {
+                frontier: "gpt-4o".into(),
+                cheap: "qwen3:8b".into(),
+            }],
+        },
+    );
+    let state = std::sync::Arc::new(AppState {
+        http_client: reqwest::Client::new(),
+        upstream_url: mock_upstream().await,
+        tenant_store: std::sync::Arc::new(seeded_store()),
+        provider_store: std::sync::Arc::new(provider_store),
+        model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+        budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+        affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+        policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+        edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
+        telemetry_tx: mpsc::channel(16).0,
+        operator_key: None,
+        accounts: None,
+        db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+            .unwrap(),
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        json_body(response).await["model"],
+        "gpt-4o",
+        "the router keeps the client model when the pair's cheap side is gone"
+    );
+}
+
     #[tokio::test]
     async fn disabling_the_router_keeps_the_client_model() {
         // ITEM-046 AC3: the controls are read per request, so an update applies
@@ -1650,6 +1770,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 guard_enabled: true,
                 router_enabled: true,
                 router_threshold: 0.35,
+                tier_pairs: Vec::new(),
             },
         );
         // Simple gpt-4o → downgraded while the router is on.
@@ -1727,6 +1848,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             guard_enabled: true,
             router_enabled: true,
             router_threshold: 0.35,
+            tier_pairs: Vec::new(),
             },
         );
         let (state, mut rx) = with_trace_channel(&base);
@@ -1753,6 +1875,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             guard_enabled: true,
             router_enabled: true,
             router_threshold: 0.35,
+            tier_pairs: Vec::new(),
             },
         );
         let response = build_router(state)
@@ -1778,6 +1901,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             guard_enabled: true,
             router_enabled: true,
             router_threshold: 0.35,
+            tier_pairs: Vec::new(),
             },
         );
         let response = build_router(state)
@@ -2751,6 +2875,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 guard_enabled: false,
                 router_enabled: true,
                 router_threshold: 0.35,
+                tier_pairs: Vec::new(),
             },
         );
         let store: std::sync::Arc<dyn budget::BudgetStore> =

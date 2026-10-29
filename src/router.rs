@@ -24,12 +24,152 @@ pub const TIER_PAIRS: &[(&str, &str)] = &[
     ("deepseek-v4-pro", "deepseek-flash"),
 ];
 
+/// A per-tenant downshift rule (ITEM-081): `frontier` may be served by `cheap`
+/// for simple traffic. Tenant pairs win over the built-in [`TIER_PAIRS`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct TierPair {
+    pub frontier: String,
+    pub cheap: String,
+}
+
+impl TierPair {
+    fn matches(&self, model: &str) -> bool {
+        model.starts_with(&self.frontier) && !model.starts_with(&self.cheap)
+    }
+}
+
+/// Where a downgrade target came from — recorded on the trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PairSource {
+    Tenant,
+    Global,
+}
+
+impl PairSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            PairSource::Tenant => "tenant",
+            PairSource::Global => "global",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Downgrade {
+    pub model: String,
+    pub source: PairSource,
+}
+
+/// Why a pair set was rejected. The dashboard maps each to a typed 400.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PairIssue {
+    EmptyModel,
+    SameModel,
+    UnknownModel(String),
+    Duplicate,
+    Cycle,
+}
+
+/// Reject a pair set the router could not honestly apply. `knows` answers
+/// whether a model is routable for the tenant right now.
+pub fn validate_pairs(
+    pairs: &[TierPair],
+    knows: impl Fn(&str) -> bool,
+) -> Result<(), PairIssue> {
+    for (index, pair) in pairs.iter().enumerate() {
+        if pair.frontier.is_empty() || pair.cheap.is_empty() {
+            return Err(PairIssue::EmptyModel);
+        }
+        if pair.frontier == pair.cheap {
+            return Err(PairIssue::SameModel);
+        }
+        if pairs[..index]
+            .iter()
+            .any(|earlier| earlier.frontier == pair.frontier)
+        {
+            return Err(PairIssue::Duplicate);
+        }
+        for model in [&pair.frontier, &pair.cheap] {
+            if !knows(model) {
+                return Err(PairIssue::UnknownModel(model.clone()));
+            }
+        }
+    }
+    if closes_loop(pairs) {
+        return Err(PairIssue::Cycle);
+    }
+    Ok(())
+}
+
+/// A loop can only be created with the built-in table, so check the effective
+/// graph (tenant pairs shadowing a frontier, plus the remaining defaults).
+fn closes_loop(pairs: &[TierPair]) -> bool {
+    let mut edges: Vec<(String, String)> = pairs
+        .iter()
+        .map(|pair| (pair.frontier.clone(), pair.cheap.clone()))
+        .collect();
+    for &(frontier, cheap) in TIER_PAIRS {
+        if !pairs.iter().any(|pair| pair.frontier == frontier) {
+            edges.push((frontier.to_string(), cheap.to_string()));
+        }
+    }
+    let mut settled = std::collections::HashSet::new();
+    edges.iter().map(|(frontier, _)| frontier).any(|frontier| {
+        reaches_itself(
+            frontier,
+            &edges,
+            &mut std::collections::HashSet::new(),
+            &mut settled,
+        )
+    })
+}
+
+fn reaches_itself(
+    node: &str,
+    edges: &[(String, String)],
+    path: &mut std::collections::HashSet<String>,
+    settled: &mut std::collections::HashSet<String>,
+) -> bool {
+    if !path.insert(node.to_string()) {
+        return true;
+    }
+    let looped = edges
+        .iter()
+        .filter(|(from, _)| from == node)
+        .any(|(_, to)| {
+            path.contains(to)
+                || (!settled.contains(to) && reaches_itself(to, edges, path, settled))
+        });
+    path.remove(node);
+    settled.insert(node.to_string());
+    looped
+}
+
 /// The cheap model to downshift `model` to, if it is the expensive member of a
 /// configured tier pair. `None` for the cheap member itself or an unpaired model.
 pub(crate) fn downgrade_target(model: &str) -> Option<&'static str> {
     TIER_PAIRS.iter().find_map(|&(expensive, cheap)| {
         (model.starts_with(expensive) && !model.starts_with(cheap)).then_some(cheap)
     })
+}
+
+/// The downgrade for `model`: the tenant's own pair first, then the built-in
+/// table, so a tenant that attaches its own cheap model is never overridden by
+/// the defaults.
+pub fn downgrade_for(model: &str, pairs: &[TierPair]) -> Option<Downgrade> {
+    pairs
+        .iter()
+        .find(|pair| pair.matches(model))
+        .map(|pair| Downgrade {
+            model: pair.cheap.clone(),
+            source: PairSource::Tenant,
+        })
+        .or_else(|| {
+            downgrade_target(model).map(|cheap| Downgrade {
+                model: cheap.to_string(),
+                source: PairSource::Global,
+            })
+        })
 }
 
 /// gpt-4o tier but NOT gpt-4o-mini (a mini request can't be downgraded).
@@ -93,9 +233,19 @@ pub(crate) fn complexity_score(payload: &Value) -> f64 {
 /// cheap model when it is simpler than `threshold`. Returns the model to use;
 /// `None` = keep the client's.
 pub fn maybe_downgrade_with(payload: &Value, threshold: f64) -> Option<String> {
+    maybe_downgrade_with_pairs(payload, threshold, &[]).map(|chosen| chosen.model)
+}
+
+/// As [`maybe_downgrade_with`], but honouring the tenant's pairs first and
+/// reporting where the target came from.
+pub fn maybe_downgrade_with_pairs(
+    payload: &Value,
+    threshold: f64,
+    pairs: &[TierPair],
+) -> Option<Downgrade> {
     let model = payload["model"].as_str()?;
-    let target = downgrade_target(model)?;
-    (complexity_score(payload) < threshold).then(|| target.to_string())
+    let chosen = downgrade_for(model, pairs)?;
+    (complexity_score(payload) < threshold).then_some(chosen)
 }
 
 /// Downgrade with the default threshold (ITEM-015 behaviour).

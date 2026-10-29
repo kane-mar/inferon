@@ -8,6 +8,7 @@
             guard_enabled: true,
             router_enabled: true,
             router_threshold: 0.35,
+            tier_pairs: Vec::new(),
         }
     }
 
@@ -49,6 +50,7 @@
                 guard_enabled: false,
                 router_enabled: true,
                 router_threshold: 0.35,
+                tier_pairs: Vec::new(),
             },
         );
         let store = InMemoryBudgetStore::new(budgets);
@@ -125,3 +127,33 @@
             serde_json::json!({"type": "json_object"})
         );
     }
+
+#[tokio::test]
+async fn tier_pairs_survive_a_controls_update_and_work_for_a_fresh_tenant() {
+    // ITEM-081: the pairs live on the same row the controls own. A save from
+    // the controls panel must not wipe them, and a tenant with no row yet
+    // can still declare pairs.
+    let store = InMemoryBudgetStore::default();
+    let tenant = uuid::Uuid::new_v4();
+    let pairs = [crate::router::TierPair {
+        frontier: "gpt-4o".into(),
+        cheap: "qwen3:8b".into(),
+    }];
+    store.set_tier_pairs(tenant, &pairs).await.unwrap();
+    store
+        .update_config(
+            tenant,
+            &ConfigUpdate {
+                budget_limit_cents: 5000,
+                cheap_fallback_model: Some("deepseek-chat".to_string()),
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.5,
+            },
+        )
+        .await
+        .unwrap();
+    let budget = store.budget_for(tenant).await.unwrap().unwrap();
+    assert_eq!(budget.tier_pairs, pairs);
+    assert_eq!(budget.router_threshold, 0.5);
+}
