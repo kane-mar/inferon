@@ -46,7 +46,7 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-078 | Edge credentials from files, not argv | hardening | **done (2026-10-26)** — `--provider-key-file` / `--node-token-file` (file wins, newline trimmed, fail-fast); `ps` shows paths only. Live restarted node + 200 |
 | ITEM-079 | Prompt-embedder artifact runs (macOS 11 x86_64) | hardening | **done (2026-10-26)** — `scripts/fetch-embedder.sh` + ORT 1.19.2 pinned (`api-19`, the newest with macOS x64/macOS 11); `All` optimization level; artifact tests `embed_bench` p50 ~8–10 ms + `embed_semantics` pass |
 | ITEM-075 | Edge serves the local provider's own models | bug | **done (2026-10-15)** — the node discovered `GET <provider-url>/models` on startup + sync (fallback to the cloud catalog); live edge run proved `/v1/models` = the local id and a local 200 with the trace in the cloud |
-| ITEM-081 | Per-tenant tier pairs (cheap tier → your own model) | feature | **new (2026-10-28)** — `TIER_PAIRS` is a compile-time const, so a tenant with a local/cheap provider cannot say "downshift to my model". Per-tenant pairs, validated, traced with their source; a `local` target costs $0 (ITEM-077) |
+| ITEM-081 | Per-tenant tier pairs (cheap tier → your own model) | feature | **done + archived (2026-10-29)** — `tier_pairs` on the tenant config (migration 036) win over the built-in table; validated at save (same/unknown/duplicate/cycle) and applied only while the cheap model still resolves; `router_event.pair_source`; `/dashboard/routing` card. Live: v4-pro → deepseek-chat served + traced `pair_source:"tenant"` |
 | ITEM-082 | Attach an on-prem model as a provider (five-minute flow) | improvement | **new (2026-10-28)** — capability exists (ITEM-051 probe + ITEM-077 `local` = $0) but the flow does not: empty key is rejected, `local` has no UI styling/hint, reachability only refreshes on a manual Test. Keyless local, real badge, periodic probe |
 | ITEM-083 | Self-hosted distribution (compose profile, install/upgrade, air-gapped) | feature | **new (2026-10-28)** — same image, same compose, no guide: named profile, first-run path, upgrade/rollback, air-gapped, CI smoke of the documented path, plain support boundary. Mostly docs |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
@@ -59,9 +59,9 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 | ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 
-_Last updated: 2026-10-28 (connectivity decision — ITEM-080 dropped, ITEM-081..084 captured)_ —
-**Next pull is ITEM-081** (per-tenant tier pairs), then **ITEM-082** (attach an
-on-prem model), then **ITEM-083** (self-hosted distribution).
+_Last updated: 2026-10-29 (ITEM-081 done + archived)_ —
+**Next pull is ITEM-082** (attach an on-prem model as a provider), then
+**ITEM-083** (self-hosted distribution).
 
 Decision (2026-10-28): the **cloud is the centre of gravity**; self-hosting is a
 supported deployment of the same artifact, not a second product. Three profiles

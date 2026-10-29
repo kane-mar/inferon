@@ -105,7 +105,7 @@ customer cost:
 | Profile | Customer setup | Prompts transit cloud | Backlog |
 |---|---|---|---|
 | **Self-hosted** (full stack on their Docker) | Docker on their host | **No** | ITEM-083 |
-| **Cloud + reachable endpoint** | Publish the model behind TLS | Yes (one extra hop) | ITEM-051/077 built; ITEM-082 UX, ITEM-081 cheap tier |
+| **Cloud + reachable endpoint** | Publish the model behind TLS | Yes (one extra hop) | ITEM-051/077/081 built; ITEM-082 UX |
 | **Edge node** (privacy only) | Run the node; clients talk to it | **No** (telemetry only) | ITEM-070 delivered |
 
 The **edge node is not a cloud fallback target**. A node that silently falls
