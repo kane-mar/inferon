@@ -15,7 +15,9 @@ PORT="${SMOKE_PORT:-18080}"
 WEB_PORT="${SMOKE_WEB_PORT:-13000}"
 export PORT WEB_PORT
 export WEB_BIND="127.0.0.1"
-export COMPOSE_PROFILES="self-hosted,mock"
+# Both on the command line: an explicit --profile overrides COMPOSE_PROFILES,
+# and the lying mock is the only "model" this smoke may call (no egress).
+PROFILES=(--profile self-hosted --profile mock)
 # The lying mock upstream is the "model": it streams a plain SSE 200 for any
 # unguarded request, so the smoke needs no external provider.
 export UPSTREAM_URL="http://mock-upstream:8090/v1/chat/completions"
@@ -30,11 +32,11 @@ cleanup() {
 trap cleanup EXIT
 
 # 1. The documented compose file must parse with the documented profile.
-"${COMPOSE[@]}" --profile self-hosted config --quiet
+"${COMPOSE[@]}" "${PROFILES[@]}" config --quiet
 echo "ok: compose config validates (self-hosted profile)"
 
 # 2. Start it exactly as the guide says.
-"${COMPOSE[@]}" --profile self-hosted up -d --build
+"${COMPOSE[@]}" "${PROFILES[@]}" up -d --build
 
 # 3. Both human-visible surfaces answer.
 for i in $(seq 1 120); do

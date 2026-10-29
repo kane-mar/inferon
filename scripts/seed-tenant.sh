@@ -21,7 +21,11 @@ LABEL="${2:-default}"
 
 # Developer key the tenant's engineers will present to the proxy.
 DEV_KEY="sk-inferon-$(openssl rand -hex 12)"
-HASH=$(printf '%s' "$DEV_KEY" | shasum -a 256 | awk '{print $1}')
+if command -v sha256sum >/dev/null 2>&1; then
+    HASH=$(printf '%s' "$DEV_KEY" | sha256sum | awk '{print $1}')
+else
+    HASH=$(printf '%s' "$DEV_KEY" | shasum -a 256 | awk '{print $1}')
+fi
 
 CONTAINER="${POSTGRES_CONTAINER:-inferon-postgres-1}"
 
