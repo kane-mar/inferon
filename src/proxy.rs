@@ -178,6 +178,22 @@ fn apply_provider_headers(
     request
 }
 
+/// An upstream request with the provider's auth and metadata headers. A keyless
+/// local provider sends no Authorization header at all (ITEM-082); every other
+/// kind sends its credential (Anthropic on `x-api-key`).
+fn provider_request(
+    client: &reqwest::Client,
+    route: &Route,
+) -> reqwest::RequestBuilder {
+    let mut request = client
+        .post(&route.url)
+        .header("Content-Type", "application/json");
+    for (header, value) in providers::auth_headers(&route.kind, &route.key, &route.metadata) {
+        request = request.header(header, value);
+    }
+    apply_provider_headers(request, &route.metadata)
+}
+
 /// The adaptive policy's health weight for a provider (1.0 = no opinion).
 fn weight_of(weights: &std::collections::BTreeMap<String, f64>, id: &Uuid) -> f64 {
     weights.get(&id.to_string()).copied().unwrap_or(1.0)
@@ -523,15 +539,8 @@ pub(crate) async fn proxy_chat_completions(
             }
         };
         meta.wire_format = downgrade_schema.then_some("json_object");
-        let attempt = apply_provider_headers(
-            state
-                .http_client
-                .post(&attempt_route.url)
-                .header("Authorization", format!("Bearer {}", attempt_route.key))
-                .header("Content-Type", "application/json"),
-            &attempt_route.metadata,
-        )
-        .body(body)
+        let attempt = provider_request(&state.http_client, attempt_route)
+            .body(body)
         .send()
         .await;
         let is_last = index + 1 == allowed.len();
@@ -703,16 +712,9 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         return resp;
     }
 
-    let mut request = state
-        .http_client
-        .post(&route.url)
-        .header("Content-Type", "application/json");
     // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
-    for (header, value) in providers::auth_headers(&route.kind, &route.key, &route.metadata) {
-        request = request.header(header, value);
-    }
-    let request = apply_provider_headers(request, &route.metadata);
+    let request = provider_request(&state.http_client, &route);
     let upstream = match request.body(body_bytes).send().await {
         Ok(response) => response,
         Err(e) => {
@@ -1196,15 +1198,7 @@ async fn fallback_to_frontier(
             );
         }
     };
-    let replay = apply_provider_headers(
-        state
-            .http_client
-            .post(&route.url)
-            .header("Authorization", format!("Bearer {}", route.key))
-            .header("Content-Type", "application/json"),
-        &route.metadata,
-    )
-    .body(replay_body)
+    let replay = provider_request(&state.http_client, &route).body(replay_body)
     .send()
     .await;
     let guarded_model = guard_emit.meta.model.clone();

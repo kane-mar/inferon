@@ -1640,6 +1640,64 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     }
 
 #[tokio::test]
+async fn a_keyless_local_provider_forwards_no_authorization_header() {
+    // ITEM-082 AC1: the probe was already keyless, but the inference path still
+    // sent `Bearer ` — a strict local server rejects that.
+    let upstream = mock_upstream().await;
+    let base = upstream.trim_end_matches("/chat/completions").to_string();
+    let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+    let provider_store = crate::providers::InMemoryProviderStore::default();
+    let provider_id = provider_store
+        .insert(
+            tenant_id,
+            &crate::providers::NewProvider {
+                kind: "local".to_string(),
+                name: "lab".to_string(),
+                base_url: base,
+                key: String::new(),
+                metadata: crate::providers::ProviderMetadata::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+    provider_store
+        .record_models(provider_id, &["qwen3:8b".to_string()])
+        .await
+        .unwrap();
+    let state = std::sync::Arc::new(AppState {
+        http_client: reqwest::Client::new(),
+        upstream_url: mock_upstream().await,
+        tenant_store: std::sync::Arc::new(seeded_store()),
+        provider_store: std::sync::Arc::new(provider_store),
+        model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
+        budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+        affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
+        policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+        edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
+        telemetry_tx: mpsc::channel(16).0,
+        operator_key: None,
+        accounts: None,
+        db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+            .unwrap(),
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            r#"{"model":"qwen3:8b","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let json = json_body(response).await;
+    assert_eq!(
+        json["echoed_auth"], "",
+        "no Authorization header reaches a keyless local model"
+    );
+}
+
+#[tokio::test]
 async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
     // ITEM-081: the tenant names the cheap target, so simple traffic lands
     // on its own model instead of the built-in mini.
