@@ -52,12 +52,12 @@ for i in $(seq 1 120); do
 done
 
 # 4. The documented upgrade step is idempotent.
-./scripts/migrate.sh >/dev/null
-./scripts/migrate.sh >/dev/null
+bash ./scripts/migrate.sh >/dev/null
+bash ./scripts/migrate.sh >/dev/null
 echo "ok: migrations re-apply cleanly"
 
 # 5. Onboard a tenant the documented way and proxy one request.
-KEY=$(./scripts/seed-tenant.sh "$UPSTREAM_MASTER_KEY" selfhosted-smoke \
+KEY=$(bash ./scripts/seed-tenant.sh "$UPSTREAM_MASTER_KEY" selfhosted-smoke \
     | awk '/developer API key:/ {print $4}')
 [ -n "$KEY" ] || { echo "seed-tenant.sh did not print a key" >&2; exit 1; }
 
