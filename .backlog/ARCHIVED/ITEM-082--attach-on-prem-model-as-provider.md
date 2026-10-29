@@ -49,3 +49,42 @@ counterfactual still attributed (ITEM-077). It is not a *flow* yet:
 
 **Source:** 2026-10-28 customer-hosted connectivity review (option A, made
 five-minute).
+
+## Close-out (2026-10-29)
+
+- **Keyless, end to end** (AC1): `providers::requires_key(kind)` lets `local` be
+  created and probed with a base URL only. `auth_headers` returns **no** header
+  for a keyless local provider, and every upstream request — chat, guard replay
+  and Anthropic — now goes through one `proxy::provider_request` helper that
+  uses it, so the inference path no longer hardcodes `Bearer {key}` either
+  (found live: the probe was keyless but the request still sent `Bearer `).
+  A local provider that *does* have a key still sends it.
+- **The flow** (AC2): `local` has its own monogram/badge (no more grey `··`),
+  a URL placeholder (`http://192.168.1.10:11434/v1`), and an in-place note:
+  costs $0, the cloud must be able to reach the URL (TLS if public), only the
+  exposed endpoint is touched. The key field is optional and says so.
+- **Reachability on a cadence** (AC3): `run_reachability_pass` runs every 5
+  minutes (`PROVIDER_PROBE_INTERVAL_SECS`), probes at most 50 due-first
+  providers (`last_check_at NULLS FIRST`), records `last_check_ok`, and never
+  calls inference. The manual Test button stays.
+- **Truthful prices** (AC4): a local provider's models are shown as
+  `$0 / $0`, `priced: true`, `local: true` in the model picker instead of a
+  cloud price keyed off the model name or "unpriced"; the picker renders
+  "Free — served on your own hardware". Traces were already $0 with the
+  counterfactual preserved (ITEM-077).
+- **Local**: Rust **337 → 344** tests (no-header forwarding; keyless create,
+  keyless probe, cloud create still refused without a key; the sweep records
+  up/down; local models shown free). Web `tsc`/eslint/i18n/unit green.
+- **Live (2026-10-29)**, deploy `ac5e782`→`9c3eac2`, CI runs `154`/`156`:
+  created a `local` provider for a real tenant with `key: ""` →
+  `{"id": …}`; the unsaved probe returned `{"ok":true,"models":["llama3:8b",
+  "qwen3:8b"]}`; `GET …/models` showed both at `$0` with `local: true`; a real
+  `/v1/chat/completions` for `qwen3:8b` returned 200 and the endpoint's log
+  showed `auth= None` (the pre-fix request logged `auth= 'Bearer '`). The trace
+  carries the local `provider_id` and `upstream_cost_usd = 0.000000`. Stopping
+  the endpoint at 13:39:19 flipped `last_check_ok` to `false` at the next tick
+  (**13:41:12**) with no failed tenant request. The provider was then removed
+  and the temporary key revoked.
+- Not done on purpose: model discovery is not triggered by the save — the
+  dashboard's Models panel (or `GET …/providers/:id/models`) does it, as for
+  every other kind.

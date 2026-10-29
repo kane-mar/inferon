@@ -42,3 +42,41 @@ capability is claimed here.
 
 **Source:** 2026-10-28 customer-hosted connectivity review — profile 1
 ("Inferon on your network").
+
+## Close-out (2026-10-29)
+
+- **Profile** (AC1): `docker compose --profile self-hosted up -d` starts proxy +
+  web + postgres + redis and nothing else — no Caddy, no cloud dependency. The
+  web container is `profiles: ["prod", "self-hosted"]` and its host bind is now
+  `${WEB_BIND:-127.0.0.1}` (loopback stays the default for `prod`; a
+  self-hosted install sets `WEB_BIND=0.0.0.0` for LAN access). Absent
+  integrations log and continue: the alert worker now says "alert webhook not
+  configured — findings are evaluated and stored, not delivered" (OAuth and
+  provider encryption already did).
+- **Guide** (AC2/AC3): `guides/inferon-self-hosted.md` — prerequisites,
+  install, secrets worth setting, first tenant + key, attaching a model on your
+  network (`kind: local`, $0), first request, backup/restore (`pg_dump`/
+  `pg_restore`), upgrade (pull → migrate → rebuild → verify) with the ordering
+  rationale and rollback (additive migrations make the old binary safe), and
+  air-gapped install (`docker save`/`load`, no egress). The support boundary is
+  explicit: same artifact, self-supported, no licence key, no phone-home, no
+  metering; what is given up is the hosted control plane, shared provider keys
+  and the cross-tenant operator view.
+- **CI** (AC4): a `self-hosted` job runs
+  `docker compose --profile self-hosted config --quiet` and
+  `scripts/smoke-selfhosted.sh`, which brings the stack up under its own
+  compose project (`inferon-selfhosted-smoke`, ports 18080/13000), waits for
+  `/healthz` + the web's `/api/health`, re-applies `scripts/migrate.sh` twice
+  (the documented upgrade step must be idempotent), seeds a tenant through
+  `seed-tenant.sh`, and proxies a real request through the mock model to a 200.
+  Two bugs fixed while wiring it: an explicit `--profile` overrides
+  `COMPOSE_PROFILES` (the mock never started), and the scripts were checked out
+  `0644` (this workspace reports every file executable, so the bit was never
+  recorded) — CI now calls them through `bash` and the index carries `0755`.
+- **README** (AC5): Quickstart describes both profiles and
+  "Running your own instance" links the guide. No new marketing surface.
+- **No licence enforcement, telemetry opt-in or update checker** were built, as
+  specified.
+- **Live**: CI run `154` (`ac5e782`) — the `self-hosted` job passed end to end
+  (image build → healthy stack → migrations → seeded key → proxied request);
+  run `156` (`9c3eac2`) repeated it green alongside the production deploy.
