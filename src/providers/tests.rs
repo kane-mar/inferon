@@ -353,3 +353,66 @@
         assert!(!is_local("openai"), "a cloud provider is not local");
         assert!(!is_local("openai-compatible"));
     }
+
+#[test]
+fn a_keyless_local_provider_sends_no_authorization_header() {
+    // ITEM-082: Ollama/vLLM need no key. Sending `Bearer ` breaks the request,
+    // so the local kind with an empty key sends no auth header at all.
+    assert!(auth_headers(LOCAL, "", &ProviderMetadata::default()).is_empty());
+    // A local server that *does* require a key still gets one.
+    assert_eq!(
+        auth_headers(LOCAL, "sk-local", &ProviderMetadata::default()),
+        vec![("Authorization", "Bearer sk-local".to_string())]
+    );
+}
+
+    /// A local OpenAI-compatible endpoint answering `/v1/models`.
+    async fn models_endpoint() -> String {
+        let app = axum::Router::new().route(
+            "/v1/models",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({"data": [{"id": "qwen3:8b"}]}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/v1")
+    }
+
+    fn local_provider(base_url: &str) -> NewProvider {
+        NewProvider {
+            kind: LOCAL.to_string(),
+            name: "lab".to_string(),
+            base_url: base_url.to_string(),
+            key: String::new(),
+            metadata: ProviderMetadata::default(),
+            spend_limit_cents: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_reachability_sweep_records_up_and_down() {
+        // ITEM-082 AC3: a provider that went dark is marked unreachable by the
+        // periodic pass, before any tenant request has to fail on it.
+        let store = InMemoryProviderStore::default();
+        let tenant = Uuid::new_v4();
+        let up = store
+            .insert(tenant, &local_provider(&models_endpoint().await))
+            .await
+            .unwrap();
+        let down = store
+            .insert(tenant, &local_provider("http://127.0.0.1:1/v1"))
+            .await
+            .unwrap();
+
+        run_reachability_pass(&store, &reqwest::Client::new()).await;
+
+        let rows = store.list(tenant).await.unwrap();
+        let check = |id: Uuid| {
+            let row = rows.iter().find(|row| row.id == id).unwrap();
+            row.last_check_ok
+        };
+        assert_eq!(check(up), Some(true));
+        assert_eq!(check(down), Some(false));
+    }

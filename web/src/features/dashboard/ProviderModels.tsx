@@ -113,9 +113,11 @@ export const ProviderModels = (props: { providerId: string; canEdit: boolean }) 
             </div>
 
             <div className="text-right font-mono text-xs text-muted-foreground">
-              {model.price.priced
-                ? `${formatUsd(model.price.input_usd_per_million)} in · ${formatUsd(model.price.output_usd_per_million)} out / 1M`
-                : t('unpriced')}
+              {model.price.local
+                ? t('local_free')
+                : model.price.priced
+                  ? `${formatUsd(model.price.input_usd_per_million)} in · ${formatUsd(model.price.output_usd_per_million)} out / 1M`
+                  : t('unpriced')}
             </div>
 
             {props.canEdit && (

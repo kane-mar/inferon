@@ -107,9 +107,12 @@ curl http://localhost:8080/healthz   # → ok
 ```
 
 The stack: `proxy` (axum), `postgres` (schema auto-applied from `db/init/` on first
-boot), `redis` (reserved for later slices). The web app + Caddy run under the `prod`
-profile (`docker compose --profile prod up -d --build`), matching the durable host;
-without it you get the data plane only.
+boot), `redis` (reserved for later slices). Two profiles bundle more:
+
+- `--profile self-hosted` — proxy + dashboard (Next) + Postgres + Redis, no TLS
+  ingress. This is the "run it on your network" install:
+  **[guides/inferon-self-hosted.md](guides/inferon-self-hosted.md)**.
+- `--profile prod` — the same stack behind Caddy, matching the durable host.
 
 ## Minting a tenant key (operator / machine-only runbook)
 
@@ -228,8 +231,10 @@ The deploy job **skips with a notice** (rather than failing) until
 
 ## Running your own instance
 
-`docker compose up -d --build` on any Docker host (see Quickstart above). The proxy
-listens on `PORT` (default 8080); point your base URL at `http://<host>:8080/v1`.
+`docker compose --profile self-hosted up -d --build` on any Docker host — install,
+upgrade, backup and air-gapped steps are in
+[guides/inferon-self-hosted.md](guides/inferon-self-hosted.md). The proxy listens
+on `PORT` (default 8080); point your base URL at `http://<host>:8080/v1`.
 
 ## Durable deployment (inferon.agilefederation.com)
 

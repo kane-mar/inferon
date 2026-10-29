@@ -357,6 +357,8 @@ export type ProviderModel = {
     output_usd_per_million: string;
     /** False when the cost engine has no price row for this id. */
     priced: boolean;
+    /** Served by a `local` provider: always $0 (ITEM-077/082). */
+    local?: boolean;
   };
 };
 

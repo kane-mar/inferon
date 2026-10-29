@@ -23,11 +23,13 @@ LABEL="${2:-default}"
 DEV_KEY="sk-inferon-$(openssl rand -hex 12)"
 HASH=$(printf '%s' "$DEV_KEY" | shasum -a 256 | awk '{print $1}')
 
+CONTAINER="${POSTGRES_CONTAINER:-inferon-postgres-1}"
+
 psql_cmd() {
     if [ -n "${DATABASE_URL:-}" ]; then
         psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "$1"
     else
-        docker exec inferon-postgres-1 psql -U inferon -d inferon -v ON_ERROR_STOP=1 -tAc "$1"
+        docker exec "$CONTAINER" psql -U inferon -d inferon -v ON_ERROR_STOP=1 -tAc "$1"
     fi
 }
 

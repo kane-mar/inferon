@@ -45,6 +45,18 @@ jobs:
       - name: unit tests (vitest)
         run: npx vitest run --project unit
 
+  # ITEM-083 AC4: the documented self-hosted install must actually start and
+  # serve a request, so the guide cannot rot. Builds both images, uses a
+  # throwaway compose project, and tears it down.
+  self-hosted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose profile validates
+        run: docker compose --profile self-hosted config --quiet
+      - name: Self-hosted install smoke (start, health, proxy a request)
+        run: bash ./scripts/smoke-selfhosted.sh
+
   # The embedder is opt-in and needs a real artifact; run its gated tests
   # (latency + semantics) on the real model so the feature cannot rot.
   embedder:

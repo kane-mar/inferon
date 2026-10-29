@@ -17,7 +17,17 @@ const DEFAULT_BASE: Record<string, string> = {
   'openai': 'https://api.openai.com/v1',
   'openai-compatible': '',
   'anthropic': 'https://api.anthropic.com/v1',
+  // A local endpoint is the tenant's own address — nothing sensible to prefill.
+  'local': '',
 };
+
+/** Base-URL placeholder per kind: the shape we expect the tenant to paste. */
+const BASE_PLACEHOLDER: Record<string, string> = {
+  local: 'http://192.168.1.10:11434/v1',
+};
+
+/** The add form shows the local-specific explanation only for this kind. */
+const LOCAL_KIND = 'local';
 
 /**
  * A distinct look per provider kind, so a list of providers is scannable at a
@@ -39,6 +49,11 @@ const KIND_STYLE: Record<string, { initials: string; monogram: string; badge: st
     initials: 'AN',
     monogram: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
     badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+  },
+  'local': {
+    initials: 'LM',
+    monogram: 'bg-teal-500/15 text-teal-600 dark:text-teal-300',
+    badge: 'bg-teal-500/10 text-teal-600 dark:text-teal-300',
   },
   'openai-compatible': {
     initials: '··',
@@ -362,11 +377,21 @@ export const ProvidersPanel = (props: {
             <input
               value={baseUrl}
               className={MONO_FIELD_INPUT}
-              placeholder="https://api.deepseek.com/v1"
+              placeholder={BASE_PLACEHOLDER[kind] ?? 'https://api.deepseek.com/v1'}
               required
               onChange={event => setBaseUrl(event.target.value)}
             />
           </label>
+
+          {kind === LOCAL_KIND && (
+            <span className="
+              block text-xs text-muted-foreground
+              sm:col-span-2
+            "
+            >
+              {t('local_note')}
+            </span>
+          )}
 
           <label className="text-sm">
             <span className="text-muted-foreground">{t('key')}</span>
@@ -374,8 +399,8 @@ export const ProvidersPanel = (props: {
               value={key}
               type="password"
               className={MONO_FIELD_INPUT}
-              placeholder="sk-…"
-              required
+              placeholder={kind === LOCAL_KIND ? t('key_optional') : 'sk-…'}
+              required={kind !== LOCAL_KIND}
               autoComplete="off"
               onChange={event => setKey(event.target.value)}
             />

@@ -28,17 +28,25 @@ fn provider_json(provider: &crate::providers::Provider) -> Value {
 
 /// One advertised model, merged with the provider's selection flags and the
 /// cost engine's price (unknown ids report `priced: false`).
-fn model_json(model_id: &str, settings: &[crate::models::ModelSetting]) -> Value {
+fn model_json(model_id: &str, settings: &[crate::models::ModelSetting], local: bool) -> Value {
     let setting = settings.iter().find(|setting| setting.model_id == model_id);
+    // A model served by a local provider is free at the margin (ITEM-077) — show
+    // that, not a cloud price keyed off the model's name (ITEM-082).
     let price = crate::cost::price_for(model_id);
+    let (input, output) = if local {
+        ("0".to_string(), "0".to_string())
+    } else {
+        (price.prompt_miss.to_string(), price.completion.to_string())
+    };
     json!({
         "id": model_id,
         "enabled": setting.map(|setting| setting.enabled).unwrap_or(true),
         "is_default": setting.map(|setting| setting.is_default).unwrap_or(false),
         "price": {
-            "input_usd_per_million": price.prompt_miss.to_string(),
-            "output_usd_per_million": price.completion.to_string(),
-            "priced": crate::cost::is_priced(model_id),
+            "input_usd_per_million": input,
+            "output_usd_per_million": output,
+            "priced": local || crate::cost::is_priced(model_id),
+            "local": local,
         },
     })
 }
@@ -103,7 +111,7 @@ pub async fn tenant_provider_create(
         Err(message) => return crate::json_error(StatusCode::BAD_REQUEST, "invalid_base_url", message),
     };
     let key = body.key.trim().to_string();
-    if key.is_empty() {
+    if key.is_empty() && crate::providers::requires_key(&body.kind) {
         return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
     }
     let name = body
@@ -242,12 +250,13 @@ pub async fn tenant_provider_probe(
         Err(message) => return crate::json_error(StatusCode::BAD_REQUEST, "invalid_base_url", message),
     };
     let key = body.key.trim().to_string();
-    if key.is_empty() {
+    let kind = body.kind.unwrap_or_default();
+    if key.is_empty() && crate::providers::requires_key(&kind) {
         return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
     }
     let resolved = crate::providers::ResolvedProvider {
         id: uuid::Uuid::nil(),
-        kind: body.kind.unwrap_or_default(),
+        kind,
         base_url,
         api_key: key,
         metadata: body.metadata,
@@ -376,7 +385,8 @@ pub async fn tenant_provider_models(
         Ok(settings) => settings,
         Err(e) => return internal(&e.to_string()),
     };
-    let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings)).collect();
+    let local = crate::providers::is_local(&provider.kind);
+    let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings, local)).collect();
     json_ok(json!({ "models": models }))
 }
 
@@ -401,7 +411,8 @@ pub async fn tenant_models(State(state): State<Arc<AppState>>, headers: HeaderMa
             Ok(settings) => settings,
             Err(e) => return internal(&e.to_string()),
         };
-        let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings)).collect();
+        let local = crate::providers::is_local(&provider.kind);
+        let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings, local)).collect();
         out.push(json!({
             "id": provider.id.to_string(),
             "name": provider.name,

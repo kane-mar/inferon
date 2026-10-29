@@ -1536,3 +1536,80 @@ async fn a_member_cannot_change_tier_pairs() {
         .unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 }
+
+    // --- ITEM-082: attaching a keyless local provider -----------------------
+
+    #[tokio::test]
+    async fn an_owner_attaches_a_keyless_local_provider() {
+        let (state, token) = tenant_role_session("owner").await;
+        let router = crate::build_router(state.clone());
+        let response = router
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers",
+                &token,
+                r#"{"kind":"local","base_url":"http://127.0.0.1:11434/v1","key":""}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let created = json_of(response).await;
+        assert!(created["id"].is_string());
+
+        let providers = state
+            .provider_store
+            .list(uuid::Uuid::parse_str(SEEDED_TENANT).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].kind, "local");
+        assert_eq!(providers[0].base_url, "http://127.0.0.1:11434/v1");
+    }
+
+    #[tokio::test]
+    async fn a_cloud_provider_still_needs_a_key() {
+        let (state, token) = tenant_role_session("owner").await;
+        let response = crate::build_router(state)
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers",
+                &token,
+                r#"{"kind":"openai","base_url":"https://api.openai.com/v1","key":""}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(json_of(response).await["error"]["type"], "invalid_key");
+    }
+
+    #[tokio::test]
+    async fn a_keyless_local_probe_is_not_refused_for_its_missing_key() {
+        // Unreachable is fine — the point is that the empty key is not a 400.
+        let (state, token) = tenant_role_session("owner").await;
+        let response = crate::build_router(state)
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/providers/test",
+                &token,
+                r#"{"kind":"local","base_url":"http://127.0.0.1:1/v1","key":""}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(json_of(response).await["ok"], false);
+    }
+
+    #[tokio::test]
+    async fn a_local_providers_models_are_shown_as_free_not_unpriced() {
+        // ITEM-082 AC4: attaching Ollama must not label its models with cloud
+        // prices (or "unpriced") — local inference costs nothing.
+        let (state, token) = tenant_role_session("owner").await;
+        seed_models(&state, &["qwen3:8b"]).await;
+        let listed = crate::build_router(state)
+            .oneshot(request_with_cookie("/v1/dashboard/api/models", &token))
+            .await
+            .unwrap();
+        let listed = json_of(listed).await;
+        let price = &listed["providers"][0]["models"][0]["price"];
+        assert_eq!(price["local"], true);
+        assert_eq!(price["priced"], true);
+        assert_eq!(price["input_usd_per_million"], "0");
+        assert_eq!(price["output_usd_per_million"], "0");
+    }

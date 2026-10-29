@@ -24,6 +24,10 @@ const ADAPT_INTERVAL_SECS: u64 = 900;
 /// Evolution cadence (ITEM-031 slice 1): drift detection over the guard
 /// telemetry, queueing a deduped job per drifting model.
 const EVOLUTION_INTERVAL_SECS: u64 = 900;
+/// Provider reachability cadence (ITEM-082): one bounded pass over due
+/// providers so a dark on-prem endpoint shows unreachable before a tenant
+/// request has to fail on it. Probing is a `/models` GET, never inference.
+const PROVIDER_PROBE_INTERVAL_SECS: u64 = 300;
 
 /// Run an async task forever on a fixed cadence. The first tick fires
 /// immediately; missed ticks are skipped rather than burst-run, so a slow pass
@@ -128,6 +132,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
         .ok()
         .filter(|u| !u.is_empty());
+    if webhook_url.is_none() {
+        tracing::info!(
+            "alert webhook not configured — findings are evaluated and stored, not delivered"
+        );
+    }
     let alert_client = Client::new();
     let alerts_pool = pool.clone();
     spawn_periodic(
@@ -205,18 +214,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if secrets.is_none() {
         tracing::info!("provider provisioning disabled — set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
     }
+    let provider_store = Arc::new(inferon::providers::PostgresProviderStore::new(
+        pool.clone(),
+        secrets,
+    ));
 
     let state = Arc::new(AppState {
-        http_client,
+        http_client: http_client.clone(),
         upstream_url: std::env::var("UPSTREAM_URL")
             .ok()
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| DEFAULT_UPSTREAM_URL.to_string()),
         tenant_store: Arc::new(PostgresTenantStore::new(pool.clone())),
-        provider_store: Arc::new(inferon::providers::PostgresProviderStore::new(
-            pool.clone(),
-            secrets,
-        )),
+        provider_store: provider_store.clone(),
         model_store: Arc::new(inferon::models::PostgresModelStore::new(pool.clone())),
         routing_store: Arc::new(inferon::routing::PostgresRoutingStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
@@ -230,6 +240,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         accounts,
         db: pool,
     });
+
+    // ITEM-082: refresh each provider's reachability on a cadence. The manual
+    // Test-connection button stays; this is what flips a dark endpoint to
+    // unreachable without waiting for a tenant request to fail.
+    let probe_store = provider_store.clone();
+    let probe_client = http_client.clone();
+    spawn_periodic(
+        "provider-reachability",
+        std::time::Duration::from_secs(PROVIDER_PROBE_INTERVAL_SECS),
+        move || {
+            let store = probe_store.clone();
+            let client = probe_client.clone();
+            async move { inferon::providers::run_reachability_pass(&*store, &client).await }
+        },
+    );
 
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     info!("inferon listening on port {port}");

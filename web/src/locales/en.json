@@ -278,7 +278,10 @@
     "probe_ok": "Connected — {count} models",
     "probe_failed": "Could not reach the provider",
     "edge_nodes": "Edge nodes",
-    "edge_hint": "Run the proxy next to your own model — inference stays on your network; only telemetry leaves it."
+    "edge_hint": "Run the proxy next to your own model — inference stays on your network; only telemetry leaves it.",
+    "local_note": "A model on your own network. Inference costs $0 here, but the cloud must be able to reach this URL (TLS if it is public). Only the endpoint you expose is touched — the rest of your LAN stays private.",
+    "key_optional": "Leave blank if the endpoint needs no key",
+    "local_free": "Free — served on your own hardware"
   },
   "EdgePage": {
     "name": "Name",

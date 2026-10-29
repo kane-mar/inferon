@@ -105,6 +105,13 @@ pub fn is_local(kind: &str) -> bool {
     kind == LOCAL
 }
 
+/// Whether a provider of `kind` needs a credential. A local OpenAI-compatible
+/// server (Ollama, LM Studio, vLLM) usually has none, so `local` is the one kind
+/// that may be attached with a base URL only (ITEM-082).
+pub fn requires_key(kind: &str) -> bool {
+    !is_local(kind)
+}
+
 /// True for the Anthropic Messages surface (not OpenAI-shaped).
 pub fn is_anthropic(kind: &str) -> bool {
     kind == ANTHROPIC
@@ -140,6 +147,9 @@ pub fn auth_headers(
     key: &str,
     metadata: &ProviderMetadata,
 ) -> Vec<(&'static str, String)> {
+    if is_local(kind) && key.is_empty() {
+        return Vec::new();
+    }
     if is_anthropic(kind) {
         let mut headers = vec![("x-api-key", key.to_string())];
         let has_version = metadata
@@ -236,6 +246,10 @@ pub trait ProviderStore: Send + Sync {
     async fn set_default(&self, tenant_id: Uuid, id: Uuid) -> StoreResult<bool>;
     /// Record the last connectivity check (ITEM-051). False when not owned.
     async fn record_check(&self, tenant_id: Uuid, id: Uuid, ok: bool) -> StoreResult<bool>;
+    /// Every provider across every tenant, with its decrypted credential,
+    /// due-first (never checked, then oldest). The reachability sweep (ITEM-082)
+    /// is the only caller — it probes providers no request is touching.
+    async fn all_for_probe(&self) -> StoreResult<Vec<(Uuid, ResolvedProvider)>>;
     /// Replace the provider's advertised model set (from its `/models`).
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()>;
     /// The models currently cached for a provider (what it last advertised).
@@ -260,6 +274,34 @@ pub trait ProviderStore: Send + Sync {
         tenant_id: Uuid,
         id: Uuid,
     ) -> StoreResult<Option<ResolvedProvider>>;
+}
+
+/// How many providers one reachability pass probes. Bounded so a large
+/// deployment degrades to "each provider is checked eventually" rather than a
+/// burst of outbound calls.
+pub const MAX_PROBES_PER_PASS: usize = 50;
+
+/// Probe each due provider's `GET <base>/models` and record the result
+/// (ITEM-082 AC3). Reachability only — never a credential use beyond the probe,
+/// never an inference call. A failure is recorded, not retried: the next pass is
+/// the retry.
+pub async fn run_reachability_pass(store: &dyn ProviderStore, client: &reqwest::Client) {
+    let providers = match store.all_for_probe().await {
+        Ok(providers) => providers,
+        Err(e) => {
+            tracing::warn!("provider reachability: could not list providers: {e}");
+            return;
+        }
+    };
+    for (tenant_id, provider) in providers.into_iter().take(MAX_PROBES_PER_PASS) {
+        let ok = fetch_models(client, &provider).await.is_ok();
+        if !ok {
+            tracing::debug!("provider {} unreachable", provider.id);
+        }
+        if let Err(e) = store.record_check(tenant_id, provider.id, ok).await {
+            tracing::warn!("provider reachability: could not record check: {e}");
+        }
+    }
 }
 
 // --- Postgres ---------------------------------------------------------------
@@ -463,6 +505,41 @@ impl ProviderStore for PostgresProviderStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn all_for_probe(&self) -> StoreResult<Vec<(Uuid, ResolvedProvider)>> {
+        let Some(secrets) = self.secrets.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let rows: Vec<(
+            Uuid,
+            Uuid,
+            String,
+            String,
+            String,
+            sqlx::types::Json<ProviderMetadata>,
+        )> = sqlx::query_as(
+            "SELECT id, tenant_id, kind, base_url, key_ciphertext, metadata FROM providers
+             ORDER BY last_check_at NULLS FIRST, created_at",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, tenant_id, kind, base_url, ciphertext, metadata)| {
+                let api_key = secrets.decrypt(&ciphertext)?;
+                Some((
+                    tenant_id,
+                    ResolvedProvider {
+                        id,
+                        kind,
+                        base_url,
+                        api_key,
+                        metadata: metadata.0,
+                    },
+                ))
+            })
+            .collect())
     }
 
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {
@@ -773,6 +850,25 @@ impl ProviderStore for InMemoryProviderStore {
             }
             None => Ok(false),
         }
+    }
+
+    async fn all_for_probe(&self) -> StoreResult<Vec<(Uuid, ResolvedProvider)>> {
+        let rows = self.rows.lock().unwrap();
+        Ok(rows
+            .iter()
+            .map(|row| {
+                (
+                    row.provider.tenant_id,
+                    ResolvedProvider {
+                        id: row.provider.id,
+                        kind: row.provider.kind.clone(),
+                        base_url: row.provider.base_url.clone(),
+                        api_key: row.api_key.clone(),
+                        metadata: row.provider.metadata.clone(),
+                    },
+                )
+            })
+            .collect())
     }
 
     async fn record_models(&self, provider_id: Uuid, model_ids: &[String]) -> StoreResult<()> {

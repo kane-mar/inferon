@@ -89,9 +89,12 @@ services:
   # Next.js human surfaces (ITEM-042e): landing, dashboard, operator console.
   # Server-side data calls go straight to the Rust proxy on the compose network
   # (INFERON_API_URL); browser calls use the public origin via Caddy.
+  # The human surfaces. `self-hosted` runs them without Caddy (plain HTTP on
+  # WEB_BIND:WEB_PORT — put your own TLS in front for anything public);
+  # `prod` bundles them behind the Caddy ingress below.
   web:
     build: ./web
-    profiles: ["prod"]
+    profiles: ["prod", "self-hosted"]
     restart: unless-stopped
     environment:
       PORT: 3000
@@ -99,9 +102,11 @@ services:
       INFERON_API_URL: http://proxy:8080
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-}
       NEXT_TELEMETRY_DISABLED: "1"
-    # Loopback-only: the container is reached via Caddy on the compose network.
+    # Loopback-only by default: in `prod` the container is reached via Caddy on
+    # the compose network. A self-hosted install sets WEB_BIND=0.0.0.0 to serve
+    # the dashboard on the LAN.
     ports:
-      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
     depends_on:
       proxy:
         condition: service_started
