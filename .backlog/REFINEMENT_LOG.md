@@ -209,3 +209,45 @@ budget guard, savings attribution, adaptive policy) is cross-provider and
 cloud-side; and the only real traffic evidence (ITEM-018) is cloud-side. So
 ITEM-081 → 082 → 083. If that ever inverts, ITEM-083 moves to the top and the
 other two do not change.
+
+## 2026-10-30 — Competitive positioning brief: 16 gaps captured (ITEM-085..100)
+
+PO supplied a positioning brief: the defensible edge is not routing or cost charts
+(commodities) but closing the loop between production traffic and private assets —
+a sub-millisecond proxy that lints runaway prompt tokens in flight and turns
+verified traffic into deduplicated JSONL by task signature, then routes to a
+distilled adapter. Source saved verbatim in
+`raw/llm-inference/2026-10-30-competitive-positioning.md`; the code-grounded
+comparison (claim vs. measured state, per row) is
+`wiki/llm-inference/inferon-differentiation-gaps.md`.
+
+**This changes the product goal**: distillation was "deliberately parked last"; it
+is now the claimed edge and the top of the backlog. The earlier roadmap items did
+not change rank relative to each other — they are still gated — but the new work
+sits above them because it is the differentiator.
+
+Measured before ranking (live, 7 days, 775 traces / 2 tenants, one ~800k-token
+workload): prompts stored 774/774, completions **12/774** (streams store none);
+guard fired 0; `proxy_ms` p50 **12 ms** / p95 **35 ms** for small requests, 1.9–2.5 s
+for 800k-token bodies; ~10 store reads per request; the ONNX embedder has no
+consumer.
+
+Captured (rank order, with the claim each closes):
+
+1. **085** persist streamed completions — the flywheel's missing leg (blocker).
+2. **086** verified-example curation + per-prompt counts — makes "2,000 verified
+   examples" a fact.
+3. **087** dataset surface + JSONL export — the demonstrable moment.
+4. **088** retention & consent — the gate that makes 087 shippable.
+5. **092** hot-path config cache + measured latency budget — makes the runtime
+   claim honest (or withdraws it).
+6. **089** semantic task signatures — wire the unused embedder.
+7. **090** in-flight payload lint (advisory) — the pre-flight half.
+8. **093** conversation/transaction grouping — the economic unit for agentic loops.
+9. **091** opt-in context pruning — high value, high risk, after 090's evidence.
+10–16. commodity parity: **094** cross-format translation, **095** rate limits,
+   **096** PII, **097** prompt registry, **098** eval harness, **099** heatmap,
+   **100** load balancing.
+
+Deliberately **not** duplicated: "route to a distilled adapter" is ITEM-032 and
+"real trainer + gold set" is ITEM-076; the new items reference them.

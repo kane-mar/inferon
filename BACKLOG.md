@@ -2,16 +2,36 @@
 
 ## Product Goal
 
-Inferon is live at `https://inferon.agilefederation.com/v1` with true cost numbers and automatic cost protection (Slice 1 + 2 delivered). The next horizon: put it in front of **real external developers**, make the dashboard and alerting trustworthy enough for them to stay, then walk the autonomy roadmap — schema guard, then OmniRouting — with LoRA distillation deliberately parked last.
+Inferon is live at `https://inferon.agilefederation.com/v1` with true cost numbers and automatic cost protection (Slice 1 + 2 delivered). The next horizon: put it in front of **real external developers**, make the dashboard and alerting trustworthy enough for them to stay, then walk the autonomy roadmap — schema guard, then OmniRouting. LoRA distillation was originally parked last; **as of 2026-10-30 it is the claimed edge** (see Positioning below), and the backlog was re-ranked accordingly.
 
 Delivered: Slice 1 (ingress + tenant auth + telemetry + cost-leak dashboard — ITEM-001..007), Slice 2 (heuristic router + budget circuit breaker — ITEM-015/016) plus ITEM-008..014, 017, 019, 020, 023–027, 034–042 — all archived (see `.backlog/ARCHIVED/`). The data plane is real and live, and the tenant-facing **control plane is delivered** (providers, per-provider models, fallback rules, routing/budget controls, spend breakdowns, SDK onboarding) — archived as ITEM-043–049. Real SDK traffic now flows (ITEM-018, archived 2026-10-12). Customer-hosted connectivity is captured as ITEM-051/052; the remaining vision work is the autonomy roadmap (OmniRouting, then distillation), which the real traffic now unblocks.
+
+**Positioning (2026-10-30).** The defensible edge is not routing or cost charts — those are commodities. It is closing the loop between production consumption and private asset generation: a sub-millisecond proxy that lints runaway prompt tokens **in flight** and quietly turns verified traffic into deduplicated JSONL datasets by task signature, then routes to a distilled adapter. The claim, the measured current state and the gap between them are recorded in `wiki/llm-inference/inferon-differentiation-gaps.md`; ITEM-085..100 close it.
 
 Project decisions that shape this backlog (see `wiki/llm-inference/inferon-project-direction.md`): Docker everywhere (deployment unit = image), Postgres for telemetry/control plane, working name **inferon**, default AI **DeepSeek**, toolchain **Rust + bash only** (no Python, no Ruby — SQL migrations unaffected).
 
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
+Active work is listed first, in rank order; delivered items follow.
+
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-085 | Persist streamed completions | feature | **new (2026-10-30)** — claim: "the proxy passively inspects completions". Today **12/774** traces have one: both stream paths store `raw_completion: None`, so there are no instruction pairs for the dominant traffic mode. Bounded capture from the existing SSE tap (content + tool calls, size cap, abort-safe) |
+| ITEM-086 | Verified-example curation and per-prompt counts | feature | **new (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
+| ITEM-087 | Dataset surface and JSONL export | feature | **new (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
+| ITEM-088 | Retention and consent for captured payloads | feature | **new (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
+| ITEM-092 | Hot-path config cache and latency budget | improvement | **new (2026-10-30)** — claim: "sub-millisecond wire latency". Measured **p50 12 ms / p95 35 ms** (small requests) with ~10 store reads per request. One tenant-config snapshot (TTL ≤5 s) + route cache; spend stays fresh; a measured budget in CI |
+| ITEM-089 | Semantic task signatures for grouping | feature | **new (2026-10-30)** — claim: "grouped by task signature". Grouping is an exact hash; the ONNX embedder has no consumer. Embed → cluster → store cluster id; `NoEmbedder` falls back to the hash; composes with ITEM-029 |
+| ITEM-090 | In-flight payload lint (advisory) | feature | **new (2026-10-30)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". The linter is post-hoc only. Pre-dispatch findings traced with wasted tokens/USD, advisory (no rewrite), bounded cost, kill switch |
+| ITEM-093 | Conversation and transaction grouping | feature | **new (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
+| ITEM-091 | Opt-in context pruning and payload rewriting | feature | **new (2026-10-30)** — claim: "dynamically pruning context". Nothing rewrites messages today. Off by default, traced rewrite record, holdout-measured, auto-off on quality regression, versioned policy |
+| ITEM-094 | Cross-format translation (any SDK to any backend) | feature | **new (2026-10-30)** — LiteLLM parity: `surface_mismatch` refuses an Anthropic SDK against an OpenAI/DeepSeek provider and vice versa. Pure translation module per direction, streaming + tools + errors, provider declares its surfaces |
+| ITEM-095 | Per-key rate limits (RPM/TPM) | feature | **new (2026-10-30)** — Portkey parity: spend caps only, no velocity limits. Per-key/tenant RPM + TPM, 429 with `Retry-After`, restart-safe counters, traced and alerted |
+| ITEM-096 | PII detection and optional redaction | feature | **new (2026-10-30)** — Portkey parity: raw payloads stored verbatim, no detection. Deterministic pattern detection with counts by class; opt-in redaction in storage and (separately) on the wire; export honours it |
+| ITEM-097 | Prompt registry and versioning | feature | **new (2026-10-30)** — Langfuse parity: exact content hash only, no identity/version/diff. Name a prompt, see versions and outcomes per version, read-only |
+| ITEM-098 | Eval harness on captured traffic | feature | **new (2026-10-30)** — Langfuse parity + the flywheel's quality gate. Pin a gold set from 086, run a model comparison, store per-case scores; regression verdict feeds ITEM-076's `Gate` |
+| ITEM-099 | Latency and quality heatmap | improvement | **new (2026-10-30)** — Langfuse parity: time series exist, no matrix view. Model × time p95/error heatmap over the existing aggregates; no new hot-path data |
+| ITEM-100 | Multi-provider load balancing | feature | **new (2026-10-30)** — LiteLLM parity: health-weighted best-provider pick, no distribution. Seeded weighted/round-robin across healthy providers; single-provider models unchanged |
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 | ITEM-044 | Model catalog & per-provider selection | feature | **done + reworked (2026-10-07)** — catalog + `tenant_models` selection **per provider**; models live under `/dashboard/providers` (the standalone Models tab is gone); provider resolution is model-aware; disabled models refused (typed 400) |
 | ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
@@ -59,12 +79,20 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 | ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 
-_Last updated: 2026-10-29 (ITEM-082 + ITEM-083 done + archived)_ —
-**Nothing is pullable.** The connectivity work (ITEM-051/077/081/082/083) is
-delivered; ITEM-084 (connector) stays staged. Remaining items are gated:
-ITEM-029 needs real task traffic for centroids (embedder gate cleared);
-030/072 need 029; ITEM-076 (train / gold-set / hot-swap) and ITEM-032 (PagedLoRA)
-need the Slice 3 infra. Next work is a PO unpark decision, not a pull.
+_Last updated: 2026-10-30 (differentiation gaps captured — ITEM-085..100)_ —
+**Next pull is ITEM-085** (persist streamed completions), then 086 → 087 → 088 →
+092. Reading the new items: the **distillation pillar** is 085–089, the
+**in-flight linting pillar** is 090–091, the **runtime and unit-of-work pillar**
+is 092–093; 094–100 are commodity parity and rank below the edge. Each item
+carries the external claim it closes, the measured current state, and why it sits
+where it does.
+
+Nothing from the earlier roadmap moved: **ITEM-029** still needs real task
+traffic for centroids (embedder gate cleared); **030/072** need 029; **ITEM-076**
+(train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA) need the Slice 3
+infra; **ITEM-084** stays staged. ITEM-063 (cache affinity) and ITEM-064
+(adaptive policy loop) capture the closed-loop design; 064 composes
+029/030/055/058/061/063 and adds governance, it does not replace them.
 
 Decision (2026-10-28): the **cloud is the centre of gravity**; self-hosting is a
 supported deployment of the same artifact, not a second product. Three profiles
@@ -76,10 +104,3 @@ profile in which the cloud routes to an on-prem model and the prompt stays off
 the cloud, so the **edge is not a cloud fallback** and ITEM-080 (node → remote
 fallback) was dropped as the wrong direction. The connector (ITEM-084) stays
 staged.
-
-Everything else stays gated: **ITEM-029** needs real task traffic for centroids
-(its embedder gate is cleared); **030/072** need 029; **ITEM-076** (train /
-gold-set / hot-swap) and **ITEM-032** (PagedLoRA) need the Slice 3 infra.
-ITEM-063 (cache affinity) and ITEM-064 (adaptive policy loop) capture the
-closed-loop operation design; 064 composes 029/030/055/058/061/063 and adds
-governance (versioning, bound, kill switch), it does not replace them.
