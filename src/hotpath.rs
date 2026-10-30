@@ -64,6 +64,13 @@ pub struct Decision {
 
 struct TenantEntry {
     refreshed: Option<Instant>,
+    /// A background config rebuild is in flight (stampede guard).
+    refreshing: bool,
+    /// A background spend refresh is in flight.
+    revalidating_spend: bool,
+    /// The policy version the cached routes were resolved under. A new version
+    /// drops them, so weights and thresholds take effect.
+    routes_version: Option<i64>,
     /// The tenant's controls; `spent_cents` is held at zero here and filled from
     /// the spend cache when read (`spend` must not be 5 s stale).
     budget: Option<TenantBudget>,
@@ -78,6 +85,9 @@ impl TenantEntry {
     fn new() -> Self {
         Self {
             refreshed: None,
+            refreshing: false,
+            revalidating_spend: false,
+            routes_version: None,
             budget: None,
             policy: None,
             fallbacks: Vec::new(),
@@ -89,11 +99,15 @@ impl TenantEntry {
 }
 
 pub struct HotPath {
+    /// When false every read goes to the store (the kill switch).
+    enabled: bool,
     ttls: Ttls,
     tenants: Mutex<HashMap<Uuid, Arc<Mutex<TenantEntry>>>>,
     /// Key hash -> tenant. The one thing the request path would otherwise read
     /// from Postgres; invalidation on key writes keeps revocation immediate.
     auth: Mutex<HashMap<String, (Tenant, Instant)>>,
+    /// Key hashes with a background auth refresh in flight.
+    auth_refreshing: Mutex<std::collections::HashSet<String>>,
     counters: Counters,
 }
 
@@ -153,11 +167,21 @@ impl HotPath {
         Self::with_ttls(Ttls::default())
     }
 
+    /// The kill switch: no caching, every read goes to the store. Used by
+    /// `HOTPATH_CACHE=off` to take the cache out of the equation instantly.
+    pub fn uncached() -> Self {
+        let mut hotpath = Self::new();
+        hotpath.enabled = false;
+        hotpath
+    }
+
     pub fn with_ttls(ttls: Ttls) -> Self {
         Self {
+            enabled: true,
             ttls,
             tenants: Mutex::new(HashMap::new()),
             auth: Mutex::new(HashMap::new()),
+            auth_refreshing: Mutex::new(std::collections::HashSet::new()),
             counters: Counters::default(),
         }
     }
@@ -208,24 +232,31 @@ impl HotPath {
             .retain(|_, (tenant, _)| tenant.api_key_id != Some(key_id));
     }
 
-    /// Resolve a key hash to its tenant, cached for the (short) auth TTL. A miss
-    /// is one indexed lookup; a hit is pure memory.
+    /// Resolve a key hash to its tenant. Fresh entries are served from memory;
+    /// a stale one is served *and* refreshed in the background, so a request
+    /// never waits on the lookup. Revocation drops the entry (see
+    /// `invalidate_key`), so a stale hit can only exist for keys nobody revoked.
     pub async fn tenant_for_key(
         &self,
         state: &Arc<AppState>,
         key_hash: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        {
+        if !self.enabled {
+            return state.tenant_store.tenant_by_api_key_hash(key_hash).await;
+        }
+        let cached = {
             let auth = self
                 .auth
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some((tenant, at)) = auth.get(key_hash) {
-                if at.elapsed() < self.ttls.auth {
-                    self.counters.auth_hits.fetch_add(1, Ordering::Relaxed);
-                    return Ok(Some(tenant.clone()));
-                }
+            auth.get(key_hash).cloned()
+        };
+        if let Some((tenant, at)) = cached {
+            self.counters.auth_hits.fetch_add(1, Ordering::Relaxed);
+            if at.elapsed() >= self.ttls.auth {
+                self.spawn_auth_refresh(state, key_hash.to_string());
             }
+            return Ok(Some(tenant));
         }
         self.counters.auth_misses.fetch_add(1, Ordering::Relaxed);
         let tenant = state.tenant_store.tenant_by_api_key_hash(key_hash).await?;
@@ -236,6 +267,51 @@ impl HotPath {
                 .insert(key_hash.to_string(), (tenant.clone(), Instant::now()));
         }
         Ok(tenant)
+    }
+
+    fn spawn_auth_refresh(&self, state: &Arc<AppState>, key_hash: String) {
+        {
+            let mut refreshing = self
+                .auth_refreshing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !refreshing.insert(key_hash.clone()) {
+                return;
+            }
+        }
+        let state = state.clone();
+        tokio::spawn(async move {
+            match state
+                .tenant_store
+                .tenant_by_api_key_hash(&key_hash)
+                .await
+            {
+                Ok(Some(tenant)) => {
+                    state
+                        .hotpath
+                        .auth
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(key_hash.clone(), (tenant, Instant::now()));
+                }
+                Ok(None) => {
+                    // Revoked or deleted out of band: stop serving it.
+                    state
+                        .hotpath
+                        .auth
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&key_hash);
+                }
+                Err(e) => tracing::warn!("hot-path auth refresh failed: {e}"),
+            }
+            state
+                .hotpath
+                .auth_refreshing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&key_hash);
+        });
     }
 
     fn entry(&self, tenant_id: Uuid) -> Arc<Mutex<TenantEntry>> {
@@ -249,27 +325,55 @@ impl HotPath {
             .clone()
     }
 
-    /// Refresh the control-plane snapshot when it is older than the config TTL.
-    /// A budget-store error is a request error (the cap cannot be evaluated);
-    /// policy/fallback errors degrade quietly, as they always have.
+    /// Serve the control-plane snapshot, refreshing it in the background when it
+    /// is older than the config TTL. Only the very first read (no snapshot yet)
+    /// waits for storage.
     async fn refresh(
         &self,
         state: &Arc<AppState>,
         tenant_id: Uuid,
     ) -> Result<Arc<Mutex<TenantEntry>>, axum::response::Response> {
         let entry = self.entry(tenant_id);
-        let stale = {
-            let e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            e.refreshed.is_none_or(|at| at.elapsed() >= self.ttls.config)
-        };
-        if !stale {
-            self.counters.config_hits.fetch_add(1, Ordering::Relaxed);
+        if !self.enabled {
+            self.counters.config_misses.fetch_add(1, Ordering::Relaxed);
+            self.load_config(state, tenant_id, &entry).await?;
             return Ok(entry);
         }
-        self.counters.config_misses.fetch_add(1, Ordering::Relaxed);
+        let phase = {
+            let e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            match e.refreshed {
+                None => 0, // cold: must load before answering
+                Some(at) if at.elapsed() < self.ttls.config => 1,
+                Some(_) => 2, // stale: answer now, refresh off-path
+            }
+        };
+        match phase {
+            1 => {
+                self.counters.config_hits.fetch_add(1, Ordering::Relaxed);
+            }
+            2 => {
+                self.counters.config_hits.fetch_add(1, Ordering::Relaxed);
+                self.spawn_config_refresh(state, tenant_id, entry.clone());
+            }
+            _ => {
+                self.counters.config_misses.fetch_add(1, Ordering::Relaxed);
+                self.load_config(state, tenant_id, &entry).await?;
+            }
+        }
+        Ok(entry)
+    }
+
+    /// Read the controls once and install them. Never called on the request path
+    /// except for the first, cold read.
+    async fn load_config(
+        &self,
+        state: &Arc<AppState>,
+        tenant_id: Uuid,
+        entry: &Arc<Mutex<TenantEntry>>,
+    ) -> Result<(), axum::response::Response> {
         let budget = match state.budget_store.budget_for(tenant_id).await {
             Ok(budget) => budget.map(|mut budget| {
-                budget.spent_cents = 0; // spend is read fresh, never from here
+                budget.spent_cents = 0; // spend has its own, shorter cache
                 budget
             }),
             Err(e) => {
@@ -292,18 +396,49 @@ impl HotPath {
             tracing::error!("routing policy load failed: {e}");
             Vec::new()
         });
+        let version = policy.as_ref().map(|policy| policy.version);
+        let mut e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        e.refreshed = Some(Instant::now());
+        e.budget = budget;
+        e.policy = policy;
+        e.fallbacks = fallbacks;
+        // Routes survive a refresh (provider/model writes invalidate them), but a
+        // new policy version changes the weights, so those decisions are redone.
+        if e.routes_version != version {
+            e.routes.clear();
+            e.routes_version = version;
+        }
+        Ok(())
+    }
+
+    fn spawn_config_refresh(
+        &self,
+        state: &Arc<AppState>,
+        tenant_id: Uuid,
+        entry: Arc<Mutex<TenantEntry>>,
+    ) {
         {
             let mut e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            // Another task may have refreshed while we were reading.
-            if e.refreshed.is_none_or(|at| at.elapsed() >= self.ttls.config) {
-                e.refreshed = Some(Instant::now());
-                e.budget = budget;
-                e.policy = policy;
-                e.fallbacks = fallbacks;
-                e.routes.clear();
+            if e.refreshing {
+                return;
             }
+            e.refreshing = true;
         }
-        Ok(entry)
+        let state = state.clone();
+        tokio::spawn(async move {
+            if state
+                .hotpath
+                .load_config(&state, tenant_id, &entry)
+                .await
+                .is_err()
+            {
+                tracing::warn!("hot-path config refresh failed for {tenant_id}");
+            }
+            entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .refreshing = false;
+        });
     }
 
     /// The tenant's controls, with a spend figure no older than the spend TTL.
@@ -327,17 +462,29 @@ impl HotPath {
         tenant_id: Uuid,
         entry: &Arc<Mutex<TenantEntry>>,
     ) -> Result<i64, axum::response::Response> {
-        let cached = {
-            let e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            e.spend
-                .filter(|(_, at)| at.elapsed() < self.ttls.spend)
-                .map(|(value, _)| value)
-        };
-        if let Some(value) = cached {
-            self.counters.spend_hits.fetch_add(1, Ordering::Relaxed);
-            return Ok(value);
+        if self.enabled {
+            let cached = {
+                let e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                e.spend
+            };
+            if let Some((value, at)) = cached {
+                self.counters.spend_hits.fetch_add(1, Ordering::Relaxed);
+                if at.elapsed() >= self.ttls.spend {
+                    self.spawn_spend_refresh(state, tenant_id, entry.clone());
+                }
+                return Ok(value);
+            }
         }
         self.counters.spend_misses.fetch_add(1, Ordering::Relaxed);
+        self.load_spend(state, tenant_id, entry).await
+    }
+
+    async fn load_spend(
+        &self,
+        state: &Arc<AppState>,
+        tenant_id: Uuid,
+        entry: &Arc<Mutex<TenantEntry>>,
+    ) -> Result<i64, axum::response::Response> {
         match state.budget_store.budget_for(tenant_id).await {
             Ok(budget) => {
                 let value = budget.map(|budget| budget.spent_cents).unwrap_or(0);
@@ -354,6 +501,36 @@ impl HotPath {
                 ))
             }
         }
+    }
+
+    fn spawn_spend_refresh(
+        &self,
+        state: &Arc<AppState>,
+        tenant_id: Uuid,
+        entry: Arc<Mutex<TenantEntry>>,
+    ) {
+        {
+            let mut e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if e.revalidating_spend {
+                return;
+            }
+            e.revalidating_spend = true;
+        }
+        let state = state.clone();
+        tokio::spawn(async move {
+            if state
+                .hotpath
+                .load_spend(&state, tenant_id, &entry)
+                .await
+                .is_err()
+            {
+                tracing::warn!("hot-path spend refresh failed for {tenant_id}");
+            }
+            entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .revalidating_spend = false;
+        });
     }
 
     /// The guard switch, fail-open (a store error never removes the safety net).
@@ -398,6 +575,16 @@ impl HotPath {
         weights: Option<&std::collections::BTreeMap<String, f64>>,
     ) -> Result<Decision, axum::response::Response> {
         let key = format!("{surface:?}:{model}");
+        if !self.enabled {
+            self.counters.route_misses.fetch_add(1, Ordering::Relaxed);
+            let route = resolve_route(state, tenant, Some(model), surface, weights).await?;
+            let disabled = state
+                .model_store
+                .is_disabled(route.provider_id, model)
+                .await
+                .unwrap_or(false);
+            return Ok(Decision { route, disabled });
+        }
         let entry = self.entry(tenant.id);
         if let Some(hit) = entry
             .lock()
@@ -432,6 +619,14 @@ impl HotPath {
         tenant_id: Uuid,
         hash: &str,
     ) -> Option<WarmTarget> {
+        if !self.enabled {
+            self.counters.warm_misses.fetch_add(1, Ordering::Relaxed);
+            return state
+                .affinity_store
+                .warm_target(tenant_id, hash)
+                .await
+                .unwrap_or(None);
+        }
         let entry = self.entry(tenant_id);
         let cached = {
             let e = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

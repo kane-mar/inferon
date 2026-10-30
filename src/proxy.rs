@@ -513,6 +513,9 @@ pub(crate) async fn proxy_chat_completions(
         }
     };
     let tenant_id = tenant.id;
+    // ITEM-092: stage timing at debug level — auth, then planning (config, route,
+    // budget/router), then the total pre-dispatch overhead set below.
+    let auth_us = started.elapsed().as_micros() as i64;
 
     let (_, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
@@ -537,6 +540,7 @@ pub(crate) async fn proxy_chat_completions(
         api_key_id: tenant.api_key_id,
         is_local: false,
     };
+    let plan_started = Instant::now();
     let ModelPlan {
         route,
         primary,
@@ -551,6 +555,12 @@ pub(crate) async fn proxy_chat_completions(
     // dispatch (a subset of the trace's total duration).
     meta.proxy_ms = Some(started.elapsed().as_millis() as i64);
     meta.proxy_us = Some(started.elapsed().as_micros() as i64);
+    tracing::debug!(
+        auth_us,
+        plan_us = plan_started.elapsed().as_micros() as i64,
+        pre_dispatch_us = meta.proxy_us.unwrap_or_default(),
+        "hot-path stages"
+    );
     let mut upstream: Option<reqwest::Response> = None;
     for index in 0..allowed.len() {
         let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);

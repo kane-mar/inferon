@@ -48,6 +48,17 @@ where
     });
 }
 
+/// The hot-path cache, or its kill switch (`HOTPATH_CACHE=off`): every read goes
+/// to the store, so a cache problem can be taken out of the equation instantly.
+fn hot_path() -> inferon::hotpath::HotPath {
+    if std::env::var("HOTPATH_CACHE").is_ok_and(|value| value == "off") {
+        tracing::warn!("hot-path cache disabled (HOTPATH_CACHE=off)");
+        inferon::hotpath::HotPath::uncached()
+    } else {
+        inferon::hotpath::HotPath::new()
+    }
+}
+
 /// Wire the periodic workers (ITEM-020/031/064/082). Each is one bounded pass on
 /// a fixed cadence; the first tick fires immediately.
 fn spawn_workers(
@@ -256,7 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         model_store: Arc::new(inferon::models::PostgresModelStore::new(pool.clone())),
         routing_store: Arc::new(inferon::routing::PostgresRoutingStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
-        hotpath: Arc::new(inferon::hotpath::HotPath::new()),
+        hotpath: Arc::new(hot_path()),
         affinity_store: std::sync::Arc::new(inferon::affinity::PostgresAffinityStore::new(
             pool.clone(),
         )),

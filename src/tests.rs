@@ -3185,3 +3185,129 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         state.hotpath.invalidate(tenant_id);
         assert!(state.hotpath.stats().invalidations > after_hit.invalidations);
     }
+
+    /// A budget store that takes its time, so "served from cache" is measurable.
+    struct SlowBudgetStore {
+        inner: budget::InMemoryBudgetStore,
+        delay: std::time::Duration,
+    }
+
+    #[async_trait::async_trait]
+    impl budget::BudgetStore for SlowBudgetStore {
+        async fn budget_for(
+            &self,
+            tenant_id: uuid::Uuid,
+        ) -> Result<Option<budget::TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
+            tokio::time::sleep(self.delay).await;
+            self.inner.budget_for(tenant_id).await
+        }
+        async fn update_config(
+            &self,
+            tenant_id: uuid::Uuid,
+            update: &budget::ConfigUpdate,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.update_config(tenant_id, update).await
+        }
+        async fn set_tier_pairs(
+            &self,
+            tenant_id: uuid::Uuid,
+            pairs: &[crate::router::TierPair],
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.set_tier_pairs(tenant_id, pairs).await
+        }
+    }
+
+    fn hot_path_state(
+        budget_store: std::sync::Arc<dyn budget::BudgetStore>,
+        hotpath: crate::hotpath::HotPath,
+    ) -> std::sync::Arc<AppState> {
+        let mut base = base_state("http://127.0.0.1:1/v1");
+        base.budget_store = budget_store;
+        base.hotpath = std::sync::Arc::new(hotpath);
+        std::sync::Arc::new(base)
+    }
+
+    #[tokio::test]
+    async fn a_stale_snapshot_is_served_while_it_refreshes() {
+        // ITEM-092: a request must never wait for a TTL refresh. The stale value
+        // is answered immediately and the store is read off-path.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let delay = std::time::Duration::from_millis(100);
+        let store = std::sync::Arc::new(SlowBudgetStore {
+            inner: budget::InMemoryBudgetStore::new(budgets),
+            delay,
+        });
+        let ttls = crate::hotpath::Ttls {
+            config: std::time::Duration::from_millis(10),
+            spend: std::time::Duration::from_millis(10),
+            auth: std::time::Duration::from_millis(10),
+            warm: std::time::Duration::from_millis(10),
+        };
+        let state = hot_path_state(store.clone(), crate::hotpath::HotPath::with_ttls(ttls));
+
+        // Cold: the first read must wait for the store.
+        let warm = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        assert!(warm.router_enabled);
+
+        // Change behind the cache, then let the snapshot go stale.
+        state
+            .budget_store
+            .update_config(
+                tenant_id,
+                &budget::ConfigUpdate {
+                    budget_limit_cents: 0,
+                    cheap_fallback_model: None,
+                    guard_enabled: true,
+                    router_enabled: false,
+                    router_threshold: 0.35,
+                },
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let started = std::time::Instant::now();
+        let stale = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        let elapsed = started.elapsed();
+        assert!(stale.router_enabled, "the stale snapshot answers the request");
+        assert!(
+            elapsed < delay / 2,
+            "the request waited for storage ({elapsed:?}) instead of serving stale"
+        );
+
+        // The background refresh lands without another request paying for it.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let fresh = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        assert!(!fresh.router_enabled, "the background refresh was applied");
+    }
+
+    #[tokio::test]
+    async fn the_cache_kill_switch_bypasses_every_read() {
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let store = std::sync::Arc::new(CountingBudgetStore {
+            inner: budget::InMemoryBudgetStore::default(),
+            reads: reads.clone(),
+        });
+        let state = hot_path_state(store, crate::hotpath::HotPath::uncached());
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+
+        let before = reads.load(std::sync::atomic::Ordering::SeqCst);
+        state.hotpath.budget(&state, tenant_id).await.unwrap();
+        assert!(
+            reads.load(std::sync::atomic::Ordering::SeqCst) - before >= 2,
+            "with the cache off, config and spend both hit the store"
+        );
+    }
