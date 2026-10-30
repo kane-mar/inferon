@@ -42,6 +42,7 @@ pub mod budget;
 pub mod cost;
 pub mod evolution;
 pub mod guard;
+pub mod hotpath;
 pub mod linter;
 pub mod policy;
 pub mod quality;
@@ -102,6 +103,9 @@ pub struct AppState {
     /// failures. Empty = no chain (behaviour unchanged).
     pub routing_store: Arc<dyn routing::RoutingStore>,
     pub budget_store: Arc<dyn budget::BudgetStore>,
+    /// ITEM-092: per-tenant read cache for the request path (config, route,
+    /// spend, warm target); authentication stays a fresh lookup.
+    pub hotpath: Arc<hotpath::HotPath>,
     /// ITEM-063: per-prefix warm-target lookup for cache-affinity routing.
     pub affinity_store: Arc<dyn affinity::AffinityStore>,
     /// ITEM-064: the tenant's active adaptive policy (versioned).

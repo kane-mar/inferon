@@ -208,7 +208,10 @@ pub async fn operator_policy_freeze(
         return resp;
     }
     match state.policy_store.freeze(tenant_id).await {
-        Ok(()) => json_ok(json!({ "ok": true })),
+        Ok(()) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "ok": true }))
+        }
         Err(e) => internal(e.to_string()),
     }
 }
@@ -224,7 +227,10 @@ pub async fn operator_policy_rollback(
         return resp;
     }
     match state.policy_store.rollback(tenant_id, version).await {
-        Ok(Some(policy)) => json_ok(json!({ "ok": true, "policy": policy })),
+        Ok(Some(policy)) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "ok": true, "policy": policy }))
+        }
         Ok(None) => crate::json_error(
             StatusCode::NOT_FOUND,
             "not_found",

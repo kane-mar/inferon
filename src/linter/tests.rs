@@ -33,6 +33,7 @@
             cache_affinity: None,
             policy_version: None,
             proxy_ms: None,
+                proxy_us: None,
         }
     }
 

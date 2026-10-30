@@ -67,6 +67,8 @@ pub struct TraceMessage {
     pub policy_version: Option<i64>,
     /// ITEM-066: the proxy's own pre-upstream time (request-received → dispatch).
     pub proxy_ms: Option<i64>,
+    /// ITEM-092: the same overhead in microseconds (the performance contract).
+    pub proxy_us: Option<i64>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -138,8 +140,8 @@ impl TraceSink for PostgresTraceSink {
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
-                    proxy_ms
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)"#,
+                    proxy_ms, proxy_us
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -169,6 +171,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.cache_affinity.as_ref().map(Json))
             .bind(msg.policy_version)
             .bind(msg.proxy_ms.map(|t| t as i32))
+            .bind(msg.proxy_us)
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {

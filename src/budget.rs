@@ -332,14 +332,9 @@ async fn load_budget(
     state: &Arc<AppState>,
     tenant_id: Uuid,
 ) -> Result<Option<TenantBudget>, Response> {
-    state.budget_store.budget_for(tenant_id).await.map_err(|e| {
-        tracing::error!("budget lookup failed: {e}");
-        crate::json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "budget_store_error",
-            "budget lookup failed",
-        )
-    })
+    // ITEM-092: the controls come from the hot-path cache; spend is refreshed
+    // on its own shorter TTL.
+    state.hotpath.budget(state, tenant_id).await
 }
 
 /// ITEM-081 AC3: a tenant pair is only usable while its cheap model is still

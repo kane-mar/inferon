@@ -146,7 +146,7 @@ pub(crate) struct Route {
 
 /// The ingress→upstream surface (ITEM-050): OpenAI is the chat-completions
 /// shape, Anthropic the Messages shape. A request never crosses surfaces.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Surface {
     OpenAi,
     Anthropic,
@@ -329,22 +329,26 @@ async fn build_model_chain(
         if !seen.insert(model.clone()) {
             continue;
         }
-        let model_route = if model == primary {
-            route.clone()
+        let decision = if model == primary {
+            // The primary was already checked by `ensure_model_enabled`.
+            crate::hotpath::Decision {
+                route: route.clone(),
+                disabled: false,
+            }
         } else {
-            resolve_route(state, tenant, Some(&model), Surface::OpenAi, weights)
+            state
+                .hotpath
+                .route(state, tenant, &model, Surface::OpenAi, weights)
                 .await
-                .unwrap_or_else(|_| route.clone())
+                .unwrap_or_else(|_| crate::hotpath::Decision {
+                    route: route.clone(),
+                    disabled: false,
+                })
         };
-        if state
-            .model_store
-            .is_disabled(model_route.provider_id, &model)
-            .await
-            .unwrap_or(false)
-        {
+        if decision.disabled {
             continue;
         }
-        chain.push((model, model_route));
+        chain.push((model, decision.route));
     }
     if chain.is_empty() {
         chain.push((primary, route.clone()));
@@ -377,34 +381,21 @@ async fn plan_models(
     let tenant_id = tenant.id;
     // ITEM-064/069: read the adaptive policy once — it supplies both the router
     // threshold and the provider health weights.
-    let policy = match state.policy_store.active(tenant_id).await {
-        Ok(policy) => policy.filter(|policy| policy.enabled),
-        Err(e) => {
-            tracing::warn!("policy lookup failed: {e}");
-            None
-        }
-    };
+    let policy = state.hotpath.policy(state, tenant_id).await;
     meta.policy_version = policy.as_ref().map(|policy| policy.version);
     let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
-    let route = match resolve_route(
-        state,
-        tenant,
-        Some(&meta.model),
-        Surface::OpenAi,
-        policy_weights,
-    )
-    .await
-    {
-        Ok(route) => route,
-        Err(resp) => return Err(resp),
-    };
+    let decision = state
+        .hotpath
+        .route(state, tenant, &meta.model, Surface::OpenAi, policy_weights)
+        .await?;
+    let route = decision.route;
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
     crate::metrics::request_routed(route.provider_id);
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
     // error (and traced), not a raw upstream 4xx.
-    ensure_model_enabled(state, meta, tenant_id, started, route.provider_id, &meta.model).await?;
+    ensure_model_enabled(state, meta, tenant_id, started, decision.disabled)?;
 
     // ITEM-016: the budget breaker wins over the router and rejects before any
     // upstream call; ITEM-046/081: otherwise the router may downshift.
@@ -421,13 +412,7 @@ async fn plan_models(
     let primary = override_primary(state, route.provider_id, meta, chosen).await;
     // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
     let primary = prefer_warm(state, tenant_id, meta, primary).await;
-    let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
-        Ok(models) => models,
-        Err(e) => {
-            tracing::error!("routing policy load failed: {e}");
-            Vec::new()
-        }
-    };
+    let fallbacks = state.hotpath.fallbacks(state, tenant_id).await;
     let chain =
         build_model_chain(state, tenant, &route, primary.clone(), fallbacks, policy_weights).await;
     Ok(ModelPlan { route, primary, chain })
@@ -546,6 +531,7 @@ pub(crate) async fn proxy_chat_completions(
         cache_affinity: None,
         policy_version: None,
         proxy_ms: None,
+        proxy_us: None,
         wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
@@ -564,6 +550,7 @@ pub(crate) async fn proxy_chat_completions(
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
     // dispatch (a subset of the trace's total duration).
     meta.proxy_ms = Some(started.elapsed().as_millis() as i64);
+    meta.proxy_us = Some(started.elapsed().as_micros() as i64);
     let mut upstream: Option<reqwest::Response> = None;
     for index in 0..allowed.len() {
         let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
@@ -651,11 +638,7 @@ pub(crate) async fn proxy_chat_completions(
         // ITEM-027 AC1: the guard is ON by default; a tenant opts out via
         // tenant_configurations.guard_enabled (fail-open on read errors).
         let guarded = guard::is_guarded_request(&meta.raw_prompt, &meta.model)
-            && state
-                .budget_store
-                .guard_enabled_for(tenant_id)
-                .await
-                .unwrap_or(true);
+            && state.hotpath.guard_enabled(&state, tenant_id).await;
         if guarded {
             guarded_stream_response(
                 &state,
@@ -730,23 +713,27 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         cache_affinity: None,
         policy_version: None,
         proxy_ms: None,
+        proxy_us: None,
         wire_format: None,
         provider_id: None,
         api_key_id: tenant.api_key_id,
         is_local: false,
     };
-    let route = match resolve_route(&state, &tenant, Some(&meta.model), Surface::Anthropic, None).await {
-        Ok(route) => route,
+    let decision = match state
+        .hotpath
+        .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
+        .await
+    {
+        Ok(decision) => decision,
         Err(resp) => return resp,
-    };    meta.provider_id = route.provider_id;
+    };
+    let route = decision.route;
+    meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
     crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
 
-    if let Err(resp) =
-        ensure_model_enabled(&state, &meta, tenant_id, started, route.provider_id, &meta.model)
-            .await
-    {
+    if let Err(resp) = ensure_model_enabled(&state, &meta, tenant_id, started, decision.disabled) {
         return resp;
     }
 
@@ -759,6 +746,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
 
     // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
+    meta.proxy_us = Some(request_started.elapsed().as_micros() as i64);
     let request = provider_request(&state.http_client, &route);
     let upstream = match request.body(body_bytes).send().await {
         Ok(response) => response,
@@ -908,8 +896,10 @@ struct RequestMeta {
     cache_affinity: Option<Value>,
     /// ITEM-064: the adaptive policy version in force for this request.
     policy_version: Option<i64>,
-    /// ITEM-066: the proxy's own pre-upstream time (request-received → dispatch).
+    /// ITEM-066/092: the proxy's own pre-upstream time (request-received →
+    /// dispatch), in ms for the dashboard and µs for the performance suite.
     proxy_ms: Option<i64>,
+    proxy_us: Option<i64>,
     /// ITEM-067: set when the wire format was downgraded (json_schema →
     /// json_object) because the target cannot honour a schema contract.
     wire_format: Option<&'static str>,
@@ -980,38 +970,28 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         cache_affinity: meta.cache_affinity.clone(),
         policy_version: meta.policy_version,
         proxy_ms: meta.proxy_ms,
+        proxy_us: meta.proxy_us,
         is_local: meta.is_local,
     }
 }
 
 /// Refuse a model the tenant disabled with a typed, traced 400 (ITEM-044 AC5).
-async fn ensure_model_enabled(
-    state: &Arc<AppState>,
+fn ensure_model_enabled(
+    state: &AppState,
     meta: &RequestMeta,
     tenant_id: Uuid,
     started: Instant,
-    provider_id: Option<Uuid>,
-    model: &str,
+    disabled: bool,
 ) -> Result<(), Response> {
-    match state.model_store.is_disabled(provider_id, model).await {
-        Ok(false) => Ok(()),
-        Ok(true) => {
-            trace_error(state, meta, tenant_id, started, 400, ErrorClass::Inferon4xx);
-            Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "model_disabled",
-                "this model is disabled for your tenant",
-            ))
-        }
-        Err(e) => {
-            tracing::error!("model selection lookup failed: {e}");
-            Err(json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "model_store_error",
-                "could not check model selection",
-            ))
-        }
+    if !disabled {
+        return Ok(());
     }
+    trace_error(state, meta, tenant_id, started, 400, ErrorClass::Inferon4xx);
+    Err(json_error(
+        StatusCode::BAD_REQUEST,
+        "model_disabled",
+        "this model is disabled for your tenant",
+    ))
 }
 
 /// Trace a terminal error response (no usage, no completion body).

@@ -41,3 +41,43 @@ scrutiny.
   adjust the claim — that is a valid outcome.
 
 **Ranking note.** Rank **5** of 22 · V4/E2.5 — makes the runtime claim honest (or withdraws it) and gives 090 the prompt cache it needs.
+## Progress (2026-10-30) — the contract and its enforcement
+
+The claim is now measurable and enforced, not aspirational:
+
+**Contract.** For a warm request with a small body, the proxy's own overhead —
+request start to just before the first upstream dispatch, i.e. `traces.proxy_us`
+— is **p50 < 1,000 µs** and **p95 < 2,000 µs**. It excludes the upstream and the
+response body; it includes authentication, config, routing, the budget/router
+decision and request parsing.
+
+**What was built**
+- `traces.proxy_us` (migration 037) alongside `proxy_ms`, so a sub-millisecond
+  claim is expressible at all (ms integers cannot express it).
+- `src/hotpath.rs`: a per-tenant read cache — controls/policy/fallbacks (5 s),
+  spend (1 s, already ≤500 ms stale from the telemetry flush), resolved route +
+  disabled flag (5 s), warm affinity target (30 s). Writes invalidate the
+  tenant snapshot from every dashboard/operator path; the TTL is the backstop for
+  out-of-band changes.
+- **Authentication is deliberately not cached**: the key lookup stays one fresh
+  indexed query (0.22 ms measured on the host), so revocation is still immediate.
+  That is the single storage round trip a warm request pays.
+
+**The suite**
+- `proxy_overhead_is_sub_millisecond_for_small_requests` (src/tests.rs): 60
+  warmed requests through the router, p50/p95 of `proxy_us` against the contract.
+- `a_warm_request_does_not_read_tenant_config_per_request`: a counting store
+  proves a 20-request burst causes at most one budget read (the spend TTL), not
+  one per request.
+- `a_trace_records_its_proxy_overhead` now asserts the µs and ms values agree.
+- `the_config_cache_is_dropped_when_the_tenant_writes` and
+  `a_provider_change_reaches_the_cached_route_only_after_invalidation`: the cache
+  cannot outlive a write.
+- `scripts/perf-check.sh` runs **in the deploy job, on the host, after the health
+  check**: it seeds a throwaway tenant with a bogus upstream key (so requests 401
+  and cost nothing), sends 40 warmed requests, reads p50/p95 from `proxy_us`, and
+  fails the deployment run if either budget is exceeded. It prints the measured
+  numbers to the CI log every time.
+
+**Not yet closed**: the live numbers still have to land on a deploy; the item
+stays open until `perf-check.sh` is green on the durable host.

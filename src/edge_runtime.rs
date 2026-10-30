@@ -458,6 +458,7 @@ pub async fn run(options: EdgeOptions) -> Result<(), Box<dyn std::error::Error>>
         routing_store: edge_state.clone(),
         budget_store: edge_state.clone(),
         policy_store: edge_state.clone(),
+        hotpath: Arc::new(crate::hotpath::HotPath::new()),
         affinity_store: Arc::new(InMemoryAffinityStore::default()),
         edge_store: Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
         telemetry_tx,

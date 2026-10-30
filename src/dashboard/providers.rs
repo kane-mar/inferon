@@ -128,7 +128,11 @@ pub async fn tenant_provider_create(
         spend_limit_cents: body.spend_limit_cents.unwrap_or(0),
     };
     match state.provider_store.insert(tenant_id, &new).await {
-        Ok(id) => json_ok(json!({ "id": id.to_string() })),
+        Ok(id) => {
+            // ITEM-092: a new provider can change how every model routes.
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "id": id.to_string() }))
+        }
         Err(e) => {
             tracing::error!("provider insert failed: {e}");
             internal(e.to_string())
@@ -150,10 +154,13 @@ pub async fn tenant_provider_remove(
         return resp;
     }
     match state.provider_store.remove(tenant_id, provider_id).await {
-        Ok(removed) => json_ok(json!({
-            "provider_id": provider_id.to_string(),
-            "removed": removed,
-        })),
+        Ok(removed) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({
+                "provider_id": provider_id.to_string(),
+                "removed": removed,
+            }))
+        }
         Err(e) => internal(e.to_string()),
     }
 }
@@ -197,7 +204,10 @@ pub async fn tenant_provider_update(
         spend_limit_cents: body.spend_limit_cents,
     };
     match state.provider_store.update(tenant_id, provider_id, &update).await {
-        Ok(true) => json_ok(json!({ "provider_id": provider_id.to_string(), "updated": true })),
+        Ok(true) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "provider_id": provider_id.to_string(), "updated": true }))
+        }
         Ok(false) => {
             crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
         }
@@ -220,10 +230,13 @@ pub async fn tenant_provider_default(
         return resp;
     }
     match state.provider_store.set_default(tenant_id, provider_id).await {
-        Ok(true) => json_ok(json!({
-            "provider_id": provider_id.to_string(),
-            "is_default": true,
-        })),
+        Ok(true) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({
+                "provider_id": provider_id.to_string(),
+                "is_default": true,
+            }))
+        }
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider"),
         Err(e) => internal(e.to_string()),
     }
@@ -317,6 +330,8 @@ pub async fn tenant_provider_test(
                     models = ids.len();
                     if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
                         tracing::warn!("provider model sync failed for {provider_id}: {e}");
+                    } else {
+                        state.hotpath.invalidate(tenant_id);
                     }
                 }
             }
@@ -387,6 +402,7 @@ pub async fn tenant_provider_models(
     };
     let local = crate::providers::is_local(&provider.kind);
     let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings, local)).collect();
+    state.hotpath.invalidate(tenant_id);
     json_ok(json!({ "models": models }))
 }
 
@@ -470,6 +486,7 @@ pub async fn tenant_provider_model_update(
             return internal(e.to_string());
         }
     }
+    state.hotpath.invalidate(tenant_id);
     json_ok(json!({ "provider_id": provider_id.to_string(), "model_id": model_id }))
 }
 

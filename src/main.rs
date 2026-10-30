@@ -256,6 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         model_store: Arc::new(inferon::models::PostgresModelStore::new(pool.clone())),
         routing_store: Arc::new(inferon::routing::PostgresRoutingStore::new(pool.clone())),
         budget_store: Arc::new(inferon::budget::PostgresBudgetStore::new(pool.clone())),
+        hotpath: Arc::new(inferon::hotpath::HotPath::new()),
         affinity_store: std::sync::Arc::new(inferon::affinity::PostgresAffinityStore::new(
             pool.clone(),
         )),

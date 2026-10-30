@@ -546,6 +546,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
@@ -862,6 +863,11 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let proxy = msg.proxy_ms.expect("proxy overhead recorded");
         assert!(proxy >= 0);
         assert!(proxy <= msg.total_duration_ms, "overhead is part of the total");
+        // ITEM-092: the same measurement at µs resolution — the performance
+        // suite reads this, so it must be recorded and agree with the ms value.
+        let proxy_us = msg.proxy_us.expect("proxy overhead recorded in µs");
+        assert!(proxy_us >= 0);
+        assert_eq!(proxy_us / 1000, proxy, "µs and ms must be the same measurement");
     }
 
     #[tokio::test]
@@ -1320,6 +1326,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             cache_affinity: None,
             policy_version: None,
             proxy_ms: None,
+                proxy_us: None,
         }
     }
 
@@ -1686,6 +1693,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             )
             .await
             .unwrap();
+        // The write path drops the hot-path snapshot (ITEM-092); a bare store
+        // update would otherwise stay invisible until the 5 s TTL.
+        base.hotpath.invalidate(uuid::Uuid::parse_str(TENANT_ID).unwrap());
         let response = build_router(base)
             .oneshot(chat_request_builder(
                 r#"{"model":"gpt-4o","messages":[{"role":"user","content":"write a haiku"}]}"#,
@@ -2862,4 +2872,262 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert_eq!(ev["guarded_model"], "gpt-4o-mini");
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         assert!(rx.try_recv().is_err(), "no duplicate trace after abort");
+    }
+
+    // --- ITEM-092: the performance contract --------------------------------
+
+    /// A budget store that counts reads, so the suite can prove the hot path
+    /// does not pay a storage round trip per request.
+    struct CountingBudgetStore {
+        inner: budget::InMemoryBudgetStore,
+        reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl budget::BudgetStore for CountingBudgetStore {
+        async fn budget_for(
+            &self,
+            tenant_id: uuid::Uuid,
+        ) -> Result<Option<budget::TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.budget_for(tenant_id).await
+        }
+        async fn guard_enabled_for(
+            &self,
+            tenant_id: uuid::Uuid,
+        ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.guard_enabled_for(tenant_id).await
+        }
+        async fn update_config(
+            &self,
+            tenant_id: uuid::Uuid,
+            update: &budget::ConfigUpdate,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.update_config(tenant_id, update).await
+        }
+        async fn set_tier_pairs(
+            &self,
+            tenant_id: uuid::Uuid,
+            pairs: &[crate::router::TierPair],
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.set_tier_pairs(tenant_id, pairs).await
+        }
+    }
+
+    fn perf_state(
+        upstream_url: &str,
+        budget_store: std::sync::Arc<dyn budget::BudgetStore>,
+        capacity: usize,
+    ) -> (std::sync::Arc<AppState>, mpsc::Receiver<TraceMessage>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let state = std::sync::Arc::new(AppState {
+            budget_store,
+            telemetry_tx: tx,
+            ..base_state(upstream_url)
+        });
+        (state, rx)
+    }
+
+    fn percentile(sorted: &[i64], pct: usize) -> i64 {
+        sorted[(sorted.len() - 1) * pct / 100]
+    }
+
+    #[tokio::test]
+    async fn a_warm_request_does_not_read_tenant_config_per_request() {
+        // The contract behind the sub-ms claim: a warm request pays one auth
+        // lookup, not a config/route/budget read per decision.
+        let upstream = mock_upstream().await;
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let store = std::sync::Arc::new(CountingBudgetStore {
+            inner: budget::InMemoryBudgetStore::new(budgets),
+            reads: reads.clone(),
+        });
+        let (state, _rx) = perf_state(&upstream, store, 64);
+        let router = build_router(state);
+        let body = r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}"#;
+
+        // Warm the snapshot (one read), then send a burst well inside the spend TTL.
+        router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let after_warm = reads.load(std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..20 {
+            router
+                .clone()
+                .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+                .await
+                .unwrap();
+        }
+        let reads_for_20 = reads.load(std::sync::atomic::Ordering::SeqCst) - after_warm;
+        assert!(
+            reads_for_20 <= 1,
+            "20 warm requests caused {reads_for_20} budget reads (expected 0, or 1 if the spend TTL elapsed)"
+        );
+    }
+
+    #[tokio::test]
+    async fn proxy_overhead_is_sub_millisecond_for_small_requests() {
+        // The measured claim (ITEM-092): p50 < 1 ms and p95 < 2 ms of proxy
+        // overhead for a small request on a warm cache. `proxy_us` is request
+        // start -> before the upstream dispatch, so the mock's own time is not
+        // part of the sample.
+        let upstream = mock_upstream().await;
+        let (state, mut rx) = perf_state(
+            &upstream,
+            std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            256,
+        );
+        let router = build_router(state);
+        let body = r#"{"model":"deepseek-chat","messages":[{"role":"user","content":"write a haiku"}]}"#;
+
+        // Warm-up: auth, config snapshot, route, spend.
+        router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let _ = rx.recv().await;
+
+        let mut samples = Vec::new();
+        for _ in 0..60 {
+            let response = router
+                .clone()
+                .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let msg = rx.recv().await.expect("a trace per request");
+            samples.push(msg.proxy_us.expect("proxy_us recorded"));
+        }
+        samples.sort_unstable();
+        let p50 = percentile(&samples, 50);
+        let p95 = percentile(&samples, 95);
+        println!("proxy overhead (in-memory harness): p50={p50}us p95={p95}us n={}", samples.len());
+        assert!(
+            p50 < 1_000,
+            "p50 proxy overhead {p50}us exceeds the 1000us contract (p95 {p95}us)"
+        );
+        assert!(
+            p95 < 2_000,
+            "p95 proxy overhead {p95}us exceeds the 2000us contract (p50 {p50}us)"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_config_cache_is_dropped_when_the_tenant_writes() {
+        // Writes invalidate; a stale snapshot must never outlive the write path.
+        let state = budgeted_state(
+            &mock_upstream().await,
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let warm = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        assert!(warm.router_enabled);
+
+        state
+            .budget_store
+            .update_config(
+                tenant_id,
+                &budget::ConfigUpdate {
+                    budget_limit_cents: 0,
+                    cheap_fallback_model: None,
+                    guard_enabled: true,
+                    router_enabled: false,
+                    router_threshold: 0.35,
+                },
+            )
+            .await
+            .unwrap();
+        let cached = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        assert!(cached.router_enabled, "cached until invalidated");
+
+        state.hotpath.invalidate(tenant_id);
+        let fresh = state.hotpath.budget(&state, tenant_id).await.unwrap().unwrap();
+        assert!(!fresh.router_enabled, "invalidation drops the snapshot");
+    }
+
+    #[tokio::test]
+    async fn a_provider_change_reaches_the_cached_route_only_after_invalidation() {
+        use crate::providers::ProviderStore as _;
+        let tenant = seeded_tenant();
+        let store = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        let id = store
+            .insert(
+                tenant.id,
+                &crate::providers::NewProvider {
+                    kind: "openai-compatible".to_string(),
+                    name: "a".to_string(),
+                    base_url: "https://a.test/v1".to_string(),
+                    key: "sk-a".to_string(),
+                    metadata: crate::providers::ProviderMetadata::default(),
+                    spend_limit_cents: 0,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .record_models(id, &["m".to_string()])
+            .await
+            .unwrap();
+        let state = std::sync::Arc::new(AppState {
+            provider_store: store.clone(),
+            ..base_state("http://127.0.0.1:1/v1")
+        });
+
+        let first = state
+            .hotpath
+            .route(&state, &tenant, "m", Surface::OpenAi, None)
+            .await
+            .unwrap();
+        assert_eq!(first.route.url, "https://a.test/v1/chat/completions");
+
+        store
+            .update(
+                tenant.id,
+                id,
+                &crate::providers::ProviderUpdate {
+                    base_url: Some("https://b.test/v1".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let cached = state
+            .hotpath
+            .route(&state, &tenant, "m", Surface::OpenAi, None)
+            .await
+            .unwrap();
+        assert_eq!(cached.route.url, "https://a.test/v1/chat/completions");
+
+        state.hotpath.invalidate(tenant.id);
+        let fresh = state
+            .hotpath
+            .route(&state, &tenant, "m", Surface::OpenAi, None)
+            .await
+            .unwrap();
+        assert_eq!(fresh.route.url, "https://b.test/v1/chat/completions");
     }

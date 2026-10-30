@@ -64,7 +64,10 @@ pub async fn tenant_routing_set(
         chain.push(model);
     }
     match state.routing_store.set_fallbacks(tenant_id, &chain).await {
-        Ok(()) => json_ok(json!({ "fallbacks": chain })),
+        Ok(()) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "fallbacks": chain }))
+        }
         Err(e) => internal(e.to_string()),
     }
 }
@@ -107,7 +110,10 @@ pub async fn tenant_tier_pairs_set(
         return pair_refusal(issue);
     }
     match state.budget_store.set_tier_pairs(tenant_id, &pairs).await {
-        Ok(()) => json_ok(json!({ "tier_pairs": pair_json(&pairs, &catalog) })),
+        Ok(()) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "tier_pairs": pair_json(&pairs, &catalog) }))
+        }
         Err(e) => internal(e.to_string()),
     }
 }
@@ -262,7 +268,10 @@ pub async fn tenant_config_set(
         router_threshold: body.router_threshold.clamp(0.0, 1.0),
     };
     match state.budget_store.update_config(tenant_id, &update).await {
-        Ok(()) => json_ok(json!({ "updated": true })),
+        Ok(()) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "updated": true }))
+        }
         Err(e) => internal(e.to_string()),
     }
 }

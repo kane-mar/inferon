@@ -38,6 +38,7 @@
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(crate::budget::InMemoryBudgetStore::default()),
+            hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),

@@ -158,6 +158,12 @@ jobs:
           ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" \
             'for i in $(seq 1 90); do if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then echo stack-healthy; exit 0; fi; sleep 5; done; echo stack-health-failed; exit 1'
 
+      - name: Performance claim (sub-ms proxy overhead)
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          ssh -i ~/.ssh/id_deploy "root@$DEPLOY_HOST" \
+            'cd /opt/inferon && bash ./scripts/perf-check.sh'
+
       - name: Public landing check
         if: steps.cfg.outputs.configured == 'true'
         run: |
