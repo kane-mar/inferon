@@ -66,6 +66,15 @@ pub struct EdgeBudget {
     /// cloud does.
     #[serde(default)]
     pub tier_pairs: Vec<crate::router::TierPair>,
+    /// ITEM-088: store raw payloads at all.
+    #[serde(default = "default_true")]
+    pub capture_payloads: bool,
+    #[serde(default = "default_retention")]
+    pub payload_retention_days: i64,
+}
+
+fn default_retention() -> i64 {
+    30
 }
 
 fn default_threshold() -> f64 {
@@ -164,6 +173,8 @@ impl BudgetStore for EdgeState {
             router_enabled: budget.router_enabled,
             router_threshold: budget.router_threshold,
             tier_pairs: budget.tier_pairs,
+            capture_payloads: budget.capture_payloads,
+            payload_retention_days: budget.payload_retention_days,
         }))
     }
 

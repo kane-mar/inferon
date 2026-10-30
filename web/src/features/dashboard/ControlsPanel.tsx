@@ -19,6 +19,8 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
   const [guard, setGuard] = useState(data.guard_enabled);
   const [routerOn, setRouterOn] = useState(data.router_enabled);
   const [threshold, setThreshold] = useState(String(data.router_threshold));
+  const [capture, setCapture] = useState(data.capture_payloads);
+  const [retention, setRetention] = useState(String(data.payload_retention_days));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -37,6 +39,8 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
         guard_enabled: guard,
         router_enabled: routerOn,
         router_threshold: Math.min(1, Math.max(0, Number(threshold) || 0)),
+        capture_payloads: capture,
+        payload_retention_days: Math.max(0, Math.round(Number(retention) || 0)),
       });
       setSaved(true);
       router.refresh();
@@ -96,6 +100,31 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
         />
         {t('guard')}
       </label>
+
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={capture}
+            disabled={!canEdit}
+            onChange={event => setCapture(event.target.checked)}
+          />
+          {t('capture')}
+        </label>
+        <p className="text-xs text-muted-foreground">{t('capture_help')}</p>
+        <label className="text-sm">
+          <span className="text-muted-foreground">{t('retention')}</span>
+          <input
+            className={FIELD_INPUT}
+            inputMode="numeric"
+            value={retention}
+            disabled={!canEdit || !capture}
+            onChange={event => setRetention(event.target.value)}
+          />
+        </label>
+        <p className="text-xs text-muted-foreground">{t('retention_help')}</p>
+      </div>
 
       <div className="space-y-1">
         <label className="flex items-center gap-2 text-sm">

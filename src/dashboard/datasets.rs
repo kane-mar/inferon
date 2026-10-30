@@ -101,3 +101,17 @@ pub async fn datasets(
         "clusters": clusters,
     })))
 }
+
+/// POST /v1/dashboard/api/datasets/purge (owner-only) — delete every stored
+/// payload for the tenant now (ITEM-088). Costs and aggregates survive.
+pub async fn purge(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, Response> {
+    let (tenant_id, role) = session_membership(&state, &headers).await?;
+    owner_only(&role)?;
+    match crate::retention::purge_tenant(&state.db, tenant_id).await {
+        Ok(purged) => {
+            tracing::info!("payload purge: tenant {tenant_id} cleared {purged} row(s)");
+            Ok(json_ok(json!({ "purged": purged })))
+        }
+        Err(e) => Err(internal(e.to_string())),
+    }
+}

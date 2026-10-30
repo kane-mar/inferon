@@ -48,6 +48,7 @@ pub mod hotpath;
 pub mod linter;
 pub mod policy;
 pub mod quality;
+pub mod retention;
 pub mod router;
 pub mod routing;
 pub mod usage;
@@ -136,6 +137,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/performance", get(dashboard::performance))
         .route("/v1/dashboard/api/datasets", get(dashboard::datasets))
+        .route(
+            "/v1/dashboard/api/datasets/purge",
+            post(dashboard::purge),
+        )
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
         .route(
             "/v1/dashboard/api/providers/:provider_id/remove",

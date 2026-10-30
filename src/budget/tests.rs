@@ -2,6 +2,8 @@
 
     fn budget(limit: i64, spent: i64, cheap: Option<&str>) -> TenantBudget {
         TenantBudget {
+            capture_payloads: true,
+            payload_retention_days: 30,
             limit_cents: limit,
             spent_cents: spent,
             cheap_fallback_model: cheap.map(str::to_string),
@@ -44,6 +46,8 @@
         budgets.insert(
             tenant,
             TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -71,6 +75,8 @@
             .update_config(
                 tenant,
                 &ConfigUpdate {
+                    capture_payloads: true,
+                    payload_retention_days: 30,
                     budget_limit_cents: 5000,
                     cheap_fallback_model: Some("deepseek-chat".to_string()),
                     guard_enabled: false,
@@ -93,6 +99,8 @@
             .update_config(
                 fresh,
                 &ConfigUpdate {
+                    capture_payloads: true,
+                    payload_retention_days: 30,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -144,6 +152,8 @@ async fn tier_pairs_survive_a_controls_update_and_work_for_a_fresh_tenant() {
         .update_config(
             tenant,
             &ConfigUpdate {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 budget_limit_cents: 5000,
                 cheap_fallback_model: Some("deepseek-chat".to_string()),
                 guard_enabled: true,

@@ -448,6 +448,10 @@ export type TenantConfig = {
   guard_enabled: boolean;
   router_enabled: boolean;
   router_threshold: number;
+  /** ITEM-088: store raw payloads at all. */
+  capture_payloads: boolean;
+  /** ITEM-088: days raw payloads live (0 = keep forever). */
+  payload_retention_days: number;
   role: Role;
 };
 
@@ -457,6 +461,8 @@ export type ConfigUpdate = {
   guard_enabled: boolean;
   router_enabled: boolean;
   router_threshold: number;
+  capture_payloads: boolean;
+  payload_retention_days: number;
 };
 
 export type CreatedKey = {

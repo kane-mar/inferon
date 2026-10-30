@@ -360,7 +360,11 @@
     "saving": "Enregistrement…",
     "saved": "Enregistré.",
     "owner_only": "Seul le propriétaire du tenant peut modifier ces réglages.",
-    "error": "Impossible d'enregistrer — veuillez réessayer."
+    "error": "Impossible d'enregistrer — veuillez réessayer.",
+    "capture": "Stocker les prompts et complétions bruts (paires de jeu de données)",
+    "capture_help": "Désactivé = les coûts, résultats et agrégats restent enregistrés, mais aucune charge utile n'est stockée et rien ne qualifie pour un jeu de données.",
+    "retention": "Conservation des charges utiles (jours)",
+    "retention_help": "Les charges utiles plus anciennes sont purgées périodiquement ; 0 les conserve indéfiniment."
   },
   "ReportsPage": {
     "title_bar": "Rapports",

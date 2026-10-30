@@ -1669,3 +1669,26 @@ async fn a_member_cannot_change_tier_pairs() {
             .unwrap();
         assert_ne!(scoped.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
+
+    #[tokio::test]
+    async fn the_capture_switch_round_trips_through_the_config_api() {
+        let (state, token) = tenant_role_session("owner").await;
+        let body = r#"{"budget_limit_cents":0,"cheap_fallback_model":null,
+            "guard_enabled":true,"router_enabled":true,"router_threshold":0.35,
+            "capture_payloads":false,"payload_retention_days":7}"#;
+        let saved = crate::build_router(state.clone())
+            .oneshot(post_with_cookie("/v1/dashboard/api/config", &token, body))
+            .await
+            .unwrap();
+        assert_eq!(saved.status(), StatusCode::OK);
+        let listed = crate::build_router(state)
+            .oneshot(request_with_cookie("/v1/dashboard/api/config", &token))
+            .await
+            .unwrap();
+        let listed = serde_json::from_slice::<Value>(
+            &axum::body::to_bytes(listed.into_body(), 1024 * 1024).await.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(listed["capture_payloads"], false);
+        assert_eq!(listed["payload_retention_days"], 7);
+    }

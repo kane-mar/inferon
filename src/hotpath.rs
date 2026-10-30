@@ -7,10 +7,10 @@
 //!
 //! | read | TTL | why it is safe |
 //! |---|---|---|
-//! | config (budget, policy, fallbacks) | 5 s | writes invalidate immediately |
-//! | spend (`current_spend_cents`) | 1 s | already ≤ 500 ms stale (telemetry flush) |
-//! | route (provider + disabled flag) | 5 s | provider/model writes invalidate |
-//! | warm target (affinity) | 30 s | a miss only loses a cache win |
+//! | config (budget, policy, fallbacks) | 30 s | writes invalidate immediately |
+//! | spend (`current_spend_cents`) | 5 s | the breaker already lags the flush |
+//! | route (provider + disabled flag) | until a write / new policy version | invalidated explicitly |
+//! | warm target (affinity) | 60 s | a miss only loses a cache win |
 //!
 //! **Authentication is not cached**: resolving the key stays one fresh indexed
 //! lookup, so revoking a key still stops it on the next request (ITEM-034).
@@ -47,10 +47,17 @@ pub struct Ttls {
 impl Default for Ttls {
     fn default() -> Self {
         Self {
-            config: Duration::from_secs(5),
-            spend: Duration::from_secs(1),
-            warm: Duration::from_secs(30),
-            auth: Duration::from_secs(1),
+            // A stale value is served and refreshed off-path, and every write
+            // invalidates, so these bound staleness for out-of-band changes
+            // (SQL, another instance) — not for anything the dashboard does.
+            config: Duration::from_secs(30),
+            // The budget breaker's spend figure may lag by up to this TTL, on
+            // top of the telemetry flush interval (500 ms).
+            spend: Duration::from_secs(5),
+            warm: Duration::from_secs(60),
+            // A revoked key is dropped explicitly; a second instance would lag
+            // by at most this long.
+            auth: Duration::from_secs(30),
         }
     }
 }
@@ -531,6 +538,20 @@ impl HotPath {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .revalidating_spend = false;
         });
+    }
+
+    /// ITEM-088: may this tenant's raw payloads be stored? Fail-open (true) when
+    /// the config cannot be read, matching the pre-consent behaviour.
+    pub async fn capture_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
+        match self.refresh(state, tenant_id).await {
+            Ok(entry) => entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .budget
+                .as_ref()
+                .is_none_or(|budget| budget.capture_payloads),
+            Err(_) => true,
+        }
     }
 
     /// The guard switch, fail-open (a store error never removes the safety net).

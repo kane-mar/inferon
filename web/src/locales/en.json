@@ -360,7 +360,11 @@
     "saving": "Saving…",
     "saved": "Saved.",
     "owner_only": "Only the tenant owner can change these controls.",
-    "error": "Could not save — please retry."
+    "error": "Could not save — please retry.",
+    "capture": "Store raw prompts and completions (dataset pairs)",
+    "capture_help": "Off = costs, outcomes and aggregates are still recorded, but no payload is stored and nothing qualifies for a dataset.",
+    "retention": "Payload retention (days)",
+    "retention_help": "Older payloads are purged by a periodic pass; 0 keeps them indefinitely."
   },
   "ReportsPage": {
     "title_bar": "Reports",

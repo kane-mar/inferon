@@ -539,7 +539,10 @@ pub(crate) async fn proxy_chat_completions(
         provider_id: None,
         api_key_id: tenant.api_key_id,
         is_local: false,
+        capture_payloads: true,
     };
+    // ITEM-088: the tenant's consent decides whether payloads are stored at all.
+    meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     let plan_started = Instant::now();
     let ModelPlan {
         route,
@@ -728,7 +731,9 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         provider_id: None,
         api_key_id: tenant.api_key_id,
         is_local: false,
+        capture_payloads: true,
     };
+    meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     let decision = match state
         .hotpath
         .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
@@ -919,6 +924,8 @@ struct RequestMeta {
     api_key_id: Option<Uuid>,
     /// ITEM-077: served by a locally hosted provider — costed at zero.
     is_local: bool,
+    /// ITEM-088: whether raw payloads may be stored for this tenant.
+    capture_payloads: bool,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -966,9 +973,9 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         ttft_ms: outcome.ttft_ms,
         total_duration_ms: outcome.total_duration_ms,
         status_code: outcome.status,
-        raw_prompt: Some(meta.raw_prompt.clone()),
-        raw_completion: outcome.raw_completion,
-        raw_completion_capped: outcome.raw_completion_capped,
+        raw_prompt: meta.capture_payloads.then(|| meta.raw_prompt.clone()),
+        raw_completion: if meta.capture_payloads { outcome.raw_completion } else { None },
+        raw_completion_capped: meta.capture_payloads && outcome.raw_completion_capped,
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
         cache_savings_usd: rust_decimal::Decimal::ZERO,

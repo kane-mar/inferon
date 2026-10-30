@@ -344,6 +344,19 @@ pub struct ConfigBody {
     guard_enabled: bool,
     router_enabled: bool,
     router_threshold: f64,
+    /// ITEM-088. Defaults keep an older client from turning capture off.
+    #[serde(default = "default_true")]
+    capture_payloads: bool,
+    #[serde(default = "default_retention")]
+    payload_retention_days: i64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_retention() -> i64 {
+    30
 }
 
 #[derive(serde::Deserialize)]

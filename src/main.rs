@@ -28,6 +28,9 @@ const EVOLUTION_INTERVAL_SECS: u64 = 900;
 /// providers so a dark on-prem endpoint shows unreachable before a tenant
 /// request has to fail on it. Probing is a `/models` GET, never inference.
 const PROVIDER_PROBE_INTERVAL_SECS: u64 = 300;
+/// Payload retention cadence (ITEM-088): raw prompts/completions are purged past
+/// each tenant's window. Costs and aggregates are never touched.
+const RETENTION_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
 /// Run an async task forever on a fixed cadence. The first tick fires
 /// immediately; missed ticks are skipped rather than burst-run, so a slow pass
@@ -121,6 +124,23 @@ fn spawn_workers(
     // unreachable without waiting for a tenant request to fail.
     let probe_store = provider_store.clone();
     let probe_client = http_client.clone();
+    // ITEM-088: payload retention, bounded batches.
+    let retention_pool = pool.clone();
+    spawn_periodic(
+        "payload-retention",
+        std::time::Duration::from_secs(RETENTION_INTERVAL_SECS),
+        move || {
+            let pool = retention_pool.clone();
+            async move {
+                match inferon::retention::purge_expired(&pool).await {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("payload retention: purged {n} row(s)"),
+                    Err(e) => tracing::warn!("payload retention failed: {e}"),
+                }
+            }
+        },
+    );
+
     spawn_periodic(
         "provider-reachability",
         std::time::Duration::from_secs(PROVIDER_PROBE_INTERVAL_SECS),

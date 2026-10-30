@@ -740,6 +740,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     async fn anthropic_messages_respect_the_hard_budget_cap() {
         let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
         let over_cap = budget::TenantBudget {
+            capture_payloads: true,
+            payload_retention_days: 30,
             limit_cents: 100,
             spent_cents: 100,
             cheap_fallback_model: None,
@@ -1558,6 +1560,8 @@ async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
     budgets.insert(
         uuid::Uuid::parse_str(TENANT_ID).unwrap(),
         budget::TenantBudget {
+            capture_payloads: true,
+            payload_retention_days: 30,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1624,6 +1628,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     budgets.insert(
         tenant_id,
         budget::TenantBudget {
+            capture_payloads: true,
+            payload_retention_days: 30,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1664,6 +1670,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let base = budgeted_state(
             &mock_upstream().await,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -1688,6 +1696,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .update_config(
                 uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 &budget::ConfigUpdate {
+                    capture_payloads: true,
+                    payload_retention_days: 30,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -1745,6 +1755,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let base = budgeted_state(
             &mock_upstream().await,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1772,6 +1784,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let state = budgeted_state(
             &mock_upstream().await,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1798,6 +1812,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let state = budgeted_state(
             &mock_upstream().await,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -2737,6 +2753,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         budgets.insert(
             tenant_id,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -2957,6 +2975,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         budgets.insert(
             tenant_id,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3049,6 +3069,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let state = budgeted_state(
             &mock_upstream().await,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3067,6 +3089,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .update_config(
                 tenant_id,
                 &budget::ConfigUpdate {
+                    capture_payloads: true,
+                    payload_retention_days: 30,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3250,6 +3274,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         budgets.insert(
             tenant_id,
             budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3282,6 +3308,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .update_config(
                 tenant_id,
                 &budget::ConfigUpdate {
+                    capture_payloads: true,
+                    payload_retention_days: 30,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3324,4 +3352,38 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             reads.load(std::sync::atomic::Ordering::SeqCst) - before >= 2,
             "with the cache off, config and spend both hit the store"
         );
+    }
+
+    #[tokio::test]
+    async fn a_tenant_that_opts_out_of_capture_stores_no_payloads() {
+        // ITEM-088: cost and outcome survive, the prompt/completion and the
+        // dataset pair do not.
+        let mut budgets = HashMap::new();
+        budgets.insert(
+            uuid::Uuid::parse_str(TENANT_ID).unwrap(),
+            budget::TenantBudget {
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+                capture_payloads: false,
+                payload_retention_days: 30,
+            },
+        );
+        let (response, mut rx) = traced_request_with_budget(
+            r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#,
+            Some(CLIENT_KEY),
+            std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.expect("a trace");
+        assert!(msg.raw_prompt.is_none(), "no prompt stored");
+        assert!(msg.raw_completion.is_none(), "no completion stored");
+        assert!(msg.example_state.is_none(), "no dataset pair");
+        assert_eq!(msg.outcome, crate::quality::Outcome::Ok);
+        assert_eq!(msg.prompt_tokens, 3, "usage and cost are still recorded");
     }

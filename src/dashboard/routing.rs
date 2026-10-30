@@ -221,18 +221,22 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         Ok(config) => config,
         Err(e) => return internal(e.to_string()),
     };
-    let (limit, spent, cheap, guard, router_enabled, router_threshold) = match config {
-        Some(budget) => (
-            budget.limit_cents,
-            budget.spent_cents,
-            budget.cheap_fallback_model,
-            budget.guard_enabled,
-            budget.router_enabled,
-            budget.router_threshold,
-        ),
-        // Unconfigured: the router/guard are on by default (ITEM-015/027).
-        None => (0, 0, None, true, true, 0.35),
-    };
+    let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention) =
+        match config {
+            Some(budget) => (
+                budget.limit_cents,
+                budget.spent_cents,
+                budget.cheap_fallback_model,
+                budget.guard_enabled,
+                budget.router_enabled,
+                budget.router_threshold,
+                budget.capture_payloads,
+                budget.payload_retention_days,
+            ),
+            // Unconfigured: the router/guard are on by default (ITEM-015/027)
+            // and payloads are captured for 30 days (ITEM-088).
+            None => (0, 0, None, true, true, 0.35, true, 30),
+        };
     json_ok(json!({
         "budget_limit_cents": limit,
         "current_spend_cents": spent,
@@ -240,6 +244,8 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "guard_enabled": guard,
         "router_enabled": router_enabled,
         "router_threshold": router_threshold,
+        "capture_payloads": capture,
+        "payload_retention_days": retention,
         "role": role,
     }))
 }
@@ -266,6 +272,8 @@ pub async fn tenant_config_set(
         guard_enabled: body.guard_enabled,
         router_enabled: body.router_enabled,
         router_threshold: body.router_threshold.clamp(0.0, 1.0),
+        capture_payloads: body.capture_payloads,
+        payload_retention_days: body.payload_retention_days.clamp(0, 3650),
     };
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => {
