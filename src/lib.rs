@@ -263,7 +263,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 /// Ok(Some(tenant)) = authenticated; Ok(None) = missing/invalid credentials;
 /// Err = store failure (caller should see 500, never a misleading 401).
 pub(crate) async fn authenticate(
-    state: &AppState,
+    state: &Arc<AppState>,
     headers: &axum::http::HeaderMap,
 ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
     let Some(auth) = headers.get(AUTHORIZATION) else {
@@ -278,7 +278,9 @@ pub(crate) async fn authenticate(
     if key.is_empty() {
         return Ok(None);
     }
-    state.tenant_store.tenant_by_api_key_hash(&sha256_hex(key)).await
+    // ITEM-092: cached for 1 s and invalidated on every key write, so the warm
+    // path is CPU-only while revocation stays immediate in this process.
+    state.hotpath.tenant_for_key(state, &sha256_hex(key)).await
 }
 
 /// SHA-256 hex digest. API keys are only ever stored/compared/logged in this

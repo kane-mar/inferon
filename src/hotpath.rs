@@ -37,6 +37,10 @@ pub struct Ttls {
     pub config: Duration,
     pub spend: Duration,
     pub warm: Duration,
+    /// Key-hash -> tenant. Short, and invalidated on every key write: a revoked
+    /// key stops working on the next request in this process. A second proxy
+    /// instance would lag by at most this TTL.
+    pub auth: Duration,
 }
 
 impl Default for Ttls {
@@ -45,6 +49,7 @@ impl Default for Ttls {
             config: Duration::from_secs(5),
             spend: Duration::from_secs(1),
             warm: Duration::from_secs(30),
+            auth: Duration::from_secs(1),
         }
     }
 }
@@ -85,6 +90,9 @@ impl TenantEntry {
 pub struct HotPath {
     ttls: Ttls,
     tenants: Mutex<HashMap<Uuid, Arc<Mutex<TenantEntry>>>>,
+    /// Key hash -> tenant. The one thing the request path would otherwise read
+    /// from Postgres; invalidation on key writes keeps revocation immediate.
+    auth: Mutex<HashMap<String, (Tenant, Instant)>>,
 }
 
 impl Default for HotPath {
@@ -102,6 +110,7 @@ impl HotPath {
         Self {
             ttls,
             tenants: Mutex::new(HashMap::new()),
+            auth: Mutex::new(HashMap::new()),
         }
     }
 
@@ -112,6 +121,47 @@ impl HotPath {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&tenant_id);
+        self.auth
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, (tenant, _)| tenant.id != tenant_id);
+    }
+
+    /// Drop one key's cached identity. Used when only the key id is known (the
+    /// operator revoke path); the tenant's other caches are unaffected.
+    pub fn invalidate_key(&self, key_id: Uuid) {
+        self.auth
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, (tenant, _)| tenant.api_key_id != Some(key_id));
+    }
+
+    /// Resolve a key hash to its tenant, cached for the (short) auth TTL. A miss
+    /// is one indexed lookup; a hit is pure memory.
+    pub async fn tenant_for_key(
+        &self,
+        state: &Arc<AppState>,
+        key_hash: &str,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+        {
+            let auth = self
+                .auth
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((tenant, at)) = auth.get(key_hash) {
+                if at.elapsed() < self.ttls.auth {
+                    return Ok(Some(tenant.clone()));
+                }
+            }
+        }
+        let tenant = state.tenant_store.tenant_by_api_key_hash(key_hash).await?;
+        if let Some(tenant) = &tenant {
+            self.auth
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(key_hash.to_string(), (tenant.clone(), Instant::now()));
+        }
+        Ok(tenant)
     }
 
     fn entry(&self, tenant_id: Uuid) -> Arc<Mutex<TenantEntry>> {

@@ -809,7 +809,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
 /// Resolve the caller's tenant from `x-api-key` (Anthropic), tolerating a
 /// Bearer token for OpenAI-compatible Anthropic gateways.
 async fn authenticate_anthropic(
-    state: &AppState,
+    state: &Arc<AppState>,
     headers: &axum::http::HeaderMap,
 ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
     let key = headers
@@ -817,7 +817,7 @@ async fn authenticate_anthropic(
         .and_then(|value| value.to_str().ok())
         .filter(|key| !key.is_empty());
     match key {
-        Some(key) => state.tenant_store.tenant_by_api_key_hash(&sha256_hex(key)).await,
+        Some(key) => state.hotpath.tenant_for_key(state, &sha256_hex(key)).await,
         None => authenticate(state, headers).await,
     }
 }

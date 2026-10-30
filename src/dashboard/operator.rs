@@ -403,7 +403,11 @@ pub async fn operator_key_revoke(
         return resp;
     }
     match state.tenant_store.revoke_api_key(key_id).await {
-        Ok(true) => json_ok(json!({"key_id": key_id.to_string(), "revoked": true})),
+        Ok(true) => {
+            // ITEM-092: the auth cache is keyed by hash, so drop by key id.
+            state.hotpath.invalidate_key(key_id);
+            json_ok(json!({"key_id": key_id.to_string(), "revoked": true}))
+        }
         Ok(false) => crate::json_error(
             StatusCode::NOT_FOUND,
             "key_not_found",

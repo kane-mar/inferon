@@ -115,7 +115,12 @@ pub async fn tenant_key_revoke(
         return forbidden();
     }
     match state.tenant_store.revoke_tenant_key(tenant_id, key_id).await {
-        Ok(true) => json_ok(json!({ "key_id": key_id.to_string(), "revoked": true })),
+        Ok(true) => {
+            // ITEM-092: drop the cached identity so the revoked key stops now.
+            state.hotpath.invalidate_key(key_id);
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "key_id": key_id.to_string(), "revoked": true }))
+        }
         Ok(false) => crate::json_error(
             StatusCode::NOT_FOUND,
             "key_not_found",

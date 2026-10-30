@@ -3131,3 +3131,35 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .unwrap();
         assert_eq!(fresh.route.url, "https://b.test/v1/chat/completions");
     }
+
+    #[tokio::test]
+    async fn invalidating_a_key_stops_it_immediately_despite_the_auth_cache() {
+        // ITEM-092 caches the key -> tenant lookup. The revoke handler drops it;
+        // this pins that a revoked key does not survive on a warm cache.
+        let state = test_state(&mock_upstream().await);
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let router = build_router(state.clone());
+        let body = r#"{"model":"content","messages":[{"role":"user","content":"hi"}]}"#;
+
+        let response = router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "the key works and is now cached");
+
+        let key_id = state.tenant_store.list_api_keys(tenant_id).await.unwrap()[0].id;
+        state.tenant_store.revoke_tenant_key(tenant_id, key_id).await.unwrap();
+        state.hotpath.invalidate_key(key_id);
+
+        let response = router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "a revoked key must not be served from the auth cache"
+        );
+    }

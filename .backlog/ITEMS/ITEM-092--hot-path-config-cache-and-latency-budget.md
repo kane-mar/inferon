@@ -59,9 +59,13 @@ decision and request parsing.
   disabled flag (5 s), warm affinity target (30 s). Writes invalidate the
   tenant snapshot from every dashboard/operator path; the TTL is the backstop for
   out-of-band changes.
-- **Authentication is deliberately not cached**: the key lookup stays one fresh
-  indexed query (0.22 ms measured on the host), so revocation is still immediate.
-  That is the single storage round trip a warm request pays.
+- **Authentication is cached too**, for 1 s: the first warm-path measurement with
+  only a config/route cache showed p50 1,382 µs (p95 5,992 µs) on the 1 vCPU host
+  — the auth query alone was 1–4 ms under contention. The key→tenant entry is
+  dropped by `invalidate_key`/`invalidate` from every revoke path, so a revoked
+  key stops on the next request in this process; a second instance would lag by
+  at most the 1 s TTL. This is the one place where the cache touches
+  authentication and it is deliberately short.
 
 **The suite**
 - `proxy_overhead_is_sub_millisecond_for_small_requests` (src/tests.rs): 60
