@@ -141,6 +141,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/v1/dashboard/api/datasets/purge",
             post(dashboard::purge),
         )
+        .route(
+            "/v1/dashboard/api/datasets/export",
+            get(dashboard::export),
+        )
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
         .route(
             "/v1/dashboard/api/providers/:provider_id/remove",

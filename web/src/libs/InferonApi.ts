@@ -435,6 +435,25 @@ export type ModelsResponse = { providers: ProviderModelsGroup[]; role: Role };
 export type TierPair = { frontier: string; cheap: string };
 export type ActiveTierPair = TierPair & { active: boolean };
 
+/** ITEM-086: one prompt/model cluster of qualified dataset pairs. */
+export type DatasetCluster = {
+  prompt_hash: string;
+  model: string;
+  requests: number;
+  qualified: number;
+  distinct_examples: number;
+  excluded: number;
+  excluded_by_reason: Record<string, number>;
+  spend_usd: string;
+  last_seen: string;
+};
+
+export type Datasets = {
+  window: { days: number };
+  role: Role;
+  clusters: DatasetCluster[];
+};
+
 export type RoutingResponse = {
   fallbacks: string[];
   tier_pairs: ActiveTierPair[];
@@ -609,6 +628,19 @@ export class InferonApi {
 
   byModel(days: number, cookie?: string): Promise<ByModel> {
     return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${windowQuery(days)}`, undefined, { cookie });
+  }
+
+  datasets(days: number, cookie?: string): Promise<Datasets> {
+    return this.request<Datasets>(
+      'GET',
+      `/v1/dashboard/api/datasets${windowQuery(days)}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  purgePayloads(cookie?: string): Promise<{ purged: number }> {
+    return this.request('POST', '/v1/dashboard/api/datasets/purge', {}, { cookie });
   }
 
   performance(days: number, cookie?: string): Promise<PerformanceReport> {

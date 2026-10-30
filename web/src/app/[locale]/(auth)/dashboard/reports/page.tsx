@@ -34,6 +34,11 @@ export default async function ReportsPage(props: {
       title: t('performance_title'),
       body: t('performance_body'),
     },
+    {
+      href: '/dashboard/datasets',
+      title: t('datasets_title'),
+      body: t('datasets_body'),
+    },
   ];
 
   return (

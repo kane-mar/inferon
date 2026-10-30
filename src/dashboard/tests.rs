@@ -1692,3 +1692,25 @@ async fn a_member_cannot_change_tier_pairs() {
         assert_eq!(listed["capture_payloads"], false);
         assert_eq!(listed["payload_retention_days"], 7);
     }
+
+    #[tokio::test]
+    async fn the_dataset_export_is_owner_only() {
+        let anonymous = crate::build_router(dashboard_state())
+            .oneshot(get(
+                "/v1/dashboard/api/datasets/export?prompt_hash=p&model=m",
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        let (state, token) = tenant_role_session("member").await;
+        let member = crate::build_router(state)
+            .oneshot(request_with_cookie(
+                "/v1/dashboard/api/datasets/export?prompt_hash=p&model=m",
+                &token,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(member.status(), axum::http::StatusCode::FORBIDDEN);
+    }

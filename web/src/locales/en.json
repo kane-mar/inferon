@@ -73,7 +73,8 @@
     "settings": "Settings",
     "spend": "Spend",
     "audit": "Cost audit",
-    "performance": "Performance"
+    "performance": "Performance",
+    "datasets": "Datasets"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -376,7 +377,9 @@
     "audit_title": "Cost audit",
     "audit_body": "The six named cost findings computed from your traffic, refreshed live.",
     "performance_title": "Performance",
-    "performance_body": "What the proxy itself adds against its sub-millisecond contract, the cache behind it, and where the time goes."
+    "performance_body": "What the proxy itself adds against its sub-millisecond contract, the cache behind it, and where the time goes.",
+    "datasets_title": "Datasets",
+    "datasets_body": "The verified examples your traffic produced, per prompt and model — with the JSONL download and the reasons the rest did not qualify."
   },
   "SettingsPage": {
     "title_bar": "Settings",
@@ -482,5 +485,32 @@
     "requests": "Requests",
     "no_samples": "No measured requests in this window.",
     "not_enough_samples": "not enough samples yet — {count} needed"
+  },
+  "DatasetsPage": {
+    "title_bar": "Datasets",
+    "title_bar_description": "Verified examples from production traffic: how many, what they cost, why the rest did not qualify, and a JSONL download.",
+    "examples": "Verified examples",
+    "examples_help": "Distinct prompt/completion pairs (exact dedupe)",
+    "clusters": "Prompt clusters",
+    "spend": "Spend on these prompts",
+    "spend_help": "Across the window, including excluded traffic",
+    "excluded": "Excluded",
+    "by_prompt": "By prompt and model",
+    "prompt": "Prompt",
+    "model": "Model",
+    "requests": "Requests",
+    "qualified": "Qualified",
+    "distinct": "Distinct",
+    "why": "Why excluded",
+    "last_seen": "Last seen",
+    "export": "Export JSONL",
+    "empty": "No captured pairs yet. Traffic with a stored completion and no thumbs-down qualifies; check that raw payload storage is on.",
+    "purge": "Purge stored payloads",
+    "purging": "Purging…",
+    "purge_confirm": "Delete every stored payload now? Costs are kept; pairs are not.",
+    "purged": "{count} row(s) purged.",
+    "purge_error": "Could not purge — please retry.",
+    "purge_yes": "Delete payloads",
+    "cancel": "Cancel"
   }
 }

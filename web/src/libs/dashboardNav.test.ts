@@ -22,6 +22,7 @@ describe('dashboardNav — five sections, details in submenus', () => {
       '/dashboard/audit',
       '/dashboard/quality',
       '/dashboard/performance',
+      '/dashboard/datasets',
     ]);
   });
 

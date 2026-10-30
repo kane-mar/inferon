@@ -47,6 +47,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
     audit: t('audit'),
     quality: t('quality'),
     performance: t('performance'),
+    datasets: t('datasets'),
     connect: t('connect'),
     keys: t('keys'),
     members: t('members'),

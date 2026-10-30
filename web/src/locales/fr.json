@@ -73,7 +73,8 @@
     "settings": "Paramètres",
     "spend": "Dépenses",
     "audit": "Audit de coûts",
-    "performance": "Performance"
+    "performance": "Performance",
+    "datasets": "Jeux de données"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -376,7 +377,9 @@
     "audit_title": "Audit de coûts",
     "audit_body": "Les six constats de coût nommés, calculés à partir de votre trafic et actualisés en direct.",
     "performance_title": "Performance",
-    "performance_body": "Ce que le proxy ajoute lui-même face à son contrat du sous-milliseconde, le cache derrière, et où passe le temps."
+    "performance_body": "Ce que le proxy ajoute lui-même face à son contrat du sous-milliseconde, le cache derrière, et où passe le temps.",
+    "datasets_title": "Jeux de données",
+    "datasets_body": "Les exemples vérifiés produits par votre trafic, par prompt et par modèle — avec le téléchargement JSONL et les raisons des exclusions."
   },
   "SettingsPage": {
     "title_bar": "Paramètres",
@@ -482,5 +485,32 @@
     "requests": "Requêtes",
     "no_samples": "Aucune requête mesurée sur cette période.",
     "not_enough_samples": "pas encore assez d'échantillons — {count} nécessaires"
+  },
+  "DatasetsPage": {
+    "title_bar": "Jeux de données",
+    "title_bar_description": "Exemples vérifiés issus du trafic de production : combien, leur coût, pourquoi le reste n'a pas qualifié, et un téléchargement JSONL.",
+    "examples": "Exemples vérifiés",
+    "examples_help": "Paires prompt/complétion distinctes (déduplication exacte)",
+    "clusters": "Groupes de prompts",
+    "spend": "Dépense sur ces prompts",
+    "spend_help": "Sur la période, trafic exclu compris",
+    "excluded": "Exclus",
+    "by_prompt": "Par prompt et modèle",
+    "prompt": "Prompt",
+    "model": "Modèle",
+    "requests": "Requêtes",
+    "qualified": "Qualifiés",
+    "distinct": "Distincts",
+    "why": "Raison d'exclusion",
+    "last_seen": "Vu le",
+    "export": "Exporter JSONL",
+    "empty": "Aucune paire capturée. Le trafic dont la complétion est stockée et qui n'a pas de pouce vers le bas qualifie ; vérifiez que le stockage des charges utiles est actif.",
+    "purge": "Purger les charges utiles",
+    "purging": "Purge…",
+    "purge_confirm": "Supprimer maintenant toutes les charges utiles ? Les coûts sont conservés, pas les paires.",
+    "purged": "{count} ligne(s) purgée(s).",
+    "purge_error": "Impossible de purger — veuillez réessayer.",
+    "purge_yes": "Supprimer",
+    "cancel": "Annuler"
   }
 }
