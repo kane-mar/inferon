@@ -476,6 +476,7 @@
     "by_model": "By model",
     "model": "Model",
     "requests": "Requests",
-    "no_samples": "No measured requests in this window."
+    "no_samples": "No measured requests in this window.",
+    "not_enough_samples": "not enough samples yet — {count} needed"
   }
 }

@@ -77,7 +77,7 @@ export default async function PerformancePage(props: {
           label={t('overhead_p50')}
           value={us(overhead.p50_us)}
           hint={contract.p50_met == null
-            ? t('no_samples')
+            ? t('not_enough_samples', { count: contract.min_samples })
             : contract.p50_met
               ? t('within_contract')
               : t('over_contract')}

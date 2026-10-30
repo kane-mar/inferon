@@ -12,6 +12,9 @@ use super::*;
 /// a broken cache (which measured 6–28 ms) rather than a scheduling bound.
 const P50_BUDGET_US: i64 = 1_000;
 const P95_GUARD_US: i64 = 5_000;
+/// A percentile over a handful of samples is not a verdict. Below this the
+/// report says "not enough samples" rather than met/not-met.
+const MIN_SAMPLES: i64 = 20;
 
 /// `(samples, under_1ms, p50, p95, p99)` of the proxy's own overhead.
 type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>);
@@ -100,6 +103,7 @@ pub async fn performance(
     };
 
     let under_1ms_rate = (samples > 0).then(|| under_1ms as f64 / samples as f64);
+    let sufficient = samples >= MIN_SAMPLES;
     let proxy_share = match (p50_us, total_p50) {
         (Some(proxy), Some(total)) if total > 0.0 => Some(proxy as f64 / (total * 1000.0)),
         _ => None,
@@ -110,8 +114,9 @@ pub async fn performance(
         "contract": {
             "p50_us": P50_BUDGET_US,
             "p95_us": P95_GUARD_US,
-            "p50_met": p50_us.map(|p50| p50 < P50_BUDGET_US),
-            "p95_met": p95_us.map(|p95| p95 < P95_GUARD_US),
+            "min_samples": MIN_SAMPLES,
+            "p50_met": sufficient.then(|| p50_us.is_some_and(|p50| p50 < P50_BUDGET_US)),
+            "p95_met": sufficient.then(|| p95_us.is_some_and(|p95| p95 < P95_GUARD_US)),
         },
         "overhead": {
             "samples": samples,

@@ -173,6 +173,8 @@ export type PerformanceReport = {
   contract: {
     p50_us: number;
     p95_us: number;
+    /** Below this many samples the report withholds a verdict. */
+    min_samples: number;
     p50_met: boolean | null;
     p95_met: boolean | null;
   };

@@ -476,6 +476,7 @@
     "by_model": "Par modèle",
     "model": "Modèle",
     "requests": "Requêtes",
-    "no_samples": "Aucune requête mesurée sur cette période."
+    "no_samples": "Aucune requête mesurée sur cette période.",
+    "not_enough_samples": "pas encore assez d'échantillons — {count} nécessaires"
   }
 }
