@@ -83,5 +83,17 @@ decision and request parsing.
   fails the deployment run if either budget is exceeded. It prints the measured
   numbers to the CI log every time.
 
-**Not yet closed**: the live numbers still have to land on a deploy; the item
-stays open until `perf-check.sh` is green on the durable host.
+**Live (2026-10-30, CI run 162):** `warm proxy overhead: 41 requests · p50 89 µs ·
+p95 1,067 µs` — green, with p50 11× inside the budget. Revocation was checked
+against the auth cache on the live host: a key that authenticated (`400` from the
+upstream), revoked through the operator API, then got `401` on the next request.
+
+**Honest scope:** the first request after an idle period pays the config load —
+measured **~14 ms** (`proxy_us`) on the real tenant — because the snapshot is
+cold. A tenant at one request a minute sees that, not the warm number. The
+contract says "warm request" and defines warm as within the TTLs.
+
+**Still open against the original ACs:** cache hit/miss/age counters on the
+operator metrics endpoint, a per-stage timing breakdown at debug level, and the
+kill switch (the cache is always on today). None of them affect the claim, which
+is now enforced.

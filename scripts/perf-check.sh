@@ -107,7 +107,7 @@ for value in "$COUNT" "$P50" "$P95"; do
     esac
 done
 
-echo "proxy overhead: ${COUNT} requests · p50 ${P50}us · p95 ${P95}us"
+echo "warm proxy overhead: ${COUNT} requests · p50 ${P50}us · p95 ${P95}us"
 echo "budget:          p50 < ${P50_BUDGET}us · p95 < ${P95_BUDGET}us"
 
 if [ "${COUNT:-0}" -lt "$REQUESTS" ]; then

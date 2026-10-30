@@ -54,9 +54,15 @@ Caddy routes `/v1/*`, `/auth/*`, `/healthz` → `proxy`; everything else → `we
 ## Performance contract
 
 The proxy's own overhead — request start to just before the upstream dispatch,
-recorded as `traces.proxy_us` — is **p50 < 1 ms and p95 < 2 ms** for a warm
-request. It excludes the upstream and the response body; it includes
+recorded as `traces.proxy_us` — is **p50 < 1 ms and p95 < 2 ms for a warm
+request**. It excludes the upstream and the response body; it includes
 authentication, tenant config, routing, the budget/router decision and parsing.
+
+"Warm" is precise: within the cache TTLs (key and spend 1 s, config 5 s), i.e.
+inside a burst of traffic. The **first** request after an idle period pays the
+config load instead — measured at ~14 ms on the 1 vCPU host — so a tenant with
+one request a minute sees that cold cost, not the warm overhead. The claim is
+about what the proxy adds to a request; it is not a claim that Postgres is free.
 
 This is not a marketing number:
 
