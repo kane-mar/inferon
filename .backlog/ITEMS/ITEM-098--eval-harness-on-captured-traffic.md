@@ -35,5 +35,4 @@ there is no way to run a model comparison over captured inputs.
   the guard/outcome signals and say so.
 
 **Depends on** ITEM-086; feeds ITEM-076.
-**Ranking note.** Fourteenth: needed before any adapter is promoted, but the
-trainer it gates is itself gated on Slice 3 infra.
+**Ranking note.** Rank **13** of 22 · V3/E3 — needed before any adapter is promoted, but its consumer (076) is gated on Slice 3 infra.

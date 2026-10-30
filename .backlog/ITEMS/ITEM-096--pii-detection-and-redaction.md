@@ -34,5 +34,4 @@ stored by default (see ITEM-088).
   discipline as ITEM-091.
 - Do not log a match value anywhere (only the class and a count).
 
-**Ranking note.** Twelfth: a prerequisite for selling the dataset to regulated
-tenants, but not part of the brief's edge.
+**Ranking note.** Rank **12** of 22 · V3/E2.5 — a gate for regulated datasets; parity, but its value rises with 087.

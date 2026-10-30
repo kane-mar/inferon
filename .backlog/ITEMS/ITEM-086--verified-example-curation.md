@@ -39,4 +39,4 @@ example, no per-prompt count, and no dedupe.
 - Near-duplicate dedupe is deliberately out of scope — that is ITEM-089.
 
 **Depends on** ITEM-085 (completions must exist to qualify).
-**Ranking note.** Second: it turns captured bytes into a countable asset.
+**Ranking note.** Rank **2** of 22 · V5/E2 — turns captured bytes into a countable asset and defines "verified"; 087 depends on it.

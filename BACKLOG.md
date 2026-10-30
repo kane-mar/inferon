@@ -12,32 +12,33 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
-Active work is listed first, in rank order; then the gated/staged items; then
-delivered history.
+Single list, ordered by value then effort. The 22 undelivered items come first,
+in rank order; the six that are **gated** sit at the bottom of that list. Delivered
+history follows.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-085 | Persist streamed completions | feature | **new (2026-10-30)** — claim: "the proxy passively inspects completions". Today **12/774** traces have one: both stream paths store `raw_completion: None`, so there are no instruction pairs for the dominant traffic mode. Bounded capture from the existing SSE tap (content + tool calls, size cap, abort-safe) |
 | ITEM-086 | Verified-example curation and per-prompt counts | feature | **new (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
-| ITEM-087 | Dataset surface and JSONL export | feature | **new (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
 | ITEM-088 | Retention and consent for captured payloads | feature | **new (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
+| ITEM-087 | Dataset surface and JSONL export | feature | **new (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
 | ITEM-092 | Hot-path config cache and latency budget | improvement | **new (2026-10-30)** — claim: "sub-millisecond wire latency". Measured **p50 12 ms / p95 35 ms** (small requests) with ~10 store reads per request. One tenant-config snapshot (TTL ≤5 s) + route cache; spend stays fresh; a measured budget in CI |
-| ITEM-089 | Semantic task signatures for grouping | feature | **new (2026-10-30)** — claim: "grouped by task signature". Grouping is an exact hash; the ONNX embedder has no consumer. Embed → cluster → store cluster id; `NoEmbedder` falls back to the hash; composes with ITEM-029 |
-| ITEM-090 | In-flight payload lint (advisory) | feature | **new (2026-10-30)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". The linter is post-hoc only. Pre-dispatch findings traced with wasted tokens/USD, advisory (no rewrite), bounded cost, kill switch |
 | ITEM-093 | Conversation and transaction grouping | feature | **new (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
+| ITEM-090 | In-flight payload lint (advisory) | feature | **new (2026-10-30)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". The linter is post-hoc only. Pre-dispatch findings traced with wasted tokens/USD, advisory (no rewrite), bounded cost, kill switch |
+| ITEM-089 | Semantic task signatures for grouping | feature | **new (2026-10-30)** — claim: "grouped by task signature". Grouping is an exact hash; the ONNX embedder has no consumer. Embed → cluster → store cluster id; `NoEmbedder` falls back to the hash; composes with ITEM-029 |
 | ITEM-091 | Opt-in context pruning and payload rewriting | feature | **new (2026-10-30)** — claim: "dynamically pruning context". Nothing rewrites messages today. Off by default, traced rewrite record, holdout-measured, auto-off on quality regression, versioned policy |
 | ITEM-094 | Cross-format translation (any SDK to any backend) | feature | **new (2026-10-30)** — LiteLLM parity: `surface_mismatch` refuses an Anthropic SDK against an OpenAI/DeepSeek provider and vice versa. Pure translation module per direction, streaming + tools + errors, provider declares its surfaces |
 | ITEM-095 | Per-key rate limits (RPM/TPM) | feature | **new (2026-10-30)** — Portkey parity: spend caps only, no velocity limits. Per-key/tenant RPM + TPM, 429 with `Retry-After`, restart-safe counters, traced and alerted |
 | ITEM-096 | PII detection and optional redaction | feature | **new (2026-10-30)** — Portkey parity: raw payloads stored verbatim, no detection. Deterministic pattern detection with counts by class; opt-in redaction in storage and (separately) on the wire; export honours it |
-| ITEM-097 | Prompt registry and versioning | feature | **new (2026-10-30)** — Langfuse parity: exact content hash only, no identity/version/diff. Name a prompt, see versions and outcomes per version, read-only |
 | ITEM-098 | Eval harness on captured traffic | feature | **new (2026-10-30)** — Langfuse parity + the flywheel's quality gate. Pin a gold set from 086, run a model comparison, store per-case scores; regression verdict feeds ITEM-076's `Gate` |
-| ITEM-099 | Latency and quality heatmap | improvement | **new (2026-10-30)** — Langfuse parity: time series exist, no matrix view. Model × time p95/error heatmap over the existing aggregates; no new hot-path data |
 | ITEM-100 | Multi-provider load balancing | feature | **new (2026-10-30)** — LiteLLM parity: health-weighted best-provider pick, no distribution. Seeded weighted/round-robin across healthy providers; single-provider models unchanged |
+| ITEM-097 | Prompt registry and versioning | feature | **new (2026-10-30)** — Langfuse parity: exact content hash only, no identity/version/diff. Name a prompt, see versions and outcomes per version, read-only |
+| ITEM-099 | Latency and quality heatmap | improvement | **new (2026-10-30)** — Langfuse parity: time series exist, no matrix view. Model × time p95/error heatmap over the existing aggregates; no new hot-path data |
+| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
+| ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **staged** — gated on ITEM-029: map task clusters to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
-| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
-| ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 | ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 | ITEM-044 | Model catalog & per-provider selection | feature | **done + reworked (2026-10-07)** — catalog + `tenant_models` selection **per provider**; models live under `/dashboard/providers` (the standalone Models tab is gone); provider resolution is model-aware; disabled models refused (typed 400) |
@@ -80,16 +81,19 @@ delivered history.
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 
-_Last updated: 2026-10-30 (differentiation gaps captured — ITEM-085..100)_ —
-**Next pull is ITEM-085** (persist streamed completions), then 086 → 087 → 088 →
-092. Reading the new items: the **distillation pillar** is 085–089, the
-**in-flight linting pillar** is 090–091, the **runtime and unit-of-work pillar**
-is 092–093; 094–100 are commodity parity and rank below the edge. Each item
-carries the external claim it closes, the measured current state, and why it sits
-where it does.
+_Last updated: 2026-10-30 (re-ranked by value and effort — single list, gated at the bottom)_ —
+**Next pull is ITEM-085** (persist streamed completions), then 086 → 088 → 087 →
+092 → 093.
 
-Nothing from the earlier roadmap moved: **ITEM-029** still needs real task
-traffic for centroids (embedder gate cleared); **030/072** need 029; **ITEM-076**
+Ordering rule for the 22 undelivered items: **value first, effort as the
+tie-breaker**, dependencies overriding both (087 cannot precede 086/088; 090 needs
+092's prompt cache; 091 waits for 090's evidence). Distillation (085–089, 094)
+outranks parity (095–100) because it is the claimed edge, not because it is
+cheaper. The six blocked items sit at the bottom of the same list: **076 → 032**
+complete the flywheel but need Slice 3 infra; **029 → 030/072** need real task
+traffic; **084** stays conditional.
+
+Nothing from the earlier roadmap moved: **030/072** need 029; **ITEM-076**
 (train / gold-set / hot-swap) and **ITEM-032** (PagedLoRA) need the Slice 3
 infra; **ITEM-084** stays staged. ITEM-063 (cache affinity) and ITEM-064
 (adaptive policy loop) capture the closed-loop design; 064 composes

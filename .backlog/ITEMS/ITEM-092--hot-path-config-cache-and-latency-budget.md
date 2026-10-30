@@ -40,5 +40,4 @@ scrutiny.
 - If the target cannot be met on the 1 GB host, say so in the item close-out and
   adjust the claim — that is a valid outcome.
 
-**Ranking note.** Fifth: the cheapest way to make (or honestly withdraw) the
-runtime claim.
+**Ranking note.** Rank **5** of 22 · V4/E2.5 — makes the runtime claim honest (or withdraws it) and gives 090 the prompt cache it needs.

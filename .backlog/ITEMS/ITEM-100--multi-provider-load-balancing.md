@@ -31,5 +31,4 @@ not share load — the second is only used when the first fails.
 - Do not add a background balancer; the decision is per request, from cached state
   (ITEM-092).
 
-**Ranking note.** Sixteenth: real but commodity; health weighting already covers the
-failure case.
+**Ranking note.** Rank **14** of 22 · V2/E2 — health weights already cover the failure case; distribution is convenience.

@@ -38,4 +38,4 @@ staged and gated on traffic.
   synthetic-corpus test, not wait for production volume.
 
 **Depends on** ITEM-085/086 for the pairs; independent of ITEM-029's routing use.
-**Ranking note.** Sixth: the last piece of "clean, deduplicated, grouped by task".
+**Ranking note.** Rank **8** of 22 · V3.5/E3 — grouping quality; the flywheel works on exact hashes until this lands, so it does not block 087.

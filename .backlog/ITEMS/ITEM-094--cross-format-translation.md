@@ -41,4 +41,4 @@ even though the brief treats routing/translation as commodity.
 - The guard and router remain OpenAI-shaped; define explicitly which side of the
   translation they run on.
 
-**Ranking note.** Tenth: the largest commodity-parity gap, but not the edge.
+**Ranking note.** Rank **10** of 22 · V4/E4 — the biggest adoption unlock (any SDK, any backend), but commodity parity with a heavy test surface.

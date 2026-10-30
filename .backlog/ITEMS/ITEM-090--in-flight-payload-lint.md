@@ -40,4 +40,4 @@ check, no per-request visibility.
 - Keep the post-hoc linter: it catches distribution-level waste the pre-flight check
   cannot (e.g. cache misses across a day).
 
-**Ranking note.** Seventh: the pre-flight half of the cost-linting claim.
+**Ranking note.** Rank **7** of 22 · V3.5/E2.5 — the pre-flight half of the linting claim; after 092 because it needs the prompt cache.

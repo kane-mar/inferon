@@ -40,4 +40,4 @@ budget zone) but never the *messages*: no truncation, no dedupe, no context budg
   second config mechanism.
 
 **Depends on** ITEM-090 (evidence), ITEM-064 (versioned policy), ITEM-092 (cache).
-**Ranking note.** Ninth: high value, high risk; after the advisory lint.
+**Ranking note.** Rank **9** of 22 · V4/E4 — high savings, highest risk — it changes answers; only after 090 proves which payloads are redundant, and with versioned rollback.

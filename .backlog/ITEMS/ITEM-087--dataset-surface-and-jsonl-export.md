@@ -39,4 +39,4 @@ data the tenant did not consent to keep.
   scrub.
 
 **Depends on** ITEM-085, ITEM-086, ITEM-088 (consent gate).
-**Ranking note.** Third: this is the demonstrable moment of the pitch.
+**Ranking note.** Rank **4** of 22 · V5/E2.5 — the demonstrable moment of the pitch; needs 086 (counts) and 088 (consent).

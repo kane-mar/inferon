@@ -41,5 +41,4 @@ SSE tap already parses every frame for usage/outcome.
 - Capture follows the tenant's capture switch (ITEM-088); the switch defaults to
   on for parity with today's raw-prompt storage.
 
-**Ranking note.** First: it is small, it unblocks every distillation item, and
-without it the brief's central claim cannot be demonstrated.
+**Ranking note.** Rank **1** of 22 · V5/E1 — the smallest change that unblocks every distillation item — without it the edge cannot be demonstrated.

@@ -35,4 +35,4 @@ per-transaction cost, turn count and retry overhead cannot be computed.
 - Reject malformed ids with a typed 400? No — ignore and trace it; grouping is
   best-effort and must never fail a request.
 
-**Ranking note.** Eighth: needed before any "agentic-loop" performance or cost claim.
+**Ranking note.** Rank **6** of 22 · V3/E1.5 — the cheapest item after 085: names the transaction, enabling agentic-loop economics and multi-turn examples.

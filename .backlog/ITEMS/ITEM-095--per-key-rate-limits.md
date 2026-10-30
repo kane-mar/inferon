@@ -34,4 +34,4 @@ and the budget breaker; there is no request or token rate limit and no 429 with
   estimate pre-flight and reconcile. Document the choice in the item.
 - Keep it off the hot path when unset (no extra query for tenants with no limits).
 
-**Ranking note.** Eleventh: enterprise requirement, but not the differentiator.
+**Ranking note.** Rank **11** of 22 · V3/E2.5 — enterprise velocity protection; parity.

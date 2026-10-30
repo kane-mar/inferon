@@ -34,5 +34,4 @@ unrelated hash with no link to its predecessor.
   first-seen.
 - A diff needs the raw prompt, so it obeys ITEM-088's capture switch.
 
-**Ranking note.** Thirteenth: useful, but the brief treats prompt tooling as
-observability parity.
+**Ranking note.** Rank **15** of 22 · V2/E2 — prompt tooling — observability parity.

@@ -34,4 +34,4 @@ of what is stored.
 - The capture switch must be readable on the hot path — it belongs in the same
   config snapshot as ITEM-092.
 
-**Ranking note.** Fourth: the gate that makes ITEM-087 shippable to real tenants.
+**Ranking note.** Rank **3** of 22 · V4/E2 — a cheap consent/retention gate that must exist before 087 exposes data to tenants.

@@ -251,3 +251,37 @@ Captured (rank order, with the claim each closes):
 
 Deliberately **not** duplicated: "route to a distilled adapter" is ITEM-032 and
 "real trainer + gold set" is ITEM-076; the new items reference them.
+
+## 2026-10-30 — Re-rank: one list, ordered by value then effort, gated at the bottom
+
+The active set was previously ordered by narrative pillar, and the gated items sat
+between active and delivered work. PO asked for a single list ordered by value and
+effort, with blocked work at the bottom.
+
+Scored each item value (1–5) and effort (1–5); dependencies override the score
+where an item cannot usefully start before another. Final order and the reason:
+
+1. **085** V5/E1 — unblocks every distillation item.
+2. **086** V5/E2 — makes captured traffic a countable asset; 087 needs it.
+3. **088** V4/E2 — cheap consent/retention gate; must precede 087's exposure.
+4. **087** V5/E2.5 — the demonstrable moment (needs 086 + 088).
+5. **092** V4/E2.5 — makes the latency claim honest; 090 needs its prompt cache.
+6. **093** V3/E1.5 — cheapest remaining item; names the transaction.
+7. **090** V3.5/E2.5 — the pre-flight linting half.
+8. **089** V3.5/E3 — grouping quality; does not block 087.
+9. **091** V4/E4 — highest value/highest risk (changes answers); after 090's evidence.
+10. **094** V4/E4 — adoption unlock, but commodity parity.
+11. **095** V3/E2.5 — rate limits (parity).
+12. **096** V3/E2.5 — PII (parity; value rises with 087).
+13. **098** V3/E3 — eval gate; its consumer (076) is infra-gated.
+14. **100** V2/E2 — load balancing (health weights already cover failure).
+15. **097** V2/E2 — prompt tooling (parity).
+16. **099** V1.5/E1 — heatmap: cheap, lowest value.
+
+Gated, at the bottom of the same list, ordered by the value they would add when
+unblocked: **076** (training/gold set) → **032** (adapter serving) → **029**
+(centroids) → **030** (solver) → **072** (cluster preference) → **084** (connector).
+029 must precede 030/072.
+
+Every item's `**Ranking note.**` now carries its rank and V/E score, so the order is
+auditable from the item file alone.

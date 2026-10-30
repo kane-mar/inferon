@@ -27,4 +27,4 @@ dashboard renders line charts and a provider table. No matrix view.
 - Respect the existing design primitives (`Card`, chart components) so it does not
   become a one-off.
 
-**Ranking note.** Fifteenth: cheap, visible, but pure parity.
+**Ranking note.** Rank **16** of 22 · V1.5/E1 — cheap but the lowest value here: presentation over data that already exists.
