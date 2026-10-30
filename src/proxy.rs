@@ -986,6 +986,9 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         policy_version: meta.policy_version,
         proxy_ms: meta.proxy_ms,
         proxy_us: meta.proxy_us,
+        example_state: None,
+        example_reason: None,
+        completion_hash: None,
         is_local: meta.is_local,
     }
 }

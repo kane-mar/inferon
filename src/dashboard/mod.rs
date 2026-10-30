@@ -5,8 +5,10 @@
 //! renders no HTML. Tenant views live under `/v1/dashboard/api/*`; platform-wide
 //! operator views under `/v1/dashboard/api/operator/*`.
 
+mod datasets;
 mod performance;
 mod queries;
+pub use datasets::*;
 pub use performance::*;
 pub use queries::*;
 

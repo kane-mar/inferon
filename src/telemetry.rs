@@ -71,6 +71,12 @@ pub struct TraceMessage {
     pub proxy_ms: Option<i64>,
     /// ITEM-092: the same overhead in microseconds (the performance contract).
     pub proxy_us: Option<i64>,
+    /// ITEM-086: dataset qualification, decided at write time. `None` when no
+    /// completion was captured (there is no pair to qualify or exclude).
+    pub example_state: Option<&'static str>,
+    pub example_reason: Option<&'static str>,
+    /// ITEM-086: stable identity of the captured completion (exact dedupe).
+    pub completion_hash: Option<String>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -142,8 +148,9 @@ impl TraceSink for PostgresTraceSink {
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
-                    proxy_ms, proxy_us, raw_completion_capped
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)"#,
+                    proxy_ms, proxy_us, raw_completion_capped,
+                    example_state, example_reason, completion_hash
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -175,6 +182,9 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.policy_version)
             .bind(msg.proxy_ms.map(|t| t as i32))
             .bind(msg.proxy_us)
+            .bind(msg.example_state)
+            .bind(msg.example_reason)
+            .bind(msg.completion_hash.as_deref())
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {
@@ -274,6 +284,12 @@ pub async fn telemetry_worker(
                         cost::warn_if_unpriced(&msg.request_model);
                     }
                     msg.waste_detected = linter::lint(&msg, repeat_count);
+                    // ITEM-086: qualify the captured pair for the dataset surface.
+                    if let Some(classification) = crate::datasets::classify(&msg) {
+                        msg.example_state = Some(classification.state);
+                        msg.example_reason = classification.reason;
+                        msg.completion_hash = classification.completion_hash;
+                    }
                     // ITEM-053: cost with caching, and the saving vs no cache.
                     let cached = msg.cached_prompt_tokens.unwrap_or(0);
                     msg.cache_savings_usd = cost::trace_cache_savings(

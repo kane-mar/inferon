@@ -41,6 +41,7 @@ pub mod alerts;
 pub mod budget;
 pub mod capture;
 pub mod cost;
+pub mod datasets;
 pub mod evolution;
 pub mod guard;
 pub mod hotpath;
@@ -134,6 +135,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/performance", get(dashboard::performance))
+        .route("/v1/dashboard/api/datasets", get(dashboard::datasets))
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
         .route(
             "/v1/dashboard/api/providers/:provider_id/remove",

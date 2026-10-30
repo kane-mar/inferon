@@ -214,6 +214,15 @@ pub(crate) fn validate_sse_container(bytes: &[u8]) -> Result<(), GuardReason> {
 /// container integrity first, then schema conformance of the extracted
 /// content against the request's contract. Returns the reason the response
 /// must not reach the client.
+/// ITEM-086: does captured assistant content satisfy `schema`? Used by the
+/// dataset qualification pass, which must verify pairs it did not guard.
+pub fn content_matches_schema(content: &str, schema: &Value) -> bool {
+    let Ok(instance) = serde_json::from_str::<Value>(content) else {
+        return false;
+    };
+    compiled_validator(schema).is_ok_and(|validator| validator.validate(&instance).is_ok())
+}
+
 pub fn check_guarded_sse(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
     validate_sse_container(bytes)?;
     validate_content(bytes, schema)

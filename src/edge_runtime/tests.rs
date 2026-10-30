@@ -35,6 +35,9 @@
             policy_version: None,
             proxy_ms: None,
                 proxy_us: None,
+                example_state: None,
+                example_reason: None,
+                completion_hash: None,
         }
     }
 
