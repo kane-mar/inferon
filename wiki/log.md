@@ -58,3 +58,9 @@
 - Disposition: Update
 - Raw: raw/llm-inference/2026-10-11-customer-hosted-connectivity-decision.md
 - Updated: customer-hosted-llms.md (renamed from local-llm-hosting-and-edge-connector.md; B deferred for latency)
+
+## [2026-10-30] ingest | Competitive Positioning Brief: the Defensible Edge
+- Disposition: New
+- Raw: raw/llm-inference/2026-10-30-competitive-positioning.md
+- Created: inferon-differentiation-gaps.md (claim vs measured state; 16 gap items)
+- Updated: BACKLOG.md (product goal + ITEM-085..100)
