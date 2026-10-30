@@ -4,7 +4,7 @@ import { PageHeader } from '@/features/shell/PageHeader';
 import { Link } from '@/libs/I18nNavigation';
 import { currentSession } from '@/libs/session';
 
-/** The Reports hub: the detail behind the dashboard, in three places. */
+/** The Reports hub: the detail behind the dashboard, in four places. */
 export default async function ReportsPage(props: {
   params: Promise<{ locale: string }>;
 }) {
@@ -28,6 +28,11 @@ export default async function ReportsPage(props: {
       href: '/dashboard/quality',
       title: t('quality_title'),
       body: t('quality_body'),
+    },
+    {
+      href: '/dashboard/performance',
+      title: t('performance_title'),
+      body: t('performance_body'),
     },
   ];
 

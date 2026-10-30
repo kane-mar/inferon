@@ -14,13 +14,14 @@ describe('dashboardNav — five sections, details in submenus', () => {
     ]);
   });
 
-  it('puts the spend, leak and quality reports under Reports', () => {
+  it('puts the spend, leak, quality and performance reports under Reports', () => {
     const reports = dashboardNav(false).find(item => item.href === '/dashboard/reports');
 
     expect(hrefs(reports?.children ?? [])).toEqual([
       '/dashboard/reports/spend',
       '/dashboard/audit',
       '/dashboard/quality',
+      '/dashboard/performance',
     ]);
   });
 

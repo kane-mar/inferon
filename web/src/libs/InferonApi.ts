@@ -142,6 +142,61 @@ export type Quality = {
   prompts: QualityPromptRow[];
 };
 
+/** ITEM-092: the performance report — proxy overhead first, then the rest. */
+export type PerformanceCacheCount = {
+  hits: number;
+  misses: number;
+  hit_rate: number | null;
+};
+
+export type PerformanceCache = {
+  auth: PerformanceCacheCount;
+  config: PerformanceCacheCount;
+  route: PerformanceCacheCount;
+  warm: PerformanceCacheCount;
+  spend: PerformanceCacheCount;
+  invalidations: number;
+  tenants: number;
+};
+
+export type PerformanceModelRow = {
+  model: string;
+  requests: number;
+  proxy_p50_us: number | null;
+  proxy_p95_us: number | null;
+  total_p50_ms: number | null;
+  total_p95_ms: number | null;
+};
+
+export type PerformanceReport = {
+  window: { days: number; offset_days: number };
+  contract: {
+    p50_us: number;
+    p95_us: number;
+    p50_met: boolean | null;
+    p95_met: boolean | null;
+  };
+  overhead: {
+    samples: number;
+    under_1ms: number;
+    under_1ms_rate: number | null;
+    p50_us: number | null;
+    p95_us: number | null;
+    p99_us: number | null;
+  };
+  latency: {
+    total_p50_ms: number | null;
+    total_p95_ms: number | null;
+    total_p99_ms: number | null;
+    ttft_p50_ms: number | null;
+    ttft_p95_ms: number | null;
+    proxy_share: number | null;
+  };
+  /** Process-wide, operator-only; `null` for a tenant reader. */
+  cache: PerformanceCache | null;
+  by_model: PerformanceModelRow[];
+};
+
 export type PromptRow = {
   system_prompt_hash: string;
   requests: number;
@@ -546,6 +601,15 @@ export class InferonApi {
 
   byModel(days: number, cookie?: string): Promise<ByModel> {
     return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${windowQuery(days)}`, undefined, { cookie });
+  }
+
+  performance(days: number, cookie?: string): Promise<PerformanceReport> {
+    return this.request<PerformanceReport>(
+      'GET',
+      `/v1/dashboard/api/performance${windowQuery(days)}`,
+      undefined,
+      { cookie },
+    );
   }
 
   quality(days: number, cookie?: string): Promise<Quality> {

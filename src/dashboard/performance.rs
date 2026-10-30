@@ -1,0 +1,161 @@
+//! The performance report (ITEM-092): what the proxy itself adds, and whether
+//! the sub-millisecond contract holds.
+//!
+//! The headline is `traces.proxy_us` — request start to just before the first
+//! upstream dispatch — because that is the only latency number the proxy owns.
+//! End-to-end and TTFT follow, then the hot-path cache's effectiveness (operator
+//! only), then the per-model split that explains where the time goes.
+
+use super::*;
+
+/// The contract, in microseconds: the claim is p50, the tail is a guard against
+/// a broken cache (which measured 6–28 ms) rather than a scheduling bound.
+const P50_BUDGET_US: i64 = 1_000;
+const P95_GUARD_US: i64 = 5_000;
+
+/// `(samples, under_1ms, p50, p95, p99)` of the proxy's own overhead.
+type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>);
+
+/// `(total_p50, total_p95, total_p99, ttft_p50, ttft_p95)` in ms.
+type LatencyRow = (
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+);
+
+/// `(model, requests, proxy_p50_us, proxy_p95_us, total_p50_ms, total_p95_ms)`.
+type ModelRow = (String, i64, Option<i64>, Option<i64>, Option<f64>, Option<f64>);
+
+/// GET /v1/dashboard/api/performance?days=7 — the proxy's overhead against its
+/// contract, the end-to-end latency around it, and the cache behind it.
+pub async fn performance(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(window): Query<Window>,
+) -> Result<Response, Response> {
+    let (tenant_id, _role) = session_membership(&state, &headers).await?;
+    let days = window.days();
+    let offset = window.offset();
+
+    let (samples, under_1ms, p50_us, p95_us, p99_us): OverheadRow = stored(sqlx::query_as(
+        "SELECT COUNT(*),
+                COUNT(*) FILTER (WHERE proxy_us < 1000),
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                round(percentile_cont(0.99) WITHIN GROUP (ORDER BY proxy_us))::bigint
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')
+           AND proxy_us IS NOT NULL",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .bind(offset)
+    .fetch_one(&state.db)
+    .await)?;
+
+    let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95): LatencyRow = stored(sqlx::query_as(
+        "SELECT round(percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
+                round(percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms))::float8,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms))::float8
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .bind(offset)
+    .fetch_one(&state.db)
+    .await)?;
+
+    let models: Vec<ModelRow> = stored(sqlx::query_as(
+        "SELECT request_model, COUNT(*),
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms))::float8
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')
+           AND proxy_us IS NOT NULL
+         GROUP BY request_model ORDER BY 2 DESC LIMIT 10",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await)?;
+
+    // Process-wide counters are operator information, not a tenant's.
+    let cache = match super::operator_or(&state, &headers).await {
+        Ok(()) => Some(cache_json(state.hotpath.stats())),
+        Err(_) => None,
+    };
+
+    let under_1ms_rate = (samples > 0).then(|| under_1ms as f64 / samples as f64);
+    let proxy_share = match (p50_us, total_p50) {
+        (Some(proxy), Some(total)) if total > 0.0 => Some(proxy as f64 / (total * 1000.0)),
+        _ => None,
+    };
+
+    Ok(json_ok(json!({
+        "window": {"days": days, "offset_days": offset},
+        "contract": {
+            "p50_us": P50_BUDGET_US,
+            "p95_us": P95_GUARD_US,
+            "p50_met": p50_us.map(|p50| p50 < P50_BUDGET_US),
+            "p95_met": p95_us.map(|p95| p95 < P95_GUARD_US),
+        },
+        "overhead": {
+            "samples": samples,
+            "under_1ms": under_1ms,
+            "under_1ms_rate": under_1ms_rate,
+            "p50_us": p50_us,
+            "p95_us": p95_us,
+            "p99_us": p99_us,
+        },
+        "latency": {
+            "total_p50_ms": total_p50,
+            "total_p95_ms": total_p95,
+            "total_p99_ms": total_p99,
+            "ttft_p50_ms": ttft_p50,
+            "ttft_p95_ms": ttft_p95,
+            "proxy_share": proxy_share,
+        },
+        "cache": cache,
+        "by_model": models.into_iter().map(|(model, requests, proxy_p50, proxy_p95, total_p50, total_p95)| json!({
+            "model": model,
+            "requests": requests,
+            "proxy_p50_us": proxy_p50,
+            "proxy_p95_us": proxy_p95,
+            "total_p50_ms": total_p50,
+            "total_p95_ms": total_p95,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+fn cache_json(stats: crate::hotpath::CacheStats) -> Value {
+    let count = |count: crate::hotpath::CacheCount| {
+        json!({
+            "hits": count.hits,
+            "misses": count.misses,
+            "hit_rate": count.hit_rate(),
+        })
+    };
+    json!({
+        "auth": count(stats.auth),
+        "config": count(stats.config),
+        "route": count(stats.route),
+        "warm": count(stats.warm),
+        "spend": count(stats.spend),
+        "invalidations": stats.invalidations,
+        "tenants": stats.tenants,
+    })
+}

@@ -20,6 +20,7 @@
 //! as the backstop for changes made outside the process (SQL, workers).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -93,6 +94,52 @@ pub struct HotPath {
     /// Key hash -> tenant. The one thing the request path would otherwise read
     /// from Postgres; invalidation on key writes keeps revocation immediate.
     auth: Mutex<HashMap<String, (Tenant, Instant)>>,
+    counters: Counters,
+}
+
+/// Lifetime counters for the operator-facing cache report (ITEM-092).
+#[derive(Default)]
+struct Counters {
+    auth_hits: AtomicU64,
+    auth_misses: AtomicU64,
+    config_hits: AtomicU64,
+    config_misses: AtomicU64,
+    route_hits: AtomicU64,
+    route_misses: AtomicU64,
+    warm_hits: AtomicU64,
+    warm_misses: AtomicU64,
+    spend_hits: AtomicU64,
+    spend_misses: AtomicU64,
+    invalidations: AtomicU64,
+}
+
+/// Hits and misses for one cached read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheCount {
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl CacheCount {
+    fn total(self) -> u64 {
+        self.hits + self.misses
+    }
+    /// Share of reads served from memory; `None` before the first read.
+    pub fn hit_rate(self) -> Option<f64> {
+        (self.total() > 0).then(|| self.hits as f64 / self.total() as f64)
+    }
+}
+
+/// A snapshot of the hot-path caches since process start.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheStats {
+    pub auth: CacheCount,
+    pub config: CacheCount,
+    pub route: CacheCount,
+    pub warm: CacheCount,
+    pub spend: CacheCount,
+    pub invalidations: u64,
+    pub tenants: usize,
 }
 
 impl Default for HotPath {
@@ -111,12 +158,14 @@ impl HotPath {
             ttls,
             tenants: Mutex::new(HashMap::new()),
             auth: Mutex::new(HashMap::new()),
+            counters: Counters::default(),
         }
     }
 
     /// Drop everything cached for a tenant. Call after any write that changes
     /// its controls, providers, models or routing.
     pub fn invalidate(&self, tenant_id: Uuid) {
+        self.counters.invalidations.fetch_add(1, Ordering::Relaxed);
         self.tenants
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -127,9 +176,32 @@ impl HotPath {
             .retain(|_, (tenant, _)| tenant.id != tenant_id);
     }
 
+    /// A snapshot for the metrics page (ITEM-092). Lifetime counters, so the
+    /// report says "since process start" rather than implying a time window.
+    pub fn stats(&self) -> CacheStats {
+        let count = |hits: &AtomicU64, misses: &AtomicU64| CacheCount {
+            hits: hits.load(Ordering::Relaxed),
+            misses: misses.load(Ordering::Relaxed),
+        };
+        CacheStats {
+            auth: count(&self.counters.auth_hits, &self.counters.auth_misses),
+            config: count(&self.counters.config_hits, &self.counters.config_misses),
+            route: count(&self.counters.route_hits, &self.counters.route_misses),
+            warm: count(&self.counters.warm_hits, &self.counters.warm_misses),
+            spend: count(&self.counters.spend_hits, &self.counters.spend_misses),
+            invalidations: self.counters.invalidations.load(Ordering::Relaxed),
+            tenants: self
+                .tenants
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+        }
+    }
+
     /// Drop one key's cached identity. Used when only the key id is known (the
     /// operator revoke path); the tenant's other caches are unaffected.
     pub fn invalidate_key(&self, key_id: Uuid) {
+        self.counters.invalidations.fetch_add(1, Ordering::Relaxed);
         self.auth
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -150,10 +222,12 @@ impl HotPath {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some((tenant, at)) = auth.get(key_hash) {
                 if at.elapsed() < self.ttls.auth {
+                    self.counters.auth_hits.fetch_add(1, Ordering::Relaxed);
                     return Ok(Some(tenant.clone()));
                 }
             }
         }
+        self.counters.auth_misses.fetch_add(1, Ordering::Relaxed);
         let tenant = state.tenant_store.tenant_by_api_key_hash(key_hash).await?;
         if let Some(tenant) = &tenant {
             self.auth
@@ -189,8 +263,10 @@ impl HotPath {
             e.refreshed.is_none_or(|at| at.elapsed() >= self.ttls.config)
         };
         if !stale {
+            self.counters.config_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(entry);
         }
+        self.counters.config_misses.fetch_add(1, Ordering::Relaxed);
         let budget = match state.budget_store.budget_for(tenant_id).await {
             Ok(budget) => budget.map(|mut budget| {
                 budget.spent_cents = 0; // spend is read fresh, never from here
@@ -258,8 +334,10 @@ impl HotPath {
                 .map(|(value, _)| value)
         };
         if let Some(value) = cached {
+            self.counters.spend_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(value);
         }
+        self.counters.spend_misses.fetch_add(1, Ordering::Relaxed);
         match state.budget_store.budget_for(tenant_id).await {
             Ok(budget) => {
                 let value = budget.map(|budget| budget.spent_cents).unwrap_or(0);
@@ -327,8 +405,10 @@ impl HotPath {
             .routes
             .get(&key)
         {
+            self.counters.route_hits.fetch_add(1, Ordering::Relaxed);
             return Ok(hit.clone());
         }
+        self.counters.route_misses.fetch_add(1, Ordering::Relaxed);
         let route = resolve_route(state, tenant, Some(model), surface, weights).await?;
         let disabled = state
             .model_store
@@ -361,8 +441,10 @@ impl HotPath {
                 .map(|(target, _)| target.clone())
         };
         if let Some(cached) = cached {
+            self.counters.warm_hits.fetch_add(1, Ordering::Relaxed);
             return cached;
         }
+        self.counters.warm_misses.fetch_add(1, Ordering::Relaxed);
         let target = state
             .affinity_store
             .warm_target(tenant_id, hash)

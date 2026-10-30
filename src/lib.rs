@@ -132,6 +132,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/quality", post(quality_signal))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
+        .route("/v1/dashboard/api/performance", get(dashboard::performance))
         .route("/v1/dashboard/api/providers", get(dashboard::tenant_providers).post(dashboard::tenant_provider_create))
         .route(
             "/v1/dashboard/api/providers/:provider_id/remove",

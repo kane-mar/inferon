@@ -72,7 +72,8 @@
     "reports": "Rapports",
     "settings": "Paramètres",
     "spend": "Dépenses",
-    "audit": "Audit de coûts"
+    "audit": "Audit de coûts",
+    "performance": "Performance"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -369,7 +370,9 @@
     "quality_title": "Qualité",
     "quality_body": "Résultats, classes d'erreur, troncatures et pouces : ce que vous avez payé sans résultat.",
     "audit_title": "Audit de coûts",
-    "audit_body": "Les six constats de coût nommés, calculés à partir de votre trafic et actualisés en direct."
+    "audit_body": "Les six constats de coût nommés, calculés à partir de votre trafic et actualisés en direct.",
+    "performance_title": "Performance",
+    "performance_body": "Ce que le proxy ajoute lui-même face à son contrat du sous-milliseconde, le cache derrière, et où passe le temps."
   },
   "SettingsPage": {
     "title_bar": "Paramètres",
@@ -434,5 +437,45 @@
     "public_body": "Un rapport en lecture seule généré à partir du trafic réel. Actualisé toutes les 15 secondes.",
     "invalid_title": "Ce lien n'est pas disponible",
     "invalid_body": "Il a peut-être été révoqué, ou l'adresse est incorrecte."
+  },
+  "PerformancePage": {
+    "title_bar": "Performance",
+    "title_bar_description": "Ce que le proxy ajoute lui-même, et si la promesse du sous-milliseconde tient.",
+    "overhead_p50": "Surcoût du proxy p50",
+    "overhead_p95": "Surcoût du proxy p95",
+    "under_1ms": "Requêtes sous 1 ms",
+    "samples": "Requêtes mesurées",
+    "within_contract": "dans le contrat de 1 ms",
+    "over_contract": "au-dessus du contrat de 1 ms",
+    "claim": "La promesse",
+    "claim_p50": "Surcoût p50 < 1 ms",
+    "claim_p95": "Surcoût p95 < 5 ms (garde-fou contre une régression du cache)",
+    "met": "tenue",
+    "not_met": "non tenue",
+    "claim_note": "Mesuré via proxy_us : du début de la requête jusqu'à juste avant le premier envoi à l'amont, donc l'amont et le corps de réponse sont exclus. Une requête « chaude » est dans les TTL du cache ; la première après une période d'inactivité paie le chargement de la configuration.",
+    "end_to_end": "Bout en bout",
+    "total_p50": "Total p50",
+    "total_p95": "Total p95",
+    "total_p99": "Total p99",
+    "ttft_p50": "TTFT p50",
+    "ttft_p95": "TTFT p95",
+    "proxy_share": "Part du proxy",
+    "proxy_share_help": "p50 du proxy ÷ p50 total",
+    "cache": "Cache du chemin chaud",
+    "cache_note": "Depuis le démarrage de ce processus. Une lecture de stockage par requête serait le chemin sans cache.",
+    "cache_kind": "Cache",
+    "cache_auth": "auth (clé → tenant)",
+    "cache_config": "config (contrôles, politique, replis)",
+    "cache_route": "route (fournisseur par modèle)",
+    "cache_warm": "cible chaude (affinité de cache)",
+    "cache_spend": "dépense (disjoncteur budget)",
+    "hits": "Succès",
+    "misses": "Échecs",
+    "hit_rate": "Taux de succès",
+    "cache_tail": "{invalidations} invalidations · {tenants} tenants en cache",
+    "by_model": "Par modèle",
+    "model": "Modèle",
+    "requests": "Requêtes",
+    "no_samples": "Aucune requête mesurée sur cette période."
   }
 }

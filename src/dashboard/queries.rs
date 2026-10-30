@@ -77,7 +77,7 @@ type TimeseriesRow = (String, i64, i64, Decimal, i64, i64, Option<f64>, Option<f
 /// serves both scopes; the WHERE filter is the only separation.
 ///
 /// Turn a storage error into the dashboard's 500 (`?`-friendly).
-fn stored<T>(result: Result<T, sqlx::Error>) -> Result<T, Response> {
+pub(crate) fn stored<T>(result: Result<T, sqlx::Error>) -> Result<T, Response> {
     result.map_err(db_err)
 }
 

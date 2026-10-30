@@ -30,6 +30,7 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
       { href: '/dashboard/reports/spend', labelKey: 'spend' },
       { href: '/dashboard/audit', labelKey: 'audit' },
       { href: '/dashboard/quality', labelKey: 'quality' },
+      { href: '/dashboard/performance', labelKey: 'performance' },
     ],
   },
   {

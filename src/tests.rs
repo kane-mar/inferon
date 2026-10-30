@@ -3163,3 +3163,25 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             "a revoked key must not be served from the auth cache"
         );
     }
+
+    #[tokio::test]
+    async fn the_hot_path_reports_cache_hits_and_misses() {
+        // ITEM-092 metrics: the page reports cache effectiveness, so the counters
+        // must move on a hit and a miss (and survive invalidation as a count).
+        let state = test_state(&mock_upstream().await);
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+
+        let before = state.hotpath.stats();
+        state.hotpath.budget(&state, tenant_id).await.unwrap();
+        let after_miss = state.hotpath.stats();
+        assert!(after_miss.config.misses > before.config.misses, "first read is a miss");
+        assert!(after_miss.spend.misses > before.spend.misses, "spend is read on a miss");
+
+        state.hotpath.budget(&state, tenant_id).await.unwrap();
+        let after_hit = state.hotpath.stats();
+        assert!(after_hit.config.hits > after_miss.config.hits, "second read hits");
+        assert!(after_hit.spend.hits > after_miss.spend.hits, "spend hits within its TTL");
+
+        state.hotpath.invalidate(tenant_id);
+        assert!(state.hotpath.stats().invalidations > after_hit.invalidations);
+    }

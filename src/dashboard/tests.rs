@@ -1633,3 +1633,23 @@ async fn a_member_cannot_change_tier_pairs() {
             "storage detail leaked to the caller: {message}"
         );
     }
+
+    #[tokio::test]
+    async fn the_performance_report_is_session_scoped() {
+        let anonymous = crate::build_router(dashboard_state())
+            .oneshot(get("/v1/dashboard/api/performance?days=7", None))
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        let (state, token) = tenant_role_session("owner").await;
+        let scoped = crate::build_router(state)
+            .oneshot(request_with_cookie("/v1/dashboard/api/performance?days=7", &token))
+            .await
+            .unwrap();
+        assert_ne!(
+            scoped.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "a session reaches the query (the lazy pool then fails it)"
+        );
+    }

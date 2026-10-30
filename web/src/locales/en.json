@@ -72,7 +72,8 @@
     "reports": "Reports",
     "settings": "Settings",
     "spend": "Spend",
-    "audit": "Cost audit"
+    "audit": "Cost audit",
+    "performance": "Performance"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -369,7 +370,9 @@
     "quality_title": "Quality",
     "quality_body": "Outcomes, error classes, truncation and thumbs: what you paid for that did not work.",
     "audit_title": "Cost audit",
-    "audit_body": "The six named cost findings computed from your traffic, refreshed live."
+    "audit_body": "The six named cost findings computed from your traffic, refreshed live.",
+    "performance_title": "Performance",
+    "performance_body": "What the proxy itself adds against its sub-millisecond contract, the cache behind it, and where the time goes."
   },
   "SettingsPage": {
     "title_bar": "Settings",
@@ -434,5 +437,45 @@
     "public_body": "A read-only report generated from live traffic. Refreshes every 15 seconds.",
     "invalid_title": "This link is not available",
     "invalid_body": "It may have been revoked, or the address is wrong."
+  },
+  "PerformancePage": {
+    "title_bar": "Performance",
+    "title_bar_description": "What the proxy itself adds, and whether the sub-millisecond claim holds.",
+    "overhead_p50": "Proxy overhead p50",
+    "overhead_p95": "Proxy overhead p95",
+    "under_1ms": "Requests under 1 ms",
+    "samples": "Requests measured",
+    "within_contract": "within the 1 ms contract",
+    "over_contract": "over the 1 ms contract",
+    "claim": "The claim",
+    "claim_p50": "p50 overhead < 1 ms",
+    "claim_p95": "p95 overhead < 5 ms (guard against a cache regression)",
+    "met": "met",
+    "not_met": "not met",
+    "claim_note": "Measured as proxy_us: request start to just before the first upstream dispatch, so the upstream and the response body are excluded. Warm requests are those within the hot-path cache TTLs; the first request after an idle period pays the config load.",
+    "end_to_end": "End to end",
+    "total_p50": "Total p50",
+    "total_p95": "Total p95",
+    "total_p99": "Total p99",
+    "ttft_p50": "TTFT p50",
+    "ttft_p95": "TTFT p95",
+    "proxy_share": "Proxy share",
+    "proxy_share_help": "proxy p50 ÷ total p50",
+    "cache": "Hot-path cache",
+    "cache_note": "Since this proxy process started. One storage read per request would be the pre-cache path.",
+    "cache_kind": "Cache",
+    "cache_auth": "auth (key → tenant)",
+    "cache_config": "config (controls, policy, fallbacks)",
+    "cache_route": "route (provider per model)",
+    "cache_warm": "warm target (cache affinity)",
+    "cache_spend": "spend (budget breaker)",
+    "hits": "Hits",
+    "misses": "Misses",
+    "hit_rate": "Hit rate",
+    "cache_tail": "{invalidations} invalidations · {tenants} tenants cached",
+    "by_model": "By model",
+    "model": "Model",
+    "requests": "Requests",
+    "no_samples": "No measured requests in this window."
   }
 }
