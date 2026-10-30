@@ -22,7 +22,7 @@ history follows.
 | ITEM-086 | Verified-example curation and per-prompt counts | feature | **new (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
 | ITEM-088 | Retention and consent for captured payloads | feature | **new (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
 | ITEM-087 | Dataset surface and JSONL export | feature | **new (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
-| ITEM-092 | Hot-path config cache and latency budget | improvement | **new (2026-10-30)** — claim: "sub-millisecond wire latency". Measured **p50 12 ms / p95 35 ms** (small requests) with ~10 store reads per request. One tenant-config snapshot (TTL ≤5 s) + route cache; spend stays fresh; a measured budget in CI |
+| ITEM-092 | Hot-path config cache and latency budget | improvement | **in progress (2026-10-30)** — claim: "sub-millisecond wire latency". Delivered: `proxy_us`, the hot-path cache (auth/config/route/spend/warm), a **warm p50 87 µs** deploy gate over 40 requests, cache counters, and `/dashboard/performance`. Still open: stale-while-revalidate so **sparse** traffic is warm too (the page shows p50 1.8 ms at ~1 req/s, from pool warm-up + TTL misses), per-stage timing, kill switch |
 | ITEM-093 | Conversation and transaction grouping | feature | **new (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
 | ITEM-090 | In-flight payload lint (advisory) | feature | **new (2026-10-30)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". The linter is post-hoc only. Pre-dispatch findings traced with wasted tokens/USD, advisory (no rewrite), bounded cost, kill switch |
 | ITEM-089 | Semantic task signatures for grouping | feature | **new (2026-10-30)** — claim: "grouped by task signature". Grouping is an exact hash; the ONNX embedder has no consumer. Embed → cluster → store cluster id; `NoEmbedder` falls back to the hash; composes with ITEM-029 |
@@ -82,8 +82,10 @@ history follows.
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 
 _Last updated: 2026-10-30 (re-ranked by value and effort — single list, gated at the bottom)_ —
-**Next pull is ITEM-085** (persist streamed completions), then 086 → 088 → 087 →
-092 → 093.
+**ITEM-092 is in progress** — finish it before pulling new work (Rule 3): serve
+stale config/spend and refresh off the request path, keep routes until an
+explicit invalidation, then widen the TTLs. After that, **next pull is ITEM-085**
+(persist streamed completions), then 086 → 088 → 087 → 093.
 
 Ordering rule for the 22 undelivered items: **value first, effort as the
 tie-breaker**, dependencies overriding both (087 cannot precede 086/088; 090 needs
