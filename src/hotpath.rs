@@ -196,12 +196,13 @@ impl HotPath {
                 budget.spent_cents = 0; // spend is read fresh, never from here
                 budget
             }),
-            Err(_) => {
+            Err(e) => {
+                tracing::error!("budget lookup failed: {e}");
                 return Err(crate::json_error(
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     "budget_store_error",
                     "budget lookup failed",
-                ))
+                ));
             }
         };
         let policy = state
