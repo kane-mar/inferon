@@ -12,7 +12,8 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
-Active work is listed first, in rank order; delivered items follow.
+Active work is listed first, in rank order; then the gated/staged items; then
+delivered history.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
@@ -32,6 +33,12 @@ Active work is listed first, in rank order; delivered items follow.
 | ITEM-098 | Eval harness on captured traffic | feature | **new (2026-10-30)** — Langfuse parity + the flywheel's quality gate. Pin a gold set from 086, run a model comparison, store per-case scores; regression verdict feeds ITEM-076's `Gate` |
 | ITEM-099 | Latency and quality heatmap | improvement | **new (2026-10-30)** — Langfuse parity: time series exist, no matrix view. Model × time p95/error heatmap over the existing aggregates; no new hot-path data |
 | ITEM-100 | Multi-provider load balancing | feature | **new (2026-10-30)** — LiteLLM parity: health-weighted best-provider pick, no distribution. Seeded weighted/round-robin across healthy providers; single-provider models unchanged |
+| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
+| ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
+| ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
+| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
+| ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
+| ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 | ITEM-044 | Model catalog & per-provider selection | feature | **done + reworked (2026-10-07)** — catalog + `tenant_models` selection **per provider**; models live under `/dashboard/providers` (the standalone Models tab is gone); provider resolution is model-aware; disabled models refused (typed 400) |
 | ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
@@ -69,15 +76,9 @@ Active work is listed first, in rank order; delivered items follow.
 | ITEM-081 | Per-tenant tier pairs (cheap tier → your own model) | feature | **done + archived (2026-10-29)** — `tier_pairs` on the tenant config (migration 036) win over the built-in table; validated at save (same/unknown/duplicate/cycle) and applied only while the cheap model still resolves; `router_event.pair_source`; `/dashboard/routing` card. Live: v4-pro → deepseek-chat served + traced `pair_source:"tenant"` |
 | ITEM-082 | Attach an on-prem model as a provider (five-minute flow) | improvement | **done + archived (2026-10-29)** — keyless `local` (create, probe **and** inference: no Authorization header), own badge + in-place $0/reachability note, models shown free in the picker, and a 5-minute reachability sweep so a dark endpoint shows unreachable before a request fails. Live: 200 via a keyless endpoint, $0 trace, down-flip at the next tick |
 | ITEM-083 | Self-hosted distribution (compose profile, install/upgrade, air-gapped) | feature | **done + archived (2026-10-29)** — `--profile self-hosted` (proxy + web + pg + redis, no Caddy), `guides/inferon-self-hosted.md` (install, tenant, local model, backup, upgrade/rollback, air-gapped, support boundary), and a CI job that starts the documented stack and proxies a request. Green in CI runs 154/156 |
-| ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **new** — map task clusters (ITEM-029) to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
-| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
-| ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
-| ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
-| ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
-| ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 
 _Last updated: 2026-10-30 (differentiation gaps captured — ITEM-085..100)_ —
 **Next pull is ITEM-085** (persist streamed completions), then 086 → 087 → 088 →
