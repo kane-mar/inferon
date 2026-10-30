@@ -100,3 +100,37 @@ contract says "warm request" and defines warm as within the TTLs.
 operator metrics endpoint, a per-stage timing breakdown at debug level, and the
 kill switch (the cache is always on today). None of them affect the claim, which
 is now enforced.
+
+## The performance page (2026-10-30)
+
+`/dashboard/performance` (under Reports) reports the metrics this contract is
+made of, most important first:
+
+1. **Proxy overhead p50/p95**, the share of requests under 1 ms, and the sample
+   count.
+2. **The claim** — p50 < 1 ms met/not-met, the 5 ms p95 guard, the measurement
+   definition and the warm/cold scope. Below `MIN_SAMPLES` (20) it withholds a
+   verdict instead of judging a single cold request.
+3. **End to end** — total p50/p95/p99, TTFT p50/p95, and the proxy's share.
+4. **Hot-path cache** (operator only, process-wide): hits/misses/hit-rate for
+   auth, config, route, warm and spend, plus invalidations and cached tenants.
+5. **By model** — requests, overhead and total latency per model.
+
+Backend: `GET /api/performance`; `HotPath::stats()` lifetime counters.
+
+**What the page immediately showed** (25 real samples, ~1 req/s): p50 1,865 µs,
+not met. Two causes, both real:
+
+- **Pool warm-up**: the six concurrent requests that opened new Postgres
+  connections measured 110–147 ms (`proxy_us`), the rest ≤17 ms. The outliers are
+  connection setup, not hot-path work.
+- **TTL misses on sparse traffic**: auth and spend have 1 s TTLs, so at ~1 req/s
+  roughly half the requests still pay one query; config (5 s) pays three queries
+  every five seconds.
+
+So the claim holds for a **warm burst** (the deploy gate: p50 87 µs over 40
+requests in <1 s) and not for sparse traffic. Next step to close that: serve a
+stale snapshot and refresh it **off the request path** (stale-while-revalidate)
+for config and spend, keep routes until an explicit invalidation, and key routes
+by policy version. Then widen the TTLs — the invalidation, not the TTL, is what
+makes writes immediate.
