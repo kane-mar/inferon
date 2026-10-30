@@ -77,6 +77,8 @@ pub struct TraceMessage {
     pub example_reason: Option<&'static str>,
     /// ITEM-086: stable identity of the captured completion (exact dedupe).
     pub completion_hash: Option<String>,
+    /// ITEM-093: the client's transaction id, when supplied.
+    pub session_id: Option<String>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -149,8 +151,8 @@ impl TraceSink for PostgresTraceSink {
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
                     proxy_ms, proxy_us, raw_completion_capped,
-                    example_state, example_reason, completion_hash
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)"#,
+                    example_state, example_reason, completion_hash, session_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -185,6 +187,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(msg.example_state)
             .bind(msg.example_reason)
             .bind(msg.completion_hash.as_deref())
+            .bind(msg.session_id.as_deref())
             .execute(&mut *tx)
             .await;
             if let Err(e) = result {

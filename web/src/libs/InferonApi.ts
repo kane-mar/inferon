@@ -448,6 +448,29 @@ export type DatasetCluster = {
   last_seen: string;
 };
 
+/** ITEM-093: one client transaction (all requests sharing a session id). */
+export type SessionRow = {
+  session: string;
+  turns: number;
+  models: number;
+  cost_usd: string;
+  savings_usd: string;
+  errors: number;
+  first_seen: string;
+  last_seen: string;
+};
+
+export type SessionsReport = {
+  window: { days: number };
+  role: Role;
+  distribution: {
+    sessions: number;
+    p50_cost_usd: string | null;
+    p95_cost_usd: string | null;
+  };
+  sessions: SessionRow[];
+};
+
 export type Datasets = {
   window: { days: number };
   role: Role;
@@ -634,6 +657,15 @@ export class InferonApi {
     return this.request<Datasets>(
       'GET',
       `/v1/dashboard/api/datasets${windowQuery(days)}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  sessions(days: number, cookie?: string): Promise<SessionsReport> {
+    return this.request<SessionsReport>(
+      'GET',
+      `/v1/dashboard/api/sessions${windowQuery(days)}`,
       undefined,
       { cookie },
     );

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { PageHeader } from '@/features/shell/PageHeader';
-import { InferonApi } from '@/libs/InferonApi';
+import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
@@ -20,6 +20,8 @@ const rate = (value: number | null) =>
   value == null ? '—' : `${(value * 100).toFixed(1)}%`;
 
 const integer = (value: number) => value.toLocaleString('en-US');
+// `formatUsd` expects a decimal string; sessions return them as strings already.
+const usd = (value: string | null) => (value == null ? '—' : formatUsd(value));
 
 /** A small met / not-met marker (null = no samples yet). */
 const Status = (props: { ok: boolean | null; met: string; missed: string }) => {
@@ -59,7 +61,11 @@ export default async function PerformancePage(props: {
   }
 
   const t = await getTranslations({ locale, namespace: 'PerformancePage' });
-  const data = await InferonApi.fromEnv().performance(DAYS, session.cookie);
+  const api = InferonApi.fromEnv();
+  const [data, sessions] = await Promise.all([
+    api.performance(DAYS, session.cookie),
+    api.sessions(DAYS, session.cookie),
+  ]);
   const { overhead, contract, latency, cache } = data;
   const hasSamples = overhead.samples > 0;
 
@@ -130,6 +136,65 @@ export default async function PerformancePage(props: {
               hint={t('proxy_share_help')}
             />
           </div>
+        </Card>
+      </div>
+
+      {/* The unit of work: what one client transaction actually costs. */}
+      <div className="mt-4">
+        <Card title={t('transactions')}>
+          <div className="grid grid-cols-3 gap-3">
+            <KpiCard
+              label={t('transactions_p50')}
+              value={usd(sessions.distribution.p50_cost_usd)}
+            />
+            <KpiCard
+              label={t('transactions_p95')}
+              value={usd(sessions.distribution.p95_cost_usd)}
+            />
+            <KpiCard
+              label={t('transactions_count')}
+              value={integer(sessions.distribution.sessions)}
+            />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">{t('transactions_help')}</p>
+          {sessions.sessions.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className={HEAD}>{t('transaction')}</th>
+                    <th className={HEAD}>{t('turns')}</th>
+                    <th className={HEAD}>{t('models')}</th>
+                    <th className={HEAD}>{t('cost')}</th>
+                    <th className={HEAD}>{t('errors')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.sessions.slice(0, 5).map(row => (
+                    <tr
+                      key={row.session}
+                      className="
+                        border-b
+                        last:border-0
+                      "
+                    >
+                      <td className={`
+                        ${CELL}
+                        font-mono text-xs
+                      `}
+                      >
+                        {row.session}
+                      </td>
+                      <td className={CELL}>{integer(row.turns)}</td>
+                      <td className={CELL}>{integer(row.models)}</td>
+                      <td className={CELL}>{usd(row.cost_usd)}</td>
+                      <td className={CELL}>{integer(row.errors)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       </div>
 

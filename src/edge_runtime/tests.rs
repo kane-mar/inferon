@@ -38,6 +38,7 @@
                 example_state: None,
                 example_reason: None,
                 completion_hash: None,
+                session_id: None,
         }
     }
 

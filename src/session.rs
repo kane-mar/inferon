@@ -15,6 +15,24 @@ use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// The optional client transaction header (ITEM-093). Opaque, tenant-scoped.
+pub const SESSION_ID_HEADER: &str = "x-inferon-session-id";
+/// Longest accepted transaction id.
+pub const MAX_SESSION_ID_LEN: usize = 128;
+
+/// Validate an optional `X-Inferon-Session-Id`: opaque but bounded and
+/// printable, so it is safe to store and group by. Invalid values are ignored
+/// (grouping is best-effort and must never fail a request).
+pub fn parse_id(raw: Option<&str>) -> Option<String> {
+    let id = raw?.trim();
+    if id.is_empty() || id.len() > MAX_SESSION_ID_LEN {
+        return None;
+    }
+    id.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+        .then(|| id.to_string())
+}
+
 /// Name of the session cookie.
 pub const SESSION_COOKIE: &str = "inferon_session";
 /// Name of the OAuth CSRF-state cookie (short-lived, cleared after callback).

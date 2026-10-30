@@ -137,6 +137,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/performance", get(dashboard::performance))
         .route("/v1/dashboard/api/datasets", get(dashboard::datasets))
+        .route("/v1/dashboard/api/sessions", get(dashboard::sessions))
         .route(
             "/v1/dashboard/api/datasets/purge",
             post(dashboard::purge),

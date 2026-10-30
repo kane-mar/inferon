@@ -484,7 +484,17 @@
     "model": "Modèle",
     "requests": "Requêtes",
     "no_samples": "Aucune requête mesurée sur cette période.",
-    "not_enough_samples": "pas encore assez d'échantillons — {count} nécessaires"
+    "not_enough_samples": "pas encore assez d'échantillons — {count} nécessaires",
+    "transactions": "Transactions",
+    "transactions_p50": "Coût par transaction p50",
+    "transactions_p95": "Coût par transaction p95",
+    "transactions_count": "Transactions",
+    "transactions_help": "Une transaction regroupe toutes les requêtes partageant un en-tête X-Inferon-Session-Id. Les requêtes sans en-tête ne sont pas groupées.",
+    "transaction": "Session",
+    "turns": "Tours",
+    "models": "Modèles",
+    "cost": "Coût",
+    "errors": "Erreurs"
   },
   "DatasetsPage": {
     "title_bar": "Jeux de données",

@@ -1333,6 +1333,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 example_state: None,
                 example_reason: None,
                 completion_hash: None,
+                session_id: None,
         }
     }
 

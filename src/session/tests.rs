@@ -88,3 +88,15 @@
         assert!(clear.contains("HttpOnly") && clear.contains("SameSite=Lax"));
         assert!(clear.contains("Secure"));
     }
+
+#[test]
+fn a_transaction_id_is_opaque_but_bounded() {
+    // ITEM-093: a grouped request must never fail because of the header.
+    assert_eq!(parse_id(Some("tx-42")), Some("tx-42".to_string()));
+    assert_eq!(parse_id(Some(" run.1:a_b ")), Some("run.1:a_b".to_string()));
+    assert_eq!(parse_id(Some("")), None);
+    assert_eq!(parse_id(None), None);
+    assert_eq!(parse_id(Some(&"x".repeat(MAX_SESSION_ID_LEN + 1))), None);
+    assert_eq!(parse_id(Some("bad id")), None);
+    assert_eq!(parse_id(Some("bad/id")), None);
+}

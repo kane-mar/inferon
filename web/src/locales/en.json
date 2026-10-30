@@ -484,7 +484,17 @@
     "model": "Model",
     "requests": "Requests",
     "no_samples": "No measured requests in this window.",
-    "not_enough_samples": "not enough samples yet — {count} needed"
+    "not_enough_samples": "not enough samples yet — {count} needed",
+    "transactions": "Transactions",
+    "transactions_p50": "Cost per transaction p50",
+    "transactions_p95": "Cost per transaction p95",
+    "transactions_count": "Transactions",
+    "transactions_help": "A transaction is every request sharing an X-Inferon-Session-Id header. Requests without one are not grouped.",
+    "transaction": "Session",
+    "turns": "Turns",
+    "models": "Models",
+    "cost": "Cost",
+    "errors": "Errors"
   },
   "DatasetsPage": {
     "title_bar": "Datasets",

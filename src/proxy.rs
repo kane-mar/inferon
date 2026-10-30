@@ -516,6 +516,11 @@ pub(crate) async fn proxy_chat_completions(
     // ITEM-092: stage timing at debug level — auth, then planning (config, route,
     // budget/router), then the total pre-dispatch overhead set below.
     let auth_us = started.elapsed().as_micros() as i64;
+    let session_id = crate::session::parse_id(
+        req.headers()
+            .get(crate::session::SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
 
     let (_, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
@@ -540,6 +545,7 @@ pub(crate) async fn proxy_chat_completions(
         api_key_id: tenant.api_key_id,
         is_local: false,
         capture_payloads: true,
+        session_id,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
@@ -710,6 +716,11 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         }
     };
     let tenant_id = tenant.id;
+    let session_id = crate::session::parse_id(
+        req.headers()
+            .get(crate::session::SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
 
     let (body_bytes, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
@@ -732,6 +743,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         api_key_id: tenant.api_key_id,
         is_local: false,
         capture_payloads: true,
+        session_id,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     let decision = match state
@@ -926,6 +938,8 @@ struct RequestMeta {
     is_local: bool,
     /// ITEM-088: whether raw payloads may be stored for this tenant.
     capture_payloads: bool,
+    /// ITEM-093: the client's transaction id, when it supplied a valid one.
+    session_id: Option<String>,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -996,6 +1010,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         example_state: None,
         example_reason: None,
         completion_hash: None,
+        session_id: meta.session_id.clone(),
         is_local: meta.is_local,
     }
 }

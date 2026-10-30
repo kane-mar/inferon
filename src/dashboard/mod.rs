@@ -7,9 +7,11 @@
 
 mod datasets;
 mod performance;
+mod sessions;
 mod queries;
 pub use datasets::*;
 pub use performance::*;
+pub use sessions::*;
 pub use queries::*;
 
 mod providers;
