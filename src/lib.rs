@@ -39,6 +39,7 @@ pub mod affinity;
 pub mod audit;
 pub mod alerts;
 pub mod budget;
+pub mod capture;
 pub mod cost;
 pub mod evolution;
 pub mod guard;

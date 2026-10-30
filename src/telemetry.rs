@@ -29,6 +29,8 @@ pub struct TraceMessage {
     pub status_code: u16,
     pub raw_prompt: Option<Value>,
     pub raw_completion: Option<Value>,
+    /// ITEM-085: the captured completion hit the size cap (a head, not a pair).
+    pub raw_completion_capped: bool,
     pub waste_detected: Option<Value>,
     pub upstream_cost_usd: rust_decimal::Decimal,
     /// ITEM-053: estimated saving vs a no-cache call (the provider's prompt
@@ -136,12 +138,12 @@ impl TraceSink for PostgresTraceSink {
                 r#"INSERT INTO traces (
                     id, tenant_id, request_model, system_prompt_hash,
                     prompt_tokens, completion_tokens, time_to_first_token_ms,
-                    total_duration_ms, status_code, raw_prompt, raw_completion,
+                    total_duration_ms, status_code, raw_prompt, raw_completion, raw_completion_capped,
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
-                    proxy_ms, proxy_us
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)"#,
+                    proxy_ms, proxy_us, raw_completion_capped
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)"#,
             )
             .bind(msg.id)
             .bind(msg.tenant_id)
@@ -154,6 +156,7 @@ impl TraceSink for PostgresTraceSink {
             .bind(i32::from(msg.status_code))
             .bind(msg.raw_prompt.as_ref().map(Json))
             .bind(msg.raw_completion.as_ref().map(Json))
+            .bind(msg.raw_completion_capped)
             .bind(msg.upstream_cost_usd)
             .bind(msg.waste_detected.as_ref().map(Json))
             .bind(msg.truncated)

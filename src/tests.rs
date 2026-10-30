@@ -1309,6 +1309,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             status_code: 200,
             raw_prompt: None,
             raw_completion: None,
+            raw_completion_capped: false,
             waste_detected: None,
             upstream_cost_usd: rust_decimal::Decimal::ZERO,
             cache_savings_usd: rust_decimal::Decimal::ZERO,
@@ -2222,7 +2223,15 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(msg.ttft_ms.is_some(), "ttft recorded at first chunk");
         assert!(msg.total_duration_ms >= 0);
         assert_eq!(msg.status_code, 200);
-        assert_eq!(msg.raw_completion, None, "stream raw deferred (per spec)");
+        // ITEM-085: the streamed completion is captured in the non-streaming
+        // shape, so the flywheel has a pair for the dominant traffic mode.
+        let completion = msg.raw_completion.expect("streamed completion captured");
+        assert_eq!(
+            completion["choices"][0]["message"]["content"],
+            "hi",
+            "the delta content the client received"
+        );
+        assert!(!msg.raw_completion_capped);
     }
 
     #[tokio::test]
@@ -2503,7 +2512,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(msg.truncated, "aborted stream must be flagged truncated");
         assert_eq!(msg.status_code, 200);
         assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::ClientAbort));
-        assert!(msg.raw_completion.is_none());
+        // ITEM-085 AC3: an aborted stream stores exactly what was delivered.
+        let completion = msg.raw_completion.expect("partial completion captured");
+        assert_eq!(completion["choices"][0]["message"]["content"], "a");
         // Exactly one trace: the abort must not also fire the normal emit.
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(rx.try_recv().is_err(), "no duplicate trace after abort");

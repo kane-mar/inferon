@@ -16,6 +16,7 @@
             status_code: 200,
             raw_prompt: None,
             raw_completion: None,
+            raw_completion_capped: false,
             waste_detected: None,
             upstream_cost_usd: Decimal::ZERO,
             cache_savings_usd: Decimal::ZERO,

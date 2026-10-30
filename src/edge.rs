@@ -88,6 +88,7 @@ impl EdgeTrace {
             status_code: self.status_code,
             raw_prompt: self.raw_prompt,
             raw_completion: self.raw_completion,
+            raw_completion_capped: false,
             waste_detected: None,
             upstream_cost_usd: rust_decimal::Decimal::ZERO,
             cache_savings_usd: rust_decimal::Decimal::ZERO,

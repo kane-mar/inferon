@@ -876,6 +876,7 @@ async fn forward_buffered(
             usage,
             ttft_ms,
             raw_completion: response_json,
+            raw_completion_capped: false,
             truncated: false,
             outcome,
             error_class,
@@ -927,6 +928,8 @@ struct TraceOutcome {
     usage: Usage,
     ttft_ms: Option<i64>,
     raw_completion: Option<Value>,
+    /// ITEM-085: the capture hit the size cap (a head, not a full pair).
+    raw_completion_capped: bool,
     truncated: bool,
     /// ITEM-055: whether the response was usable.
     outcome: Outcome,
@@ -943,6 +946,7 @@ impl TraceOutcome {
             usage: Usage::default(),
             ttft_ms: None,
             raw_completion: None,
+            raw_completion_capped: false,
             truncated: false,
             outcome: Outcome::Error,
             error_class: Some(error_class),
@@ -964,6 +968,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         status_code: outcome.status,
         raw_prompt: Some(meta.raw_prompt.clone()),
         raw_completion: outcome.raw_completion,
+        raw_completion_capped: outcome.raw_completion_capped,
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
         cache_savings_usd: rust_decimal::Decimal::ZERO,
@@ -1179,6 +1184,7 @@ async fn guarded_stream_response(
     let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
     match guard::check_guarded_sse(&bytes, schema.as_ref()) {
         Ok(()) => {
+            guard_emit.note_completion(&bytes);
             let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
             // ttft is when the client actually sees the first byte: after the
             // buffered flush (Slice 4 latency target measures this, ITEM-027).
@@ -1323,6 +1329,8 @@ struct BufferedGuard {
     /// ITEM-025 AC3: guard event attached to the single trace once the guard
     /// has fired. None until `note_guard` runs — additive only.
     guard_event: RefCell<Option<Value>>,
+    /// ITEM-085: the buffered completion, for the dataset pair.
+    completion: RefCell<Option<crate::capture::Completion>>,
 }
 
 impl BufferedGuard {
@@ -1340,6 +1348,7 @@ impl BufferedGuard {
             emitted: Cell::new(false),
             retarget_model: RefCell::new(None),
             guard_event: RefCell::new(None),
+            completion: RefCell::new(None),
         }
     }
 
@@ -1355,6 +1364,11 @@ impl BufferedGuard {
         }
         *self.retarget_model.borrow_mut() = served.map(str::to_string);
         *self.guard_event.borrow_mut() = Some(event);
+    }
+
+    /// ITEM-085: the buffered body is a whole completion; keep it for the pair.
+    fn note_completion(&self, bytes: &[u8]) {
+        *self.completion.borrow_mut() = crate::capture::from_sse_bytes(bytes);
     }
 
     fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome, error_class: Option<ErrorClass>) {
@@ -1374,7 +1388,16 @@ impl BufferedGuard {
                 total_duration_ms: total_ms,
                 usage,
                 ttft_ms: None,
-                raw_completion: None,
+                raw_completion: self
+                    .completion
+                    .borrow()
+                    .as_ref()
+                    .map(|captured| captured.value.clone()),
+                raw_completion_capped: self
+                    .completion
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|captured| captured.capped),
                 truncated,
                 outcome,
                 error_class,
@@ -1407,6 +1430,8 @@ struct StreamEmit {
     started: Instant,
     emitted: Cell<bool>,
     ttft_ms: Cell<Option<i64>>,
+    /// Upstream bytes seen so far, for usage and (ITEM-085) the completion.
+    raw: RefCell<Vec<u8>>,
 }
 
 impl StreamEmit {
@@ -1425,7 +1450,18 @@ impl StreamEmit {
             started,
             emitted: Cell::new(false),
             ttft_ms: Cell::new(None),
+            raw: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Keep the upstream bytes for the completion capture (ITEM-085). The stream
+    /// loop already accumulates them for usage, so this is the same buffer.
+    fn note_chunk(&self, bytes: &[u8]) {
+        self.raw.borrow_mut().extend_from_slice(bytes);
+    }
+
+    fn completion(&self) -> Option<crate::capture::Completion> {
+        crate::capture::from_sse_bytes(&self.raw.borrow())
     }
 
     fn note_ttft(&self, ttft_ms: i64) {
@@ -1443,6 +1479,7 @@ impl StreamEmit {
             return;
         }
         let total_ms = self.started.elapsed().as_millis() as i64;
+        let completion = self.completion();
         let msg = build_trace(
             &self.meta,
             self.tenant_id,
@@ -1451,7 +1488,8 @@ impl StreamEmit {
                 total_duration_ms: total_ms,
                 usage,
                 ttft_ms: self.ttft_ms(),
-                raw_completion: None,
+                raw_completion: completion.as_ref().map(|captured| captured.value.clone()),
+                raw_completion_capped: completion.is_some_and(|captured| captured.capped),
                 truncated,
                 outcome,
                 error_class,
@@ -1489,7 +1527,6 @@ fn stream_with_trace(
     async_stream::stream! {
         let emit = StreamEmit::new(tx, meta, tenant_id, status, started);
         let mut stream = Box::pin(byte_stream);
-        let mut accumulated: Vec<u8> = Vec::new();
         let mut errored = false;
         while let Some(chunk) = stream.next().await {
             match chunk {
@@ -1498,7 +1535,7 @@ fn stream_with_trace(
                         emit.note_ttft(started.elapsed().as_millis() as i64);
                         tracing::debug!(ttft_ms = emit.ttft_ms().unwrap(), "first upstream chunk");
                     }
-                    accumulated.extend_from_slice(&bytes);
+                    emit.note_chunk(&bytes);
                     yield Ok(bytes);
                 }
                 Err(e) => {
@@ -1508,6 +1545,7 @@ fn stream_with_trace(
                 }
             }
         }
+        let accumulated = emit.raw.borrow().clone();
         let usage = parse_usage(&accumulated).unwrap_or_default();
         let outcome = if errored {
             Outcome::Truncated
