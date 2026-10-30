@@ -234,3 +234,13 @@
             dec("0.66")
         );
     }
+
+    #[test]
+    fn tokens_saturate_rather_than_wrap() {
+        // Pricing takes i32 token counts; a negative or absurd i64 must not
+        // wrap around into a negative cost.
+        assert_eq!(tokens_as_i32(0), 0);
+        assert_eq!(tokens_as_i32(-5), 0);
+        assert_eq!(tokens_as_i32(42), 42);
+        assert_eq!(tokens_as_i32(i64::MAX), i32::MAX);
+    }

@@ -65,6 +65,13 @@ fn lookup(model: &str) -> Option<Price> {
 /// snapshots price correctly. `deepseek-chat` and `deepseek-flash` are aliases
 /// of v4-flash. Unknown models fall back to the default row; use [`is_priced`]
 /// to tell the two apart.
+/// Token counts are `i32` in the pricing tables (legacy of the cost formula):
+/// saturate instead of wrapping, so an absurd count can never produce a
+/// negative or overflowed cost.
+pub(crate) fn tokens_as_i32(tokens: i64) -> i32 {
+    tokens.clamp(0, i64::from(i32::MAX)) as i32
+}
+
 pub fn price_for(model: &str) -> Price {
     lookup(model).unwrap_or_else(|| miss_only("3.00", "15.00"))
 }

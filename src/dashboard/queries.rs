@@ -508,8 +508,8 @@ async fn query_waste(
             cost::savings_vs(
                 &model,
                 &suggested,
-                prompt_tokens.clamp(0, i64::from(i32::MAX)) as i32,
-                completion_tokens.clamp(0, i64::from(i32::MAX)) as i32,
+                cost::tokens_as_i32(prompt_tokens),
+                cost::tokens_as_i32(completion_tokens),
                 0,
             )
         };

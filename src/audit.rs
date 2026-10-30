@@ -21,6 +21,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::cost;
 
 /// Prefix so a leaked string is recognisable as a share credential.
 pub const TOKEN_PREFIX: &str = "inferon-audit-";
@@ -260,8 +261,8 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
             crate::cost::savings_vs(
                 &model,
                 &suggested,
-                clamp_tokens(prompt),
-                clamp_tokens(completion),
+                cost::tokens_as_i32(prompt),
+                cost::tokens_as_i32(completion),
                 0,
             )
         };
@@ -370,10 +371,6 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
             "errors_by_class": errors.into_iter().collect::<std::collections::BTreeMap<_, _>>(),
         },
     }))
-}
-
-fn clamp_tokens(tokens: i64) -> i32 {
-    tokens.clamp(0, i64::from(i32::MAX)) as i32
 }
 
 fn decimal_from(value: Option<&str>) -> Decimal {
