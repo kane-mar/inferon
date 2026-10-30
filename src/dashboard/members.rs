@@ -16,11 +16,11 @@ pub async fn tenant_members(State(state): State<Arc<AppState>>, headers: HeaderM
         .clone();
     let members = match users.list_members(tenant_id).await {
         Ok(rows) => rows,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let invites = match users.list_invites(tenant_id).await {
         Ok(rows) => rows,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let rows: Vec<Value> = members
         .into_iter()
@@ -58,7 +58,7 @@ pub async fn tenant_member_invite(
         .await
     {
         Ok(()) => json_ok(json!({ "github_login": login, "invited": true })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -91,6 +91,6 @@ pub async fn tenant_member_remove(
             "member_not_removable",
             "no such member, or the tenant owner cannot be removed",
         ),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }

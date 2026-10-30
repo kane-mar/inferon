@@ -21,7 +21,7 @@ pub async fn tenant_edge_nodes(State(state): State<Arc<AppState>>, headers: Head
         Ok(nodes) => {
             json_ok(json!({ "nodes": nodes.iter().map(edge_node_json).collect::<Vec<_>>() }))
         }
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -52,7 +52,7 @@ pub async fn tenant_edge_node_create(
         .await
     {
         Ok(id) => json_ok(json!({ "id": id.to_string(), "token": token })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -72,6 +72,6 @@ pub async fn tenant_edge_node_revoke(
     match state.edge_store.revoke(tenant_id, node_id).await {
         Ok(true) => json_ok(json!({ "removed": true })),
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such edge node"),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }

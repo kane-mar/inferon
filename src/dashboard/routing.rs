@@ -16,12 +16,12 @@ pub async fn tenant_routing(State(state): State<Arc<AppState>>, headers: HeaderM
     };
     let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
         Ok(fallbacks) => fallbacks,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let pairs = match state.budget_store.budget_for(tenant_id).await {
         Ok(Some(budget)) => budget.tier_pairs,
         Ok(None) => Vec::new(),
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let catalog = match model_catalog(&state, tenant_id).await {
         Ok(catalog) => catalog,
@@ -65,7 +65,7 @@ pub async fn tenant_routing_set(
     }
     match state.routing_store.set_fallbacks(tenant_id, &chain).await {
         Ok(()) => json_ok(json!({ "fallbacks": chain })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -108,7 +108,7 @@ pub async fn tenant_tier_pairs_set(
     }
     match state.budget_store.set_tier_pairs(tenant_id, &pairs).await {
         Ok(()) => json_ok(json!({ "tier_pairs": pair_json(&pairs, &catalog) })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -137,7 +137,7 @@ async fn model_catalog(
         .provider_store
         .list(tenant_id)
         .await
-        .map_err(|e| internal(&e.to_string()))?;
+        .map_err(|e| internal(e.to_string()))?;
     if providers.is_empty() {
         return Ok(ModelCatalog::Open);
     }
@@ -147,12 +147,12 @@ async fn model_catalog(
             .provider_store
             .advertised_models(provider.id)
             .await
-            .map_err(|e| internal(&e.to_string()))?;
+            .map_err(|e| internal(e.to_string()))?;
         let settings = state
             .model_store
             .settings(provider.id)
             .await
-            .map_err(|e| internal(&e.to_string()))?;
+            .map_err(|e| internal(e.to_string()))?;
         for model in advertised {
             let disabled = settings
                 .iter()
@@ -213,7 +213,7 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
     };
     let config = match state.budget_store.budget_for(tenant_id).await {
         Ok(config) => config,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let (limit, spent, cheap, guard, router_enabled, router_threshold) = match config {
         Some(budget) => (
@@ -263,6 +263,6 @@ pub async fn tenant_config_set(
     };
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => json_ok(json!({ "updated": true })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }

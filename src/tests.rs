@@ -424,21 +424,10 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .await
             .unwrap();
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: "https://shared.test/v1/chat/completions".to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store,
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state("https://shared.test/v1/chat/completions")
         });
         (state, rx)
     }
@@ -470,21 +459,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
         let (tx, rx) = mpsc::channel(64);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: "http://127.0.0.1:1/v1/chat/completions".to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state("http://127.0.0.1:1/v1/chat/completions")
         });
         let mut builder = Request::builder()
             .method("POST")
@@ -557,15 +533,15 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let (response, _rx) = edge_request(&body, Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
-    fn state_with_store(
-        upstream_url: &str,
-        tenant_store: std::sync::Arc<dyn TenantStore>,
-    ) -> std::sync::Arc<AppState> {
-        let (tx, _rx) = mpsc::channel::<TraceMessage>(64);
-        std::sync::Arc::new(AppState {
+
+    /// The `AppState` every test needs: seeded tenant, empty in-memory stores,
+    /// a pool that is never dialled. Tests spread this and override only what
+    /// they care about (`..base_state(...)`), so a new field is added once.
+    fn base_state(upstream_url: &str) -> AppState {
+        AppState {
             http_client: reqwest::Client::new(),
             upstream_url: upstream_url.to_string(),
-            tenant_store,
+            tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
@@ -573,13 +549,23 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
             edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
-            telemetry_tx: tx,
+            telemetry_tx: mpsc::channel::<TraceMessage>(64).0,
             operator_key: None,
             accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
+                .unwrap(),
+        }
+    }
+
+    fn state_with_store(
+        upstream_url: &str,
+        tenant_store: std::sync::Arc<dyn TenantStore>,
+    ) -> std::sync::Arc<AppState> {
+        let (tx, _rx) = mpsc::channel::<TraceMessage>(64);
+        std::sync::Arc::new(AppState {
+            tenant_store,
+            telemetry_tx: tx,
+            ..base_state(upstream_url)
         })
     }
 
@@ -630,23 +616,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
         let (tx, rx) = mpsc::channel(64);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store,
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(body, auth))
@@ -659,21 +631,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         provider_store: std::sync::Arc<dyn crate::providers::ProviderStore>,
     ) -> std::sync::Arc<AppState> {
         std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: "https://shared.test/v1/chat/completions".to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store,
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: mpsc::channel(1).0,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state("https://shared.test/v1/chat/completions")
         })
     }
 
@@ -826,21 +786,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         ));
         let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
             affinity_store: affinity,
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let body = json!({
             "model": "deepseek-v4-pro",
@@ -883,21 +831,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         .unwrap();
         let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store,
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -1004,21 +940,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
     async fn a_transport_failure_is_classified() {
         let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: "http://127.0.0.1:1/v1/chat/completions".to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state("http://127.0.0.1:1/v1/chat/completions")
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -1200,26 +1123,15 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         .unwrap();
         let (tx, _rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store,
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::seed(
-                provider_id,
-                "llama-3",
-                false,
-                false,
+            provider_id,
+            "llama-3",
+            false,
+            false,
             )),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(
@@ -1279,21 +1191,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         );
         let (tx, _rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
             tenant_store: std::sync::Arc::new(InMemoryTenantStore::new(by_hash)),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -1329,26 +1229,15 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         .await
         .unwrap();
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
             provider_store: std::sync::Arc::new(provider_store),
             model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::seed(
-                provider_id,
-                "gpt-4o",
-                false,
-                false,
+            provider_id,
+            "gpt-4o",
+            false,
+            false,
             )),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -1370,25 +1259,11 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let tenant = seeded_tenant();
         let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(
-                crate::providers::InMemoryProviderStore::default(),
-            ),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
             routing_store: std::sync::Arc::new(
-                crate::routing::InMemoryRoutingStore::with_fallbacks(tenant.id, &["deepseek-chat"]),
+            crate::routing::InMemoryRoutingStore::with_fallbacks(tenant.id, &["deepseek-chat"]),
             ),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-                .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -1538,23 +1413,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         budgets.insert(uuid::Uuid::parse_str(TENANT_ID).unwrap(), budget);
         let (tx, _rx) = mpsc::channel::<TraceMessage>(64);
         std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: upstream_url.to_string(),
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(upstream_url)
         })
     }
 
@@ -1566,19 +1427,12 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let (tx, rx) = mpsc::channel(64);
         let state = std::sync::Arc::new(AppState {
             http_client: state.http_client.clone(),
-            upstream_url: state.upstream_url.clone(),
             tenant_store: state.tenant_store.clone(),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
             budget_store: state.budget_store.clone(),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             operator_key: state.operator_key.clone(),
-            accounts: None,
             db: state.db.clone(),
             telemetry_tx: tx,
+            ..base_state(&state.upstream_url.clone())
         });
         (state, rx)
     }
@@ -1666,21 +1520,9 @@ async fn a_keyless_local_provider_forwards_no_authorization_header() {
         .await
         .unwrap();
     let state = std::sync::Arc::new(AppState {
-        http_client: reqwest::Client::new(),
-        upstream_url: mock_upstream().await,
-        tenant_store: std::sync::Arc::new(seeded_store()),
         provider_store: std::sync::Arc::new(provider_store),
-        model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-        budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-        affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-        policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-        edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
         telemetry_tx: mpsc::channel(16).0,
-        operator_key: None,
-        accounts: None,
-        db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-            .unwrap(),
+        ..base_state(&mock_upstream().await)
     });
     let response = build_router(state)
         .oneshot(chat_request_builder(
@@ -1784,21 +1626,10 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         },
     );
     let state = std::sync::Arc::new(AppState {
-        http_client: reqwest::Client::new(),
-        upstream_url: mock_upstream().await,
-        tenant_store: std::sync::Arc::new(seeded_store()),
         provider_store: std::sync::Arc::new(provider_store),
-        model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
         budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
-        affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-        policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-        edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
         telemetry_tx: mpsc::channel(16).0,
-        operator_key: None,
-        accounts: None,
-        db: sqlx::PgPool::connect_lazy("postgres://inferon:inferon@localhost:5432/inferon")
-            .unwrap(),
+        ..base_state(&mock_upstream().await)
     });
     let response = build_router(state)
         .oneshot(chat_request_builder(
@@ -2425,23 +2256,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         // the first request's trace. Later requests must still complete (AC5).
         let _keepalive = rx_keepalive;
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -2630,23 +2446,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     async fn serve_and_abort(model: &str) -> mpsc::Receiver<TraceMessage> {
         let (tx, rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -2702,23 +2503,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     async fn upstream_mid_stream_error_records_truncated_trace() {
         let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let response = build_router(state)
             .oneshot(chat_request_builder(
@@ -3020,23 +2806,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     async fn serve_guarded_and_abort(model: &str, marker: &str) -> mpsc::Receiver<TraceMessage> {
         let (tx, rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
-            http_client: reqwest::Client::new(),
-            upstream_url: mock_upstream().await,
-            tenant_store: std::sync::Arc::new(seeded_store()),
-            provider_store: std::sync::Arc::new(crate::providers::InMemoryProviderStore::default()),
-            model_store: std::sync::Arc::new(crate::models::InMemoryModelStore::default()),
-            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::default()),
-            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
-            affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
-            policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
-            operator_key: None,
-            accounts: None,
-            db: sqlx::PgPool::connect_lazy(
-                "postgres://inferon:inferon@localhost:5432/inferon",
-            )
-            .unwrap(),
+            ..base_state(&mock_upstream().await)
         });
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();

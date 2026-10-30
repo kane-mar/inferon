@@ -61,13 +61,6 @@ impl Window {
     }
 }
 
-
-
-
-
-
-
-
 fn unauthorized() -> Response {
     crate::json_error(
         StatusCode::UNAUTHORIZED,
@@ -84,9 +77,15 @@ fn forbidden() -> Response {
     )
 }
 
-fn internal(message: &str) -> Response {
-    tracing::error!("dashboard query failed: {message}");
-    crate::json_error(StatusCode::INTERNAL_SERVER_ERROR, "dashboard_error", message)
+/// A 500 that keeps the detail in the log and returns a stable message — an
+/// SQL or storage error is never echoed back to a tenant.
+fn internal(detail: impl std::fmt::Display) -> Response {
+    tracing::error!("dashboard request failed: {detail}");
+    crate::json_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "dashboard_error",
+        "the request could not be completed",
+    )
 }
 
 fn json_ok(value: Value) -> Response {
@@ -94,7 +93,7 @@ fn json_ok(value: Value) -> Response {
 }
 
 fn db_err(e: sqlx::Error) -> Response {
-    internal(&e.to_string())
+    internal(e.to_string())
 }
 
 /// A resolved dashboard caller. The two capabilities are independent: a
@@ -199,7 +198,6 @@ async fn tenant_or(state: &Arc<AppState>, headers: &HeaderMap) -> Result<uuid::U
     resolve_scope(state, headers).await?.tenant.ok_or_else(forbidden)
 }
 
-
 /// The signed-in user's tenant membership — the human identity behind the
 /// tenant-scoped management APIs (ITEM-038). Sessions only: a bare tenant key
 /// is not a human identity (machines use the operator key API) and operator
@@ -240,44 +238,10 @@ async fn session_membership(
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[derive(serde::Deserialize)]
 pub struct EdgeNodeBody {
     name: String,
 }
-
-
-
-
-
-
-
-
 
 #[derive(serde::Deserialize)]
 pub struct KeyQuery {
@@ -290,23 +254,15 @@ pub struct CreateKeyBody {
     label: Option<String>,
 }
 
-
-
-
-
 #[derive(serde::Deserialize)]
 pub struct KeyLabelBody {
     label: Option<String>,
 }
 
-
 #[derive(serde::Deserialize)]
 pub struct KeyLimitBody {
     spend_limit_cents: i64,
 }
-
-
-
 
 /// Owner-gate for tenant management actions (ITEM-038/039): members can view
 /// their tenant but never take destructive/owner actions.
@@ -317,7 +273,6 @@ fn owner_only(role: &str) -> Result<(), Response> {
         Err(forbidden())
     }
 }
-
 
 // --- Providers (ITEM-043) ----------------------------------------------------
 
@@ -344,16 +299,6 @@ pub struct ProviderUpdateBody {
     spend_limit_cents: Option<i64>,
 }
 
-
-
-
-
-
-
-
-
-
-
 #[derive(serde::Deserialize)]
 pub struct ProviderProbeBody {
     base_url: String,
@@ -366,8 +311,6 @@ pub struct ProviderProbeBody {
     metadata: crate::providers::ProviderMetadata,
 }
 
-
-
 // --- Models (ITEM-044, live from the provider) -------------------------------
 
 #[derive(serde::Deserialize)]
@@ -375,10 +318,6 @@ pub struct ModelUpdateBody {
     enabled: Option<bool>,
     is_default: Option<bool>,
 }
-
-
-
-
 
 // --- Routing (ITEM-045) ------------------------------------------------------
 
@@ -392,8 +331,6 @@ pub struct TierPairsBody {
     tier_pairs: Vec<crate::router::TierPair>,
 }
 
-
-
 // --- Tenant controls (ITEM-046) ---------------------------------------------
 
 #[derive(serde::Deserialize)]
@@ -405,18 +342,10 @@ pub struct ConfigBody {
     router_threshold: f64,
 }
 
-
-
-
 #[derive(serde::Deserialize)]
 pub struct MemberInviteBody {
     github_login: String,
 }
-
-
-
-
-
 
 #[cfg(test)]
 mod tests;

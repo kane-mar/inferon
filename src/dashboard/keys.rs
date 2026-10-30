@@ -48,7 +48,7 @@ pub async fn tenant_keys(State(state): State<Arc<AppState>>, headers: HeaderMap)
             let rows: Vec<Value> = keys.iter().map(key_json).collect();
             json_ok(json!({ "role": role, "keys": rows }))
         }
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -77,7 +77,7 @@ pub async fn tenant_key_limit(
             "spend_limit_cents": body.spend_limit_cents.max(0),
         })),
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such key"),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -121,6 +121,6 @@ pub async fn tenant_key_revoke(
             "key_not_found",
             "no such key for this tenant",
         ),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }

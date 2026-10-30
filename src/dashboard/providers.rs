@@ -71,7 +71,7 @@ pub async fn tenant_providers(State(state): State<Arc<AppState>>, headers: Heade
             "kinds": crate::providers::PROVIDER_KINDS,
             "role": role,
         })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -131,7 +131,7 @@ pub async fn tenant_provider_create(
         Ok(id) => json_ok(json!({ "id": id.to_string() })),
         Err(e) => {
             tracing::error!("provider insert failed: {e}");
-            internal(&e.to_string())
+            internal(e.to_string())
         }
     }
 }
@@ -154,7 +154,7 @@ pub async fn tenant_provider_remove(
             "provider_id": provider_id.to_string(),
             "removed": removed,
         })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -201,7 +201,7 @@ pub async fn tenant_provider_update(
         Ok(false) => {
             crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
         }
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -225,7 +225,7 @@ pub async fn tenant_provider_default(
             "is_default": true,
         })),
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider"),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -288,7 +288,7 @@ pub async fn tenant_provider_test(
         Ok(None) => {
             return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
         }
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
     let mut probe = state
@@ -365,7 +365,7 @@ pub async fn tenant_provider_models(
         Ok(None) => {
             return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider")
         }
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let ids = match fetch_provider_models(&state, &provider).await {
         Ok(ids) => ids,
@@ -379,11 +379,11 @@ pub async fn tenant_provider_models(
         }
     };
     if let Err(e) = state.provider_store.record_models(provider_id, &ids).await {
-        return internal(&e.to_string());
+        return internal(e.to_string());
     }
     let settings = match state.model_store.settings(provider_id).await {
         Ok(settings) => settings,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let local = crate::providers::is_local(&provider.kind);
     let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings, local)).collect();
@@ -399,17 +399,17 @@ pub async fn tenant_models(State(state): State<Arc<AppState>>, headers: HeaderMa
     };
     let providers = match state.provider_store.list(tenant_id).await {
         Ok(providers) => providers,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let mut out = Vec::with_capacity(providers.len());
     for provider in &providers {
         let ids = match state.provider_store.advertised_models(provider.id).await {
             Ok(ids) => ids,
-            Err(e) => return internal(&e.to_string()),
+            Err(e) => return internal(e.to_string()),
         };
         let settings = match state.model_store.settings(provider.id).await {
             Ok(settings) => settings,
-            Err(e) => return internal(&e.to_string()),
+            Err(e) => return internal(e.to_string()),
         };
         let local = crate::providers::is_local(&provider.kind);
         let models: Vec<Value> = ids.iter().map(|id| model_json(id, &settings, local)).collect();
@@ -443,7 +443,7 @@ pub async fn tenant_provider_model_update(
     // Ownership check (the id must be one of this tenant's providers).
     let owned = match state.provider_store.list(tenant_id).await {
         Ok(providers) => providers.into_iter().any(|provider| provider.id == provider_id),
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     if !owned {
         return crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such provider");
@@ -451,7 +451,7 @@ pub async fn tenant_provider_model_update(
     // Only a model the provider actually advertises can be configured.
     let advertised = match state.provider_store.advertised_models(provider_id).await {
         Ok(ids) => ids,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     if !advertised.iter().any(|id| id == &model_id) {
         return crate::json_error(
@@ -462,12 +462,12 @@ pub async fn tenant_provider_model_update(
     }
     if let Some(enabled) = body.enabled {
         if let Err(e) = state.model_store.set_enabled(provider_id, &model_id, enabled).await {
-            return internal(&e.to_string());
+            return internal(e.to_string());
         }
     }
     if body.is_default == Some(true) {
         if let Err(e) = state.model_store.set_default(provider_id, &model_id).await {
-            return internal(&e.to_string());
+            return internal(e.to_string());
         }
     }
     json_ok(json!({ "provider_id": provider_id.to_string(), "model_id": model_id }))

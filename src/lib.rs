@@ -255,30 +255,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /// Resolve the caller's tenant from the Authorization header.
 /// Ok(Some(tenant)) = authenticated; Ok(None) = missing/invalid credentials;
 /// Err = store failure (caller should see 500, never a misleading 401).
@@ -317,7 +293,6 @@ pub(crate) fn mint_client_key() -> String {
     format!("{CLIENT_KEY_PREFIX}{}", Uuid::new_v4().simple())
 }
 
-
 /// OpenAI-style JSON error response.
 pub(crate) fn json_error(status: StatusCode, err_type: &str, message: &str) -> Response {
     let body = serde_json::json!({"error": {"message": message, "type": err_type}}).to_string();
@@ -328,16 +303,6 @@ pub(crate) fn json_error(status: StatusCode, err_type: &str, message: &str) -> R
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     response
 }
-
-
-
-
-
-
-
-
-
-
 
 pub fn parse_port(value: Option<&str>) -> u16 {
     value

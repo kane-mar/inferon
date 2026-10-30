@@ -1613,3 +1613,22 @@ async fn a_member_cannot_change_tier_pairs() {
         assert_eq!(price["input_usd_per_million"], "0");
         assert_eq!(price["output_usd_per_million"], "0");
     }
+
+    #[tokio::test]
+    async fn a_storage_failure_is_logged_not_echoed_to_the_caller() {
+        // dashboard_state() points at a lazy pool that cannot connect; the
+        // response must be a generic 500, not a transcript of the failure.
+        let (state, token) = tenant_role_session("owner").await;
+        let response = crate::build_router(state)
+            .oneshot(request_with_cookie("/v1/dashboard/api/summary?days=7", &token))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        let body = json_of(response).await;
+        let message = body["error"]["message"].as_str().unwrap_or_default();
+        assert_eq!(body["error"]["type"], "dashboard_error");
+        assert!(
+            !message.contains("connection") && !message.to_lowercase().contains("postgres"),
+            "storage detail leaked to the caller: {message}"
+        );
+    }

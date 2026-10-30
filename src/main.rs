@@ -48,6 +48,80 @@ where
     });
 }
 
+/// Wire the periodic workers (ITEM-020/031/064/082). Each is one bounded pass on
+/// a fixed cadence; the first tick fires immediately.
+fn spawn_workers(
+    pool: &sqlx::PgPool,
+    http_client: &Client,
+    provider_store: &Arc<inferon::providers::PostgresProviderStore>,
+) {
+    // Cost anomaly alerts (ITEM-020): one periodic evaluation pass; webhook
+    // delivery is best-effort from a compose env var (no new infra, AC4).
+    let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
+        .ok()
+        .filter(|u| !u.is_empty());
+    if webhook_url.is_none() {
+        tracing::info!(
+            "alert webhook not configured — findings are evaluated and stored, not delivered"
+        );
+    }
+    let alert_client = Client::new();
+    let alerts_pool = pool.clone();
+    spawn_periodic(
+        "alerts",
+        std::time::Duration::from_secs(ALERT_EVAL_INTERVAL_SECS),
+        move || {
+            let pool = alerts_pool.clone();
+            let client = alert_client.clone();
+            let webhook = webhook_url.clone();
+            async move {
+                inferon::alerts::run_evaluation(&pool, webhook.as_deref(), &client).await;
+            }
+        },
+    );
+
+    // Adaptive policy loop (ITEM-064): derive a bounded policy from telemetry
+    // and publish it; the hot path reads it on the next request.
+    let adapt_pool = pool.clone();
+    spawn_periodic(
+        "adaptive-policy",
+        std::time::Duration::from_secs(ADAPT_INTERVAL_SECS),
+        move || {
+            let pool = adapt_pool.clone();
+            async move { inferon::policy::run_adaptation(&pool).await }
+        },
+    );
+
+    // ITEM-031 slice 1: drift detection -> evolution job queue.
+    let evolution_pool = pool.clone();
+    spawn_periodic(
+        "evolution",
+        std::time::Duration::from_secs(EVOLUTION_INTERVAL_SECS),
+        move || {
+            let pool = evolution_pool.clone();
+            async move {
+                inferon::evolution::run_evolution(&pool).await;
+            }
+        },
+    );
+
+    // ITEM-082: refresh each provider's reachability on a cadence. The manual
+    // Test-connection button stays; this is what flips a dark endpoint to
+    // unreachable without waiting for a tenant request to fail.
+    let probe_store = provider_store.clone();
+    let probe_client = http_client.clone();
+    spawn_periodic(
+        "provider-reachability",
+        std::time::Duration::from_secs(PROVIDER_PROBE_INTERVAL_SECS),
+        move || {
+            let store = probe_store.clone();
+            let client = probe_client.clone();
+            async move { inferon::providers::run_reachability_pass(&*store, &client).await }
+        },
+    );
+
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -127,56 +201,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         initial_counts,
     ));
 
-    // Cost anomaly alerts (ITEM-020): one periodic evaluation pass; webhook
-    // delivery is best-effort from a compose env var (no new infra, AC4).
-    let webhook_url = std::env::var("ALERT_WEBHOOK_URL")
-        .ok()
-        .filter(|u| !u.is_empty());
-    if webhook_url.is_none() {
-        tracing::info!(
-            "alert webhook not configured — findings are evaluated and stored, not delivered"
-        );
-    }
-    let alert_client = Client::new();
-    let alerts_pool = pool.clone();
-    spawn_periodic(
-        "alerts",
-        std::time::Duration::from_secs(ALERT_EVAL_INTERVAL_SECS),
-        move || {
-            let pool = alerts_pool.clone();
-            let client = alert_client.clone();
-            let webhook = webhook_url.clone();
-            async move {
-                inferon::alerts::run_evaluation(&pool, webhook.as_deref(), &client).await;
-            }
-        },
-    );
-
-    // Adaptive policy loop (ITEM-064): derive a bounded policy from telemetry
-    // and publish it; the hot path reads it on the next request.
-    let adapt_pool = pool.clone();
-    spawn_periodic(
-        "adaptive-policy",
-        std::time::Duration::from_secs(ADAPT_INTERVAL_SECS),
-        move || {
-            let pool = adapt_pool.clone();
-            async move { inferon::policy::run_adaptation(&pool).await }
-        },
-    );
-
-    // ITEM-031 slice 1: drift detection -> evolution job queue.
-    let evolution_pool = pool.clone();
-    spawn_periodic(
-        "evolution",
-        std::time::Duration::from_secs(EVOLUTION_INTERVAL_SECS),
-        move || {
-            let pool = evolution_pool.clone();
-            async move {
-                inferon::evolution::run_evolution(&pool).await;
-            }
-        },
-    );
-
     // A connect timeout keeps an unreachable provider (e.g. a LAN model the
     // cloud host cannot route to) from hanging a request indefinitely; it
     // covers DNS + TCP + TLS. No overall timeout — streaming responses can be
@@ -185,6 +209,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .pool_max_idle_per_host(100)
         .connect_timeout(std::time::Duration::from_secs(5))
         .build()?;
+    // Periodic workers run off the same pool: alerts, the adaptive policy, the
+    // evolution queue and provider reachability (the only one that needs a
+    // store and the outbound client).
+    let secrets = inferon::secret::Secrets::from_env().map(Arc::new);
+    if secrets.is_none() {
+        tracing::info!("provider provisioning disabled — set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
+    }
+    let provider_store = Arc::new(inferon::providers::PostgresProviderStore::new(
+        pool.clone(),
+        secrets,
+    ));
+    spawn_workers(&pool, &http_client, &provider_store);
+
     // Human accounts (ITEM-035): `None` when GitHub OAuth is unconfigured —
     // /auth/login answers 503 then (fail closed on the login screen).
     let accounts = inferon::auth::Accounts::from_env(
@@ -208,17 +245,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Provider credentials are encrypted at rest (ITEM-043). Without a master
-    // key, provider provisioning is disabled — tenants keep using the shared key.
-    let secrets = inferon::secret::Secrets::from_env().map(Arc::new);
-    if secrets.is_none() {
-        tracing::info!("provider provisioning disabled — set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
-    }
-    let provider_store = Arc::new(inferon::providers::PostgresProviderStore::new(
-        pool.clone(),
-        secrets,
-    ));
-
     let state = Arc::new(AppState {
         http_client: http_client.clone(),
         upstream_url: std::env::var("UPSTREAM_URL")
@@ -240,21 +266,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         accounts,
         db: pool,
     });
-
-    // ITEM-082: refresh each provider's reachability on a cadence. The manual
-    // Test-connection button stays; this is what flips a dark endpoint to
-    // unreachable without waiting for a tenant request to fail.
-    let probe_store = provider_store.clone();
-    let probe_client = http_client.clone();
-    spawn_periodic(
-        "provider-reachability",
-        std::time::Duration::from_secs(PROVIDER_PROBE_INTERVAL_SECS),
-        move || {
-            let store = probe_store.clone();
-            let client = probe_client.clone();
-            async move { inferon::providers::run_reachability_pass(&*store, &client).await }
-        },
-    );
 
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     info!("inferon listening on port {port}");

@@ -172,11 +172,6 @@ pub fn downgrade_for(model: &str, pairs: &[TierPair]) -> Option<Downgrade> {
         })
 }
 
-/// gpt-4o tier but NOT gpt-4o-mini (a mini request can't be downgraded).
-pub fn is_gpt4o_tier(model: &str) -> bool {
-    model.starts_with("gpt-4o") && !model.starts_with("gpt-4o-mini")
-}
-
 /// Total character length of all string message content (non-string content
 /// counts as 0 — it is handled by the tool/structure signals instead).
 fn content_chars(payload: &Value) -> usize {

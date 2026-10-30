@@ -193,7 +193,7 @@ pub async fn operator_policy(
             "tenant_id": tenant_id.to_string(),
             "policy": policy,
         })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -209,7 +209,7 @@ pub async fn operator_policy_freeze(
     }
     match state.policy_store.freeze(tenant_id).await {
         Ok(()) => json_ok(json!({ "ok": true })),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -230,7 +230,7 @@ pub async fn operator_policy_rollback(
             "not_found",
             "no such policy version",
         ),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -239,11 +239,9 @@ pub async fn operator_summary(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match operator_or(&state, &headers).await {
-        Ok(()) => query_summary(&state, None, &window, "operator").await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    operator_or(&state, &headers).await?;
+    query_summary(&state, None, &window, "operator").await
 }
 
 /// GET /v1/dashboard/api/operator/by-model?days=7 — platform-wide spend by model.
@@ -251,11 +249,9 @@ pub async fn operator_by_model(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match operator_or(&state, &headers).await {
-        Ok(()) => query_by_model(&state, None, &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    operator_or(&state, &headers).await?;
+    query_by_model(&state, None, &window).await
 }
 
 /// GET /v1/dashboard/api/operator/by-prompt?days=7 — platform-wide clusters.
@@ -263,11 +259,9 @@ pub async fn operator_by_prompt(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match operator_or(&state, &headers).await {
-        Ok(()) => query_by_prompt(&state, None, &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    operator_or(&state, &headers).await?;
+    query_by_prompt(&state, None, &window).await
 }
 
 /// GET /v1/dashboard/api/operator/alerts?days=7 — cost anomaly episodes
@@ -282,7 +276,7 @@ pub async fn operator_alerts(
     }
     let alerts = match crate::alerts::list_alerts(&state.db, window.days()).await {
         Ok(rows) => rows,
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     // ITEM-071: label a per-provider alert with the provider's name.
     let provider_ids: Vec<uuid::Uuid> = alerts
@@ -333,11 +327,9 @@ pub async fn operator_guard(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match operator_or(&state, &headers).await {
-        Ok(()) => query_guard(&state, None, &window, "operator").await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    operator_or(&state, &headers).await?;
+    query_guard(&state, None, &window, "operator").await
 }
 
 /// GET /v1/dashboard/api/operator/keys?tenant_id=… — a tenant's key metadata
@@ -362,7 +354,7 @@ pub async fn operator_keys(
                 .collect();
             json_ok(json!({"keys": rows}))
         }
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 
@@ -385,7 +377,7 @@ pub async fn operator_keys_create(
                 "no such tenant",
             )
         }
-        Err(e) => return internal(&e.to_string()),
+        Err(e) => return internal(e.to_string()),
     };
     let label = body.label.unwrap_or_else(|| "default".to_string());
     match mint_key_payload(&state, tenant.id, &label).await {
@@ -411,7 +403,7 @@ pub async fn operator_key_revoke(
             "key_not_found",
             "no such active key",
         ),
-        Err(e) => internal(&e.to_string()),
+        Err(e) => internal(e.to_string()),
     }
 }
 

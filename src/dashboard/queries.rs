@@ -75,16 +75,22 @@ type TimeseriesRow = (String, i64, i64, Decimal, i64, i64, Option<f64>, Option<f
 /// views and `None` for the operator's platform-wide views (ITEM-013).
 /// The SQL uses `($1::uuid IS NULL OR tenant_id = $1)` so one query shape
 /// serves both scopes; the WHERE filter is the only separation.
+///
+/// Turn a storage error into the dashboard's 500 (`?`-friendly).
+fn stored<T>(result: Result<T, sqlx::Error>) -> Result<T, Response> {
+    result.map_err(db_err)
+}
+
 pub(crate) async fn query_summary(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
     scope_label: &str,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
     let offset = window.offset();
     let row: Option<SummaryRow> =
-        match sqlx::query_as(
+        stored(sqlx::query_as(
             "SELECT COUNT(*),
                     COALESCE(SUM(upstream_cost_usd), 0),
                     COUNT(*) FILTER (WHERE status_code >= 400),
@@ -110,11 +116,7 @@ pub(crate) async fn query_summary(
         .bind(days)
         .bind(offset)
         .fetch_optional(&state.db)
-        .await
-        {
-            Ok(row) => row,
-            Err(e) => return db_err(e),
-        };
+        .await)?;
 
     let (
         requests,
@@ -161,7 +163,7 @@ pub(crate) async fn query_summary(
         duration_p99_ms,
         proxy_p50_ms,
         proxy_p95_ms,
-    ): LatencyRow = match sqlx::query_as(
+    ): LatencyRow = stored(sqlx::query_as(
         "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
                 percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
                 percentile_cont(0.99) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
@@ -179,13 +181,9 @@ pub(crate) async fn query_summary(
     .bind(days)
     .bind(offset)
     .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     // ITEM-057: the failure taxonomy, grouped by class (null = no failure).
-    let by_class: Vec<(String, i64)> = match sqlx::query_as(
+    let by_class: Vec<(String, i64)> = stored(sqlx::query_as(
         "SELECT error_class, COUNT(*)
          FROM traces
          WHERE error_class IS NOT NULL
@@ -198,11 +196,7 @@ pub(crate) async fn query_summary(
     .bind(days)
     .bind(offset)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let errors_by_class: serde_json::Map<String, Value> = by_class
         .into_iter()
         .map(|(class, count)| (class, json!(count)))
@@ -218,7 +212,7 @@ pub(crate) async fn query_summary(
     } else {
         None
     };
-    json_ok(json!({
+    Ok(json_ok(json!({
         "scope": scope_label,
         "tenant_id": tenant.map(|t| t.to_string()),
         "window_days": days,
@@ -255,15 +249,15 @@ pub(crate) async fn query_summary(
         // What the request would have cost on the model the client asked for
         // (model-substitution axis; cache is a separate axis above).
         "unreduced_cost_usd": (total_cost + savings).to_string(),
-    }))
+    })))
 }
 
 pub(crate) async fn query_by_model(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
-    let rows: Vec<ModelAggregateRow> = match sqlx::query_as(
+) -> Result<Response, Response> {
+    let rows: Vec<ModelAggregateRow> = stored(sqlx::query_as(
         "SELECT request_model, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(upstream_cost_usd), 0),
                 COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0),
@@ -276,11 +270,7 @@ pub(crate) async fn query_by_model(
     .bind(tenant)
     .bind(window.days())
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
     let models: Vec<Value> = rows
         .into_iter()
@@ -300,15 +290,15 @@ pub(crate) async fn query_by_model(
             })
         })
         .collect();
-    json_ok(json!({"models": models}))
+    Ok(json_ok(json!({"models": models})))
 }
 
 pub(crate) async fn query_by_prompt(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
-    let rows: Vec<(Option<String>, i64, i64, Decimal, i64, Decimal)> = match sqlx::query_as(
+) -> Result<Response, Response> {
+    let rows: Vec<(Option<String>, i64, i64, Decimal, i64, Decimal)> = stored(sqlx::query_as(
         "SELECT system_prompt_hash, COUNT(*), COALESCE(SUM(prompt_tokens), 0),
                 COALESCE(SUM(upstream_cost_usd), 0),
                 COALESCE(SUM(cached_prompt_tokens), 0), COALESCE(SUM(cache_savings_usd), 0)
@@ -321,11 +311,7 @@ pub(crate) async fn query_by_prompt(
     .bind(window.days())
     .bind(window.limit())
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
     let prompts: Vec<Value> = rows
         .into_iter()
@@ -342,7 +328,7 @@ pub(crate) async fn query_by_prompt(
             })
         })
         .collect();
-    json_ok(json!({"prompts": prompts}))
+    Ok(json_ok(json!({"prompts": prompts})))
 }
 
 /// ITEM-047: spend/usage grouped by provider over the window (offset shifts it
@@ -351,11 +337,11 @@ async fn query_by_provider(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
     let offset = window.offset();
     let rows: Vec<ProviderAggregateRow> =
-        match sqlx::query_as(
+        stored(sqlx::query_as(
             "SELECT t.provider_id,
                     COALESCE(p.name, 'Shared platform key'),
                     COALESCE(p.kind, 'shared'),
@@ -381,11 +367,7 @@ async fn query_by_provider(
         .bind(days)
         .bind(offset)
         .fetch_all(&state.db)
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => return db_err(e),
-        };
+        .await)?;
 
     let providers: Vec<Value> = rows
         .into_iter()
@@ -424,11 +406,11 @@ async fn query_by_provider(
             },
         )
         .collect();
-    json_ok(json!({
+    Ok(json_ok(json!({
         "window_days": days,
         "offset_days": offset,
         "providers": providers,
-    }))
+    })))
 }
 
 /// ITEM-047: spend/usage grouped by API key over the window. A `NULL`
@@ -437,10 +419,10 @@ async fn query_by_key(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
     let offset = window.offset();
-    let rows: Vec<KeyAggregateRow> = match sqlx::query_as(
+    let rows: Vec<KeyAggregateRow> = stored(sqlx::query_as(
         "SELECT t.api_key_id,
                 COALESCE(k.label, 'Legacy key'),
                 COUNT(*),
@@ -460,11 +442,7 @@ async fn query_by_key(
     .bind(days)
     .bind(offset)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
     let keys: Vec<Value> = rows
         .into_iter()
@@ -482,21 +460,21 @@ async fn query_by_key(
             },
         )
         .collect();
-    json_ok(json!({
+    Ok(json_ok(json!({
         "window_days": days,
         "offset_days": offset,
         "keys": keys,
-    }))
+    })))
 }
 
 async fn query_waste(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
+) -> Result<Response, Response> {
     // Grouped by the model pair so the estimate uses each row's own suggestion
     // (`gpt-4o` -> mini, `deepseek-v4-pro` -> flash) rather than a fixed pair.
-    let rows: Vec<(String, String, String, i64, i64, i64, Decimal)> = match sqlx::query_as(
+    let rows: Vec<(String, String, String, i64, i64, i64, Decimal)> = stored(sqlx::query_as(
         "SELECT flag, request_model,
                 COALESCE(waste_detected->>'suggested_model', '') AS suggested,
                 COUNT(*), COALESCE(SUM(prompt_tokens), 0),
@@ -513,11 +491,7 @@ async fn query_waste(
     .bind(tenant)
     .bind(window.days())
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
     #[derive(Default)]
     struct Totals {
@@ -553,7 +527,7 @@ async fn query_waste(
             "savings_est_usd": totals.savings.to_string(),
         });
     }
-    json_ok(out)
+    Ok(json_ok(out))
 }
 
 /// Daily buckets over the window, gap-filled with zero rows so the chart is
@@ -562,11 +536,11 @@ async fn query_timeseries(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
     let offset = window.offset();
     let rows: Vec<TimeseriesRow> =
-        match sqlx::query_as(
+        stored(sqlx::query_as(
             "SELECT to_char(b.day, 'YYYY-MM-DD'),
                     COUNT(t.id),
                     COUNT(t.id) FILTER (WHERE t.status_code >= 400),
@@ -589,11 +563,7 @@ async fn query_timeseries(
         .bind(days)
         .bind(offset)
         .fetch_all(&state.db)
-        .await
-        {
-            Ok(rows) => rows,
-            Err(e) => return db_err(e),
-        };
+        .await)?;
 
     let points: Vec<Value> = rows
         .into_iter()
@@ -621,11 +591,11 @@ async fn query_timeseries(
             },
         )
         .collect();
-    json_ok(json!({
+    Ok(json_ok(json!({
         "window_days": days,
         "offset_days": offset,
         "points": points,
-    }))
+    })))
 }
 
 /// GET /v1/dashboard/api/quality?days=7 (tenant scope) — ITEM-055 quality view:
@@ -635,11 +605,9 @@ pub async fn quality(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_quality(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_quality(&state, Some(id), &window).await
 }
 
 /// A rate as a fraction in 0..1, or `None` when there is no denominator.
@@ -651,10 +619,10 @@ async fn query_quality(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
     window: &Window,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
     // Overall totals: derived outcomes + guard fallbacks + unclassified history.
-    let totals: Option<QualityTotalsRow> = match sqlx::query_as(
+    let totals: Option<QualityTotalsRow> = stored(sqlx::query_as(
         "SELECT COUNT(*),
                 COUNT(*) FILTER (WHERE outcome = 'ok'),
                 COUNT(*) FILTER (WHERE outcome = 'empty'),
@@ -670,15 +638,11 @@ async fn query_quality(
     .bind(tenant)
     .bind(days)
     .fetch_optional(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let (requests, ok, empty, refused, errors, truncated, guard_fallback, unclassified) =
         totals.unwrap_or((0, 0, 0, 0, 0, 0, 0, 0));
 
-    let thumbs: (i64, i64) = match sqlx::query_as(
+    let thumbs: (i64, i64) = stored(sqlx::query_as(
         "SELECT COUNT(*) FILTER (WHERE signal = 'up'),
                 COUNT(*) FILTER (WHERE signal = 'down')
          FROM trace_quality
@@ -688,13 +652,9 @@ async fn query_quality(
     .bind(tenant)
     .bind(days)
     .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
-    let models: Vec<(String, i64, i64, i64, i64, i64, i64)> = match sqlx::query_as(
+    let models: Vec<(String, i64, i64, i64, i64, i64, i64)> = stored(sqlx::query_as(
         "SELECT t.request_model, COUNT(*),
                 COUNT(*) FILTER (WHERE t.outcome = 'ok'),
                 COUNT(*) FILTER (WHERE t.outcome = 'empty'),
@@ -710,13 +670,9 @@ async fn query_quality(
     .bind(tenant)
     .bind(days)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
-    let prompts: Vec<(String, i64, i64, i64, i64)> = match sqlx::query_as(
+    let prompts: Vec<(String, i64, i64, i64, i64)> = stored(sqlx::query_as(
         "SELECT system_prompt_hash, COUNT(*),
                 COUNT(*) FILTER (WHERE outcome = 'ok'),
                 COUNT(*) FILTER (WHERE outcome = 'empty'),
@@ -730,14 +686,10 @@ async fn query_quality(
     .bind(tenant)
     .bind(days)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
 
     // ITEM-057: the failure taxonomy, grouped by class.
-    let by_class: Vec<(String, i64)> = match sqlx::query_as(
+    let by_class: Vec<(String, i64)> = stored(sqlx::query_as(
         "SELECT error_class, COUNT(*)
          FROM traces
          WHERE error_class IS NOT NULL
@@ -748,11 +700,7 @@ async fn query_quality(
     .bind(tenant)
     .bind(days)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let errors_by_class: serde_json::Map<String, Value> = by_class
         .into_iter()
         .map(|(class, count)| (class, json!(count)))
@@ -787,7 +735,7 @@ async fn query_quality(
         })
         .collect();
 
-    json_ok(json!({
+    Ok(json_ok(json!({
         "window_days": days,
         "scope": if tenant.is_some() { "tenant" } else { "operator" },
         "overall": {
@@ -811,7 +759,7 @@ async fn query_quality(
         },
         "models": model_rows,
         "prompts": prompt_rows,
-    }))
+    })))
 }
 
 /// GET /v1/dashboard/api/summary?days=7 (tenant scope)
@@ -819,11 +767,9 @@ pub async fn summary(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_summary(&state, Some(id), &window, "tenant").await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_summary(&state, Some(id), &window, "tenant").await
 }
 
 /// GET /v1/dashboard/api/by-model?days=7 (tenant scope)
@@ -831,11 +777,9 @@ pub async fn by_model(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_by_model(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_by_model(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/by-prompt?days=7&limit=10 (tenant scope)
@@ -843,11 +787,9 @@ pub async fn by_prompt(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_by_prompt(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_by_prompt(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/by-provider?days=7 (tenant scope)
@@ -855,11 +797,9 @@ pub async fn by_provider(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_by_provider(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_by_provider(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/by-key?days=7 (tenant scope)
@@ -867,11 +807,9 @@ pub async fn by_key(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_by_key(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_by_key(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/waste?days=7 (tenant scope)
@@ -879,11 +817,9 @@ pub async fn waste(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_waste(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_waste(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/timeseries?days=30&offset=0 (tenant scope)
@@ -891,11 +827,9 @@ pub async fn timeseries(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_timeseries(&state, Some(id), &window).await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_timeseries(&state, Some(id), &window).await
 }
 
 /// GET /v1/dashboard/api/guard?days=7 (tenant scope, ITEM-026 AC2)
@@ -903,11 +837,9 @@ pub async fn guard(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Query(window): Query<Window>,
-) -> Response {
-    match tenant_or(&state, &headers).await {
-        Ok(id) => query_guard(&state, Some(id), &window, "tenant").await,
-        Err(resp) => resp,
-    }
+) -> Result<Response, Response> {
+    let id = tenant_or(&state, &headers).await?;
+    query_guard(&state, Some(id), &window, "tenant").await
 }
 
 /// Guard telemetry aggregate over the additive `guard_event` JSONB on traces
@@ -922,9 +854,9 @@ pub(crate) async fn query_guard(
     tenant: Option<uuid::Uuid>,
     window: &Window,
     scope_label: &str,
-) -> Response {
+) -> Result<Response, Response> {
     let days = window.days();
-    let row: Option<(i64, i64, i64)> = match sqlx::query_as(
+    let row: Option<(i64, i64, i64)> = stored(sqlx::query_as(
         "SELECT COUNT(*),
                 COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
                 COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback_failed')
@@ -936,14 +868,10 @@ pub(crate) async fn query_guard(
     .bind(tenant)
     .bind(days)
     .fetch_optional(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let (guarded, fallback, fallback_failed) = row.unwrap_or((0, 0, 0));
 
-    let by_model: Vec<(String, i64, i64, i64)> = match sqlx::query_as(
+    let by_model: Vec<(String, i64, i64, i64)> = stored(sqlx::query_as(
         "SELECT COALESCE(guard_event->>'guarded_model', '(unknown)'), COUNT(*),
                 COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
                 COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback_failed')
@@ -956,11 +884,7 @@ pub(crate) async fn query_guard(
     .bind(tenant)
     .bind(days)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let models: Vec<Value> = by_model
         .into_iter()
         .map(|(model, guarded, fallback, fallback_failed)| {
@@ -973,7 +897,7 @@ pub(crate) async fn query_guard(
         })
         .collect();
 
-    let by_reason: Vec<(String, i64)> = match sqlx::query_as(
+    let by_reason: Vec<(String, i64)> = stored(sqlx::query_as(
         "SELECT guard_event->>'reason', COUNT(*)
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
@@ -985,17 +909,13 @@ pub(crate) async fn query_guard(
     .bind(tenant)
     .bind(days)
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let reasons: Vec<Value> = by_reason
         .into_iter()
         .map(|(reason, events)| json!({ "reason": reason, "events": events }))
         .collect();
 
-    let negative: Vec<(String, i64)> = match sqlx::query_as(
+    let negative: Vec<(String, i64)> = stored(sqlx::query_as(
         "SELECT system_prompt_hash, COUNT(*)
          FROM traces
          WHERE ($1::uuid IS NULL OR tenant_id = $1)
@@ -1008,17 +928,13 @@ pub(crate) async fn query_guard(
     .bind(days)
     .bind(window.limit())
     .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return db_err(e),
-    };
+    .await)?;
     let negative_samples: Vec<Value> = negative
         .into_iter()
         .map(|(hash, fallbacks)| json!({ "system_prompt_hash": hash, "fallbacks": fallbacks }))
         .collect();
 
-    json_ok(json!({
+    Ok(json_ok(json!({
         "scope": scope_label,
         "tenant_id": tenant.map(|t| t.to_string()),
         "window_days": days,
@@ -1028,5 +944,5 @@ pub(crate) async fn query_guard(
         "by_model": models,
         "by_reason": reasons,
         "negative_samples": negative_samples,
-    }))
+    })))
 }

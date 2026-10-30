@@ -352,6 +352,147 @@ async fn build_model_chain(
     chain
 }
 
+/// What the router decided for a request: the route for the client's model and
+/// the ordered chain to try. Fills in the trace-visible decisions on `meta`
+/// (provider, router event, cache affinity) as it goes.
+struct ModelPlan {
+    route: Route,
+    /// The model the chain starts from (after any override/affinity) — recorded
+    /// as the `from_model` of a fallback event.
+    primary: String,
+    chain: Vec<(String, Route)>,
+}
+
+/// Turn the request into a model plan: read the adaptive policy, resolve the
+/// route, apply the budget breaker and the heuristic router, prefer a warm
+/// cache, then append the tenant's fallback chain — dropping models the tenant
+/// disabled. Trace-visible decisions (provider, router event, cache affinity)
+/// are recorded on `meta` as they are made.
+async fn plan_models(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    meta: &mut RequestMeta,
+    started: Instant,
+) -> Result<ModelPlan, Response> {
+    let tenant_id = tenant.id;
+    // ITEM-064/069: read the adaptive policy once — it supplies both the router
+    // threshold and the provider health weights.
+    let policy = match state.policy_store.active(tenant_id).await {
+        Ok(policy) => policy.filter(|policy| policy.enabled),
+        Err(e) => {
+            tracing::warn!("policy lookup failed: {e}");
+            None
+        }
+    };
+    meta.policy_version = policy.as_ref().map(|policy| policy.version);
+    let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
+    let route = match resolve_route(
+        state,
+        tenant,
+        Some(&meta.model),
+        Surface::OpenAi,
+        policy_weights,
+    )
+    .await
+    {
+        Ok(route) => route,
+        Err(resp) => return Err(resp),
+    };
+    meta.provider_id = route.provider_id;
+    meta.is_local = route.is_local;
+    crate::metrics::request_routed(route.provider_id);
+
+    // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
+    // error (and traced), not a raw upstream 4xx.
+    ensure_model_enabled(state, meta, tenant_id, started, route.provider_id, &meta.model).await?;
+
+    // ITEM-016: the budget breaker wins over the router and rejects before any
+    // upstream call; ITEM-046/081: otherwise the router may downshift.
+    let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
+    let chosen = match budget::check_budget(state, tenant_id, &meta.raw_prompt, policy_threshold)
+        .await
+    {
+        Ok(chosen) => chosen,
+        Err(resp) => {
+            trace_error(state, meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
+            return Err(resp);
+        }
+    };
+    let primary = override_primary(state, route.provider_id, meta, chosen).await;
+    // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
+    let primary = prefer_warm(state, tenant_id, meta, primary).await;
+    let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
+        Ok(models) => models,
+        Err(e) => {
+            tracing::error!("routing policy load failed: {e}");
+            Vec::new()
+        }
+    };
+    let chain =
+        build_model_chain(state, tenant, &route, primary.clone(), fallbacks, policy_weights).await;
+    Ok(ModelPlan { route, primary, chain })
+}
+
+/// ITEM-044 AC4: never select a model the tenant disabled — the requested model
+/// then stands. Otherwise the override becomes the primary and, when the
+/// heuristic router caused it, is recorded on the trace (ITEM-054/081).
+async fn override_primary(
+    state: &Arc<AppState>,
+    provider_id: Option<Uuid>,
+    meta: &mut RequestMeta,
+    chosen: Option<budget::ModelOverride>,
+) -> String {
+    let Some(chosen) = chosen else {
+        return meta.model.clone();
+    };
+    if state
+        .model_store
+        .is_disabled(provider_id, &chosen.model)
+        .await
+        .unwrap_or(false)
+    {
+        return meta.model.clone();
+    }
+    if chosen.reason == budget::ROUTER_REASON {
+        let mut event = json!({
+            "from_model": meta.model,
+            "to_model": chosen.model,
+            "reason": chosen.reason,
+        });
+        if let Some(source) = chosen.pair_source {
+            event["pair_source"] = json!(source.label());
+        }
+        meta.router_event = Some(event);
+    }
+    chosen.model
+}
+
+/// ITEM-063: keep a warm provider cache over a marginally cheaper miss.
+async fn prefer_warm(
+    state: &Arc<AppState>,
+    tenant_id: Uuid,
+    meta: &mut RequestMeta,
+    primary: String,
+) -> String {
+    let Some(hash) = meta.system_prompt_hash.as_deref() else {
+        return primary;
+    };
+    match state.affinity_store.warm_target(tenant_id, hash).await {
+        Ok(Some(warm))
+            if warm.model != primary && crate::affinity::keep_warm(&warm.model, &primary) =>
+        {
+            meta.cache_affinity = Some(json!({
+                "from_model": primary,
+                "to_model": warm.model,
+                "reason": "cache_affinity",
+            }));
+            warm.model
+        }
+        _ => primary,
+    }
+}
+
+
 /// Proxy a chat completion request to the configured upstream.
 ///
 /// Authenticates the caller via `Authorization: Bearer <key>` (SHA-256 lookup
@@ -365,7 +506,9 @@ pub(crate) async fn proxy_chat_completions(
     req: Request,
 ) -> Response {
     let _in_flight = crate::metrics::request_started();
-    let request_started = Instant::now();
+    // One clock for the whole request: `started` is both the trace's duration
+    // basis and the split point for the proxy's own pre-upstream time.
+    let started = Instant::now();
     let tenant = match authenticate(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -391,8 +534,8 @@ pub(crate) async fn proxy_chat_completions(
         Err(resp) => return resp,
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
-    // The router/budget override is decided per request (ITEM-045/046) — see
-    // `check_budget` below, which applies both against the tenant's config.
+    // The router/budget override is decided per request in `plan_models` below,
+    // against the tenant's config (ITEM-045/046).
     let mut meta = RequestMeta {
         id: Uuid::new_v4(),
         model: payload["model"].as_str().unwrap_or("unknown").to_string(),
@@ -408,117 +551,19 @@ pub(crate) async fn proxy_chat_completions(
         api_key_id: tenant.api_key_id,
         is_local: false,
     };
-    // ITEM-064/069: read the adaptive policy once — it supplies both the router
-    // threshold and the provider health weights.
-    let policy = match state.policy_store.active(tenant_id).await {
-        Ok(policy) => policy.filter(|policy| policy.enabled),
-        Err(e) => {
-            tracing::warn!("policy lookup failed: {e}");
-            None
-        }
-    };
-    meta.policy_version = policy.as_ref().map(|policy| policy.version);
-    let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
-    let route = match resolve_route(
-        &state,
-        &tenant,
-        Some(&meta.model),
-        Surface::OpenAi,
-        policy_weights,
-    )
-    .await
-    {
-        Ok(route) => route,
+    let ModelPlan {
+        route,
+        primary,
+        chain: allowed,
+    } = match plan_models(&state, &tenant, &mut meta, started).await {
+        Ok(plan) => plan,
         Err(resp) => return resp,
     };
-    meta.provider_id = route.provider_id;
-    meta.is_local = route.is_local;
-    crate::metrics::request_routed(route.provider_id);
-
-    let started = Instant::now();
-
-    // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
-    // error (and traced), not a raw upstream 4xx.
-    if let Err(resp) =
-        ensure_model_enabled(&state, &meta, tenant_id, started, route.provider_id, &meta.model)
-            .await
-    {
-        return resp;
-    }
-
-    let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
-    // Budget breaker (ITEM-016): its fallback model wins over the router;
-    // a hard-cap rejection is traced and answered 429 before any upstream call.
-    let budget_override = match budget::check_budget(
-        &state,
-        tenant_id,
-        &meta.raw_prompt,
-        policy_threshold,
-    )
-    .await
-    {
-        Ok(model) => model,
-        Err(resp) => {
-            trace_error(&state, &meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
-            return resp;
-        }
-    };
-    let mut model_override = budget_override;
-    // ITEM-044 AC4: routing never selects a model the tenant disabled — drop the
-    // override and serve the (already-allowed) requested model. ITEM-054: when
-    // the heuristic router caused the override, record it on the trace.
-    if let Some(chosen) = model_override.clone() {
-        if state
-            .model_store
-            .is_disabled(route.provider_id, &chosen.model)
-            .await
-            .unwrap_or(false)
-        {
-            model_override = None;
-        } else if chosen.reason == budget::ROUTER_REASON {
-            let mut event = json!({
-                "from_model": meta.model,
-                "to_model": chosen.model,
-                "reason": chosen.reason,
-            });
-            if let Some(source) = chosen.pair_source {
-                event["pair_source"] = json!(source.label());
-            }
-            meta.router_event = Some(event);
-        }
-    }
-    // ITEM-045: the ordered chain — the primary (after any router/budget override),
-    // then the tenant's fallbacks, de-duped and with disabled models dropped
-    // (ITEM-044). Loaded once per request; an empty chain changes nothing.
-    let primary = model_override.take().map(|chosen| chosen.model).unwrap_or_else(|| meta.model.clone());
-    // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
-    let primary = match meta.system_prompt_hash.as_deref() {
-        Some(hash) => match state.affinity_store.warm_target(tenant_id, hash).await {
-            Ok(Some(warm)) if warm.model != primary && crate::affinity::keep_warm(&warm.model, &primary) => {
-                meta.cache_affinity = Some(json!({
-                    "from_model": primary,
-                    "to_model": warm.model,
-                    "reason": "cache_affinity",
-                }));
-                warm.model
-            }
-            _ => primary,
-        },
-        None => primary,
-    };
-    let fallbacks = match state.routing_store.fallbacks(tenant_id).await {
-        Ok(models) => models,
-        Err(e) => {
-            tracing::error!("routing policy load failed: {e}");
-            Vec::new()
-        }
-    };
-    let allowed = build_model_chain(&state, &tenant, &route, primary.clone(), fallbacks, policy_weights).await;
 
     let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
-    // dispatch.
-    meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
+    // dispatch (a subset of the trace's total duration).
+    meta.proxy_ms = Some(started.elapsed().as_millis() as i64);
     let mut upstream: Option<reqwest::Response> = None;
     for index in 0..allowed.len() {
         let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
@@ -541,8 +586,8 @@ pub(crate) async fn proxy_chat_completions(
         meta.wire_format = downgrade_schema.then_some("json_object");
         let attempt = provider_request(&state.http_client, attempt_route)
             .body(body)
-        .send()
-        .await;
+            .send()
+            .await;
         let is_last = index + 1 == allowed.len();
         match attempt {
             Ok(response) => {
