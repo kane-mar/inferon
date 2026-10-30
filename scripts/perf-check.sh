@@ -54,6 +54,20 @@ HASH=$(printf '%s' "$KEY" | sha256)
 psql "INSERT INTO api_keys (tenant_id, label, key_hash)
       VALUES ('$TENANT', 'perf-check', '$HASH');" >/dev/null
 
+# Point the throwaway tenant at a dead local port so each probe fails in
+# microseconds (connection refused) instead of leaving the host. The key
+# ciphertext is copied from an existing provider so it decrypts with this
+# deployment's key; the row is deleted with the tenant. With no provider to
+# copy, the tenant falls back to the shared upstream (a slow, free 401).
+if [ "$(psql "SELECT count(*) FROM providers;")" != "0" ]; then
+    psql "INSERT INTO providers
+            (tenant_id, kind, name, base_url, key_ciphertext, key_hint, metadata,
+             spend_limit_cents, is_default)
+          SELECT '$TENANT', kind, 'perf-check', 'http://127.0.0.1:9/v1',
+                 key_ciphertext, key_hint, metadata, 0, true
+          FROM providers ORDER BY created_at LIMIT 1;" >/dev/null
+fi
+
 cleanup() {
     psql "DELETE FROM tenants WHERE id = '$TENANT';" >/dev/null 2>&1 || true
 }
@@ -66,17 +80,32 @@ BODY='{"model":"perf-check","messages":[{"role":"user","content":"ping"}]}'
 curl -sS -o /dev/null --max-time 10 "$BASE/v1/chat/completions" \
     -H "Authorization: Bearer $KEY" -H 'content-type: application/json' -d "$BODY" || true
 sleep 0.3
-# Keep the burst inside the 5 s config TTL so every sample is a warm request.
-seq 1 "$REQUESTS" | xargs -P 4 -I{} curl -sS -o /dev/null --max-time 10 \
-    "$BASE/v1/chat/completions" \
-    -H "Authorization: Bearer $KEY" -H 'content-type: application/json' -d "$BODY" || true
+# Sequential on purpose: the claim is per-request wire latency, not throughput.
+# The burst finishes well inside the 5 s config TTL, so every sample is warm.
+for _ in $(seq 1 "$REQUESTS"); do
+    curl -sS -o /dev/null --max-time 10 \
+        "$BASE/v1/chat/completions" \
+        -H "Authorization: Bearer $KEY" \
+        -H 'content-type: application/json' -d "$BODY" || true
+done
 # Telemetry flushes every 500 ms.
 sleep 2
 
-read -r COUNT P50 P95 <<<"$(psql "SELECT count(*),
+# `psql -tA` separates fields with '|', not whitespace.
+IFS='|' read -r COUNT P50 P95 <<<"$(psql "SELECT count(*),
         COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us)), 0),
         COALESCE(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us)), 0)
     FROM traces WHERE tenant_id = '$TENANT' AND proxy_us IS NOT NULL;")"
+
+# Never pass vacuously: a parse failure must fail the check.
+for value in "$COUNT" "$P50" "$P95"; do
+    case "$value" in
+        ''|*[!0-9]*)
+            echo "perf-check: could not parse the measurement (count=${COUNT:-} p50=${P50:-} p95=${P95:-})" >&2
+            exit 1
+            ;;
+    esac
+done
 
 echo "proxy overhead: ${COUNT} requests · p50 ${P50}us · p95 ${P95}us"
 echo "budget:          p50 < ${P50_BUDGET}us · p95 < ${P95_BUDGET}us"
