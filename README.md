@@ -69,8 +69,10 @@ This is not a marketing number:
 - the unit suite measures it on every push
   (`proxy_overhead_is_sub_millisecond_for_small_requests`);
 - the deploy job runs `scripts/perf-check.sh` against the live host after every
-  deployment and fails the run if p50 ≥ 1 ms or p95 ≥ 2 ms, printing the measured
-  numbers;
+  deployment, prints the measured numbers, and **fails the run if p50 ≥ 1 ms**.
+  p95 is reported with a 5 ms guard, not gated at 1–2 ms: on the shared 1 vCPU
+  host the tail is scheduler-bound (observed 1.1–3.5 ms) while a cache
+  regression measured 6–28 ms;
 - the hot path pays **one** storage round trip per request (the auth lookup).
   Everything else — controls, policy, fallbacks, route, warm target, spend — is
   served from `src/hotpath.rs` and invalidated on every write.
