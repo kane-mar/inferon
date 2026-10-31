@@ -221,7 +221,7 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         Ok(config) => config,
         Err(e) => return internal(e.to_string()),
     };
-    let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention) =
+    let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention, lint) =
         match config {
             Some(budget) => (
                 budget.limit_cents,
@@ -232,10 +232,12 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
                 budget.router_threshold,
                 budget.capture_payloads,
                 budget.payload_retention_days,
+                budget.lint_enabled,
             ),
-            // Unconfigured: the router/guard are on by default (ITEM-015/027)
-            // and payloads are captured for 30 days (ITEM-088).
-            None => (0, 0, None, true, true, 0.35, true, 30),
+            // Unconfigured: the router/guard are on by default (ITEM-015/027),
+            // payloads are captured for 30 days (ITEM-088) and the pre-flight
+            // lint runs (ITEM-090).
+            None => (0, 0, None, true, true, 0.35, true, 30, true),
         };
     json_ok(json!({
         "budget_limit_cents": limit,
@@ -246,6 +248,7 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "router_threshold": router_threshold,
         "capture_payloads": capture,
         "payload_retention_days": retention,
+        "lint_enabled": lint,
         "role": role,
     }))
 }
@@ -274,6 +277,7 @@ pub async fn tenant_config_set(
         router_threshold: body.router_threshold.clamp(0.0, 1.0),
         capture_payloads: body.capture_payloads,
         payload_retention_days: body.payload_retention_days.clamp(0, 3650),
+        lint_enabled: body.lint_enabled,
     };
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => {

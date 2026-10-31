@@ -115,6 +115,8 @@ pub struct HotPath {
     auth: Mutex<HashMap<String, (Tenant, Instant)>>,
     /// Key hashes with a background auth refresh in flight.
     auth_refreshing: Mutex<std::collections::HashSet<String>>,
+    /// The last system-prompt hash per tenant, for the pre-flight repeat check.
+    recent_prompts: Mutex<HashMap<Uuid, (String, Instant)>>,
     counters: Counters,
 }
 
@@ -189,6 +191,7 @@ impl HotPath {
             tenants: Mutex::new(HashMap::new()),
             auth: Mutex::new(HashMap::new()),
             auth_refreshing: Mutex::new(std::collections::HashSet::new()),
+            recent_prompts: Mutex::new(HashMap::new()),
             counters: Counters::default(),
         }
     }
@@ -540,6 +543,20 @@ impl HotPath {
         });
     }
 
+    /// ITEM-090: record this request's system-prompt hash and say whether the
+    /// previous request from the tenant had the same one (inside `window`).
+    pub fn note_prompt(&self, tenant_id: Uuid, hash: &str, window: std::time::Duration) -> bool {
+        let mut recent = self
+            .recent_prompts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let repeated = recent
+            .get(&tenant_id)
+            .is_some_and(|(last, at)| last == hash && at.elapsed() < window);
+        recent.insert(tenant_id, (hash.to_string(), Instant::now()));
+        repeated
+    }
+
     /// ITEM-088: may this tenant's raw payloads be stored? Fail-open (true) when
     /// the config cannot be read, matching the pre-consent behaviour.
     pub async fn capture_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
@@ -550,6 +567,20 @@ impl HotPath {
                 .budget
                 .as_ref()
                 .is_none_or(|budget| budget.capture_payloads),
+            Err(_) => true,
+        }
+    }
+
+    /// ITEM-090: is the pre-flight lint pass on for this tenant? Fail-open, like
+    /// the other switches: an unreadable config keeps the advisory pass.
+    pub async fn lint_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
+        match self.refresh(state, tenant_id).await {
+            Ok(entry) => entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .budget
+                .as_ref()
+                .is_none_or(|budget| budget.lint_enabled),
             Err(_) => true,
         }
     }

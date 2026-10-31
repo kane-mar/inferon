@@ -12,19 +12,19 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
-Single list, ordered by value then effort. The 22 undelivered items come first,
+Single list, ordered by value then effort. The 9 undelivered items come first,
 in rank order; the six that are **gated** sit at the bottom of that list. Delivered
 history follows.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-085 | Persist streamed completions | feature | **new (2026-10-30)** — claim: "the proxy passively inspects completions". Today **12/774** traces have one: both stream paths store `raw_completion: None`, so there are no instruction pairs for the dominant traffic mode. Bounded capture from the existing SSE tap (content + tool calls, size cap, abort-safe) |
-| ITEM-086 | Verified-example curation and per-prompt counts | feature | **new (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
-| ITEM-088 | Retention and consent for captured payloads | feature | **new (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
-| ITEM-087 | Dataset surface and JSONL export | feature | **new (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
-| ITEM-092 | Hot-path config cache and latency budget | improvement | **in progress (2026-10-30)** — claim: "sub-millisecond wire latency". Delivered: `proxy_us`, the hot-path cache (auth/config/route/spend/warm), a **warm p50 87 µs** deploy gate over 40 requests, cache counters, and `/dashboard/performance`. Still open: stale-while-revalidate so **sparse** traffic is warm too (the page shows p50 1.8 ms at ~1 req/s, from pool warm-up + TTL misses), per-stage timing, kill switch |
-| ITEM-093 | Conversation and transaction grouping | feature | **new (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
-| ITEM-090 | In-flight payload lint (advisory) | feature | **new (2026-10-30)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". The linter is post-hoc only. Pre-dispatch findings traced with wasted tokens/USD, advisory (no rewrite), bounded cost, kill switch |
+| ITEM-085 | Persist streamed completions | feature | **done (2026-10-30)** — claim: "the proxy passively inspects completions". Today **12/774** traces have one: both stream paths store `raw_completion: None`, so there are no instruction pairs for the dominant traffic mode. Bounded capture from the existing SSE tap (content + tool calls, size cap, abort-safe) |
+| ITEM-086 | Verified-example curation and per-prompt counts | feature | **done (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
+| ITEM-088 | Retention and consent for captured payloads | feature | **done (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
+| ITEM-087 | Dataset surface and JSONL export | feature | **done (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
+| ITEM-092 | Hot-path config cache and latency budget | improvement | **done — core (2026-10-30)** — claim: "sub-millisecond wire latency". Delivered: `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate and background refresh (sparse traffic no longer pays a cold TTL miss), a **warm p50 87 µs** deploy gate over 40 requests, cache counters, and `/dashboard/performance`. Remaining (small, tracked in the item file): per-stage timing breakdown and a cache kill switch |
+| ITEM-093 | Conversation and transaction grouping | feature | **done (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
+| ITEM-090 | In-flight payload lint (advisory) | feature | **done (2026-10-31)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". Pre-dispatch pass (`preflight`) flags a repeated system prompt (hot-path history, 10 min), an oversized tool schema, boilerplate and duplicate turns; the finding is priced by the cost engine, recorded on `traces.request_lint`, returned as `X-Inferon-Lint`, shown on `/dashboard/performance`, kill-switchable per tenant (`tenant_configurations.lint_enabled`) and dismissible as a false positive (`POST /v1/lint/dismiss`). Advisory: the payload is forwarded unchanged |
 | ITEM-089 | Semantic task signatures for grouping | feature | **new (2026-10-30)** — claim: "grouped by task signature". Grouping is an exact hash; the ONNX embedder has no consumer. Embed → cluster → store cluster id; `NoEmbedder` falls back to the hash; composes with ITEM-029 |
 | ITEM-091 | Opt-in context pruning and payload rewriting | feature | **new (2026-10-30)** — claim: "dynamically pruning context". Nothing rewrites messages today. Off by default, traced rewrite record, holdout-measured, auto-off on quality regression, versioned policy |
 | ITEM-094 | Cross-format translation (any SDK to any backend) | feature | **new (2026-10-30)** — LiteLLM parity: `surface_mismatch` refuses an Anthropic SDK against an OpenAI/DeepSeek provider and vice versa. Pure translation module per direction, streaming + tools + errors, provider declares its surfaces |
@@ -79,15 +79,16 @@ history follows.
 | ITEM-083 | Self-hosted distribution (compose profile, install/upgrade, air-gapped) | feature | **done + archived (2026-10-29)** — `--profile self-hosted` (proxy + web + pg + redis, no Caddy), `guides/inferon-self-hosted.md` (install, tenant, local model, backup, upgrade/rollback, air-gapped, support boundary), and a CI job that starts the documented stack and proxies a request. Green in CI runs 154/156 |
 | ITEM-073 | Split the tenant control-plane module (dashboard/mod.rs) | tech-debt | **done (2026-10-15)** — handlers moved to `dashboard/{providers,keys,members,edge_admin,routing,queries}.rs` (re-exported; router paths unchanged); mod.rs 3,684 → 1,828 lines. Live: all 24 tenant+operator endpoints 200 |
 | ITEM-074 | Move bulk test modules out of production files | tech-debt | **done (2026-10-15)** — 26 `#[cfg(test)] mod tests` blocks moved to sibling `<module>/tests.rs` (crate root → `src/tests.rs`); same 306 tests. lib.rs 3,250 → 339, dashboard/mod.rs 1,828 → 415 |
+| ITEM-101 | Trace insert regression + schema-width guard | bug | **done (2026-10-31)** — the ITEM-085 build listed `raw_completion_capped` twice in the trace INSERT (and had one placeholder short), so **every** trace insert failed and the batch rolled back; ITEM-088's `payload_retention_days` was `INTEGER` while the store decodes `i64`, so the hot path answered `500 budget_store_error` for every request from 2026-10-30 11:14Z. Fixed, plus unit guards that read the statement as data: no duplicate column, one placeholder per column, every column exists in `db/init`, and the retention column is `BIGINT`. Live: 200 + a persisted trace |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 
-_Last updated: 2026-10-30 (re-ranked by value and effort — single list, gated at the bottom)_ —
-**ITEM-092 is in progress** — finish it before pulling new work (Rule 3): serve
-stale config/spend and refresh off the request path, keep routes until an
-explicit invalidation, then widen the TTLs. After that, **next pull is ITEM-085**
-(persist streamed completions), then 086 → 088 → 087 → 093.
+_Last updated: 2026-10-31 (085/086/088/087/093 and 090 delivered, 101 fixed)_ —
+**next pull is ITEM-089** (semantic task signatures): it is the last unpulled
+piece of the distillation cluster and the embedder gate is already cleared
+(ITEM-079). ITEM-092's remaining work (per-stage timing, cache kill switch) is
+small enough to pick up alongside it.
 
-Ordering rule for the 22 undelivered items: **value first, effort as the
+Ordering rule for the undelivered items: **value first, effort as the
 tie-breaker**, dependencies overriding both (087 cannot precede 086/088; 090 needs
 092's prompt cache; 091 waits for 090's evidence). Distillation (085–089, 094)
 outranks parity (095–100) because it is the claimed edge, not because it is

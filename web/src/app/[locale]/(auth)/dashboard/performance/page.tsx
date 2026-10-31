@@ -198,6 +198,48 @@ export default async function PerformancePage(props: {
         </Card>
       </div>
 
+      {/* Advisory findings: waste the proxy can see before the call leaves. */}
+      <div className="mt-4">
+        <Card title={t('findings')}>
+          <p className="mb-3 text-xs text-muted-foreground">{t('findings_help')}</p>
+          {data.lint.requests === 0
+            ? (
+                <p className="text-sm text-muted-foreground">{t('findings_none')}</p>
+              )
+            : (
+                <div className="flex flex-wrap items-center gap-4">
+                  <span className="text-sm">
+                    {t('findings_count', { count: data.lint.requests })}
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {t('findings_waste', { usd: data.lint.wasted_usd })}
+                  </span>
+                  {data.lint.dismissed > 0 && (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {t('findings_dismissed', { count: data.lint.dismissed })}
+                    </span>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(data.lint.by_kind).map(([kind, count]) => (
+                      <span
+                        key={kind}
+                        className="
+                          rounded-md border px-2 py-1 font-mono text-xs
+                          text-muted-foreground
+                        "
+                      >
+                        {kind}
+                        {' '}
+                        ·
+                        {integer(count)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+        </Card>
+      </div>
+
       {/* Operator-only: process-wide cache counters. */}
       {cache && (
         <div className="mt-4">

@@ -175,6 +175,8 @@ impl BudgetStore for EdgeState {
             tier_pairs: budget.tier_pairs,
             capture_payloads: budget.capture_payloads,
             payload_retention_days: budget.payload_retention_days,
+            // The edge runs the same advisory pass (ITEM-090).
+            lint_enabled: true,
         }))
     }
 

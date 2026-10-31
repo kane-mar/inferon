@@ -742,6 +742,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         let over_cap = budget::TenantBudget {
             capture_payloads: true,
             payload_retention_days: 30,
+            lint_enabled: true,
             limit_cents: 100,
             spent_cents: 100,
             cheap_fallback_model: None,
@@ -1334,6 +1335,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 example_reason: None,
                 completion_hash: None,
                 session_id: None,
+                request_lint: None,
         }
     }
 
@@ -1563,6 +1565,7 @@ async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
         budget::TenantBudget {
             capture_payloads: true,
             payload_retention_days: 30,
+            lint_enabled: true,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1631,6 +1634,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         budget::TenantBudget {
             capture_payloads: true,
             payload_retention_days: 30,
+            lint_enabled: true,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1673,6 +1677,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -1699,6 +1704,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 &budget::ConfigUpdate {
                     capture_payloads: true,
                     payload_retention_days: 30,
+                    lint_enabled: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -1758,6 +1764,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1787,6 +1794,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1815,6 +1823,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -2756,6 +2765,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -2978,6 +2988,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3072,6 +3083,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3092,6 +3104,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 &budget::ConfigUpdate {
                     capture_payloads: true,
                     payload_retention_days: 30,
+                    lint_enabled: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3277,6 +3290,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             budget::TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3311,6 +3325,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 &budget::ConfigUpdate {
                     capture_payloads: true,
                     payload_retention_days: 30,
+                    lint_enabled: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3372,6 +3387,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 tier_pairs: Vec::new(),
                 capture_payloads: false,
                 payload_retention_days: 30,
+                lint_enabled: true,
             },
         );
         let (response, mut rx) = traced_request_with_budget(
@@ -3387,4 +3403,83 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(msg.example_state.is_none(), "no dataset pair");
         assert_eq!(msg.outcome, crate::quality::Outcome::Ok);
         assert_eq!(msg.prompt_tokens, 3, "usage and cost are still recorded");
+    }
+
+    #[tokio::test]
+    async fn a_repeated_system_prompt_is_flagged_on_the_trace_and_the_response() {
+        // ITEM-090: advisory, pre-dispatch, and visible to the client.
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let router = build_router(state);
+        let body = r#"{"model":"content","messages":[
+            {"role":"system","content":"You are a very long boilerplate preamble."},
+            {"role":"user","content":"hi"}
+        ]}"#;
+
+        let first = router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert!(first.headers().get("x-inferon-lint").is_none(), "first turn is clean");
+        let _ = rx.recv().await.expect("trace");
+
+        let second = router
+            .clone()
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(
+            second.headers().get("x-inferon-lint").and_then(|v| v.to_str().ok()),
+            Some("repeated_system_prompt")
+        );
+        let msg = rx.recv().await.expect("trace");
+        let lint = msg.request_lint.expect("finding recorded");
+        assert_eq!(lint["kinds"][0], "repeated_system_prompt");
+        assert!(lint["wasted_tokens_est"].as_i64().unwrap() > 0);
+        assert!(
+            lint["wasted_usd_est"].as_str().is_some_and(|usd| usd.parse::<f64>().unwrap() > 0.0),
+            "the finding is priced: {lint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_lint_kill_switch_stops_the_pre_dispatch_pass() {
+        // ITEM-090 AC5: a tenant can turn the advisory pass off; the payload is
+        // forwarded either way.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
+                lint_enabled: false,
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: false,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let store: std::sync::Arc<dyn budget::BudgetStore> =
+            std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets));
+        let body = r#"{"model":"content","messages":[
+            {"role":"system","content":"You are a very long boilerplate preamble."},
+            {"role":"user","content":"hi"}
+        ]}"#;
+
+        let _ = traced_request_with_budget(body, Some(CLIENT_KEY), store.clone()).await;
+        let (second, mut rx) = traced_request_with_budget(body, Some(CLIENT_KEY), store).await;
+        assert!(
+            second.headers().get("x-inferon-lint").is_none(),
+            "the killed pass adds no header"
+        );
+        let msg = rx.recv().await.expect("trace");
+        assert!(msg.request_lint.is_none(), "and records nothing");
     }

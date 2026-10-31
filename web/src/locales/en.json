@@ -494,7 +494,13 @@
     "turns": "Turns",
     "models": "Models",
     "cost": "Cost",
-    "errors": "Errors"
+    "errors": "Errors",
+    "findings": "In-flight findings",
+    "findings_help": "Advisory checks on the payload before dispatch: repeated system prompts, oversized schemas, boilerplate, duplicate turns. The request is forwarded unchanged.",
+    "findings_none": "No findings in this window.",
+    "findings_count": "{count} request(s) with findings",
+    "findings_waste": "≈{usd} USD of avoidable input",
+    "findings_dismissed": "{count} dismissed"
   },
   "DatasetsPage": {
     "title_bar": "Datasets",

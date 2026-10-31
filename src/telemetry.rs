@@ -79,6 +79,8 @@ pub struct TraceMessage {
     pub completion_hash: Option<String>,
     /// ITEM-093: the client's transaction id, when supplied.
     pub session_id: Option<String>,
+    /// ITEM-090: pre-flight payload findings (None = nothing fired).
+    pub request_lint: Option<Value>,
 }
 
 /// Flush seam for the telemetry worker: batches of TraceMessages are handed
@@ -128,6 +130,20 @@ impl PostgresTraceSink {
     }
 }
 
+/// The trace insert. Read as data by `tests` — a column the migrations do not
+/// create, or one listed twice, fails the test suite instead of the deploy.
+const TRACE_INSERT: &str = r#"INSERT INTO traces (
+                    id, tenant_id, request_model, system_prompt_hash,
+                    prompt_tokens, completion_tokens, time_to_first_token_ms,
+                    total_duration_ms, status_code, raw_prompt, raw_completion, raw_completion_capped,
+                    upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
+                    provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
+                    outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
+                    proxy_ms, proxy_us,
+                    example_state, example_reason, completion_hash, session_id,
+                    request_lint
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)"#;
+
 #[async_trait::async_trait]
 impl TraceSink for PostgresTraceSink {
     async fn flush(&mut self, batch: &mut Vec<TraceMessage>) {
@@ -142,54 +158,44 @@ impl TraceSink for PostgresTraceSink {
         };
         let mut affinity_hits: Vec<(Uuid, String, Option<Uuid>, String)> = Vec::new();
         for msg in batch.drain(..) {
-            let result = sqlx::query(
-                r#"INSERT INTO traces (
-                    id, tenant_id, request_model, system_prompt_hash,
-                    prompt_tokens, completion_tokens, time_to_first_token_ms,
-                    total_duration_ms, status_code, raw_prompt, raw_completion, raw_completion_capped,
-                    upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
-                    provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
-                    outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
-                    proxy_ms, proxy_us, raw_completion_capped,
-                    example_state, example_reason, completion_hash, session_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)"#,
-            )
-            .bind(msg.id)
-            .bind(msg.tenant_id)
-            .bind(&msg.request_model)
-            .bind(msg.system_prompt_hash.as_deref())
-            .bind(msg.prompt_tokens)
-            .bind(msg.completion_tokens)
-            .bind(msg.ttft_ms.map(|t| t as i32))
-            .bind(msg.total_duration_ms as i32)
-            .bind(i32::from(msg.status_code))
-            .bind(msg.raw_prompt.as_ref().map(Json))
-            .bind(msg.raw_completion.as_ref().map(Json))
-            .bind(msg.raw_completion_capped)
-            .bind(msg.upstream_cost_usd)
-            .bind(msg.waste_detected.as_ref().map(Json))
-            .bind(msg.truncated)
-            .bind(msg.guard_event.as_ref().map(Json))
-            .bind(msg.routing_event.as_ref().map(Json))
-            .bind(msg.provider_id)
-            .bind(msg.api_key_id)
-            .bind(msg.cached_prompt_tokens.map(|t| t as i32))
-            .bind(msg.cache_savings_usd)
-            .bind(msg.router_event.as_ref().map(Json))
-            .bind(msg.outcome.as_str())
-            .bind(msg.error_class.map(|class| class.as_str()))
-            .bind(msg.savings_usd)
-            .bind(msg.savings_kind.as_deref())
-            .bind(msg.cache_affinity.as_ref().map(Json))
-            .bind(msg.policy_version)
-            .bind(msg.proxy_ms.map(|t| t as i32))
-            .bind(msg.proxy_us)
-            .bind(msg.example_state)
-            .bind(msg.example_reason)
-            .bind(msg.completion_hash.as_deref())
-            .bind(msg.session_id.as_deref())
-            .execute(&mut *tx)
-            .await;
+            let result = sqlx::query(TRACE_INSERT)
+                .bind(msg.id)
+                .bind(msg.tenant_id)
+                .bind(&msg.request_model)
+                .bind(msg.system_prompt_hash.as_deref())
+                .bind(msg.prompt_tokens)
+                .bind(msg.completion_tokens)
+                .bind(msg.ttft_ms.map(|t| t as i32))
+                .bind(msg.total_duration_ms as i32)
+                .bind(i32::from(msg.status_code))
+                .bind(msg.raw_prompt.as_ref().map(Json))
+                .bind(msg.raw_completion.as_ref().map(Json))
+                .bind(msg.raw_completion_capped)
+                .bind(msg.upstream_cost_usd)
+                .bind(msg.waste_detected.as_ref().map(Json))
+                .bind(msg.truncated)
+                .bind(msg.guard_event.as_ref().map(Json))
+                .bind(msg.routing_event.as_ref().map(Json))
+                .bind(msg.provider_id)
+                .bind(msg.api_key_id)
+                .bind(msg.cached_prompt_tokens.map(|t| t as i32))
+                .bind(msg.cache_savings_usd)
+                .bind(msg.router_event.as_ref().map(Json))
+                .bind(msg.outcome.as_str())
+                .bind(msg.error_class.map(|class| class.as_str()))
+                .bind(msg.savings_usd)
+                .bind(msg.savings_kind.as_deref())
+                .bind(msg.cache_affinity.as_ref().map(Json))
+                .bind(msg.policy_version)
+                .bind(msg.proxy_ms.map(|t| t as i32))
+                .bind(msg.proxy_us)
+                .bind(msg.example_state)
+                .bind(msg.example_reason)
+                .bind(msg.completion_hash.as_deref())
+                .bind(msg.session_id.as_deref())
+                .bind(msg.request_lint.as_ref().map(Json))
+                .execute(&mut *tx)
+                .await;
             if let Err(e) = result {
                 tracing::error!("telemetry: trace insert failed, rolling back batch: {e}");
                 return; // tx dropped -> rollback keeps the flush atomic (AC6)
@@ -350,3 +356,6 @@ pub async fn telemetry_worker(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

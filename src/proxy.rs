@@ -546,9 +546,11 @@ pub(crate) async fn proxy_chat_completions(
         is_local: false,
         capture_payloads: true,
         session_id,
+        lint: None,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
+    preflight(&state, tenant_id, &mut meta).await;
     let plan_started = Instant::now();
     let ModelPlan {
         route,
@@ -744,8 +746,10 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         is_local: false,
         capture_payloads: true,
         session_id,
+        lint: None,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
+    preflight(&state, tenant_id, &mut meta).await;
     let decision = match state
         .hotpath
         .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
@@ -906,7 +910,7 @@ async fn forward_buffered(
     if let Some(content_type) = content_type.or(upstream_content_type) {
         response.headers_mut().insert(CONTENT_TYPE, content_type);
     }
-    with_trace_id(response, meta.id)
+    with_lint(with_trace_id(response, meta.id), meta.lint.as_ref())
 }
 
 /// Request-derived fields shared by every trace of this request.
@@ -940,6 +944,8 @@ struct RequestMeta {
     capture_payloads: bool,
     /// ITEM-093: the client's transaction id, when it supplied a valid one.
     session_id: Option<String>,
+    /// ITEM-090: pre-flight payload findings (None = nothing fired).
+    lint: Option<Value>,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -1011,6 +1017,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         example_reason: None,
         completion_hash: None,
         session_id: meta.session_id.clone(),
+        request_lint: meta.lint.clone(),
         is_local: meta.is_local,
     }
 }
@@ -1139,6 +1146,104 @@ pub(crate) async fn quality_signal(
     }
 }
 
+/// Body of `POST /v1/lint/dismiss` (ITEM-090).
+#[derive(serde::Deserialize)]
+pub(crate) struct DismissLintBody {
+    trace_id: Uuid,
+}
+
+/// POST /v1/lint/dismiss — the tenant judged a finding a false positive.
+///
+/// Tenant-authenticated with the tenant's API key; the trace must carry a
+/// finding and belong to the caller. Dismissed findings stay on the trace and
+/// stop counting as actionable on the performance page.
+pub(crate) async fn dismiss_lint(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<DismissLintBody>,
+) -> Response {
+    let tenant = match authenticate(&state, &headers).await {
+        Ok(Some(tenant)) => tenant,
+        Ok(None) => {
+            return json_error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_api_key",
+                "missing or invalid Authorization header",
+            )
+        }
+        Err(e) => {
+            tracing::error!("lint dismissal tenant lookup failed: {e}");
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "tenant_store_error",
+                "tenant lookup failed",
+            );
+        }
+    };
+    let updated = sqlx::query(
+        "UPDATE traces SET lint_dismissed_at = NOW()
+         WHERE id = $1 AND tenant_id = $2 AND request_lint IS NOT NULL",
+    )
+    .bind(body.trace_id)
+    .bind(tenant.id)
+    .execute(&state.db)
+    .await;
+    match updated {
+        Ok(result) if result.rows_affected() == 0 => json_error(
+            StatusCode::NOT_FOUND,
+            "no_finding",
+            "no lint finding for that trace",
+        ),
+        Ok(_) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "ok": true, "trace_id": body.trace_id.to_string() })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("lint dismissal failed: {e}");
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "lint_store_error",
+                "could not dismiss the finding",
+            )
+        }
+    }
+}
+
+/// ITEM-090: inspect the payload before dispatch. Advisory only — nothing is
+/// rewritten; the finding rides the trace and `X-Inferon-Lint`. Skipped when the
+/// tenant turned the switch off, and a failed lookup never fails the request.
+async fn preflight(state: &Arc<AppState>, tenant_id: Uuid, meta: &mut RequestMeta) {
+    if !state.hotpath.lint_enabled(state, tenant_id).await {
+        return;
+    }
+    // The repeat check compares this turn's system prompt with the tenant's
+    // previous one; the rest of the pass is pure.
+    let repeated = meta.system_prompt_hash.as_ref().is_some_and(|hash| {
+        state
+            .hotpath
+            .note_prompt(tenant_id, hash, crate::preflight::REPEAT_WINDOW)
+    });
+    meta.lint = crate::preflight::inspect(&meta.raw_prompt, repeated, &meta.model);
+}
+
+/// ITEM-090: put the finding kinds on the response (`X-Inferon-Lint`), so the
+/// client can see them without opening the dashboard.
+fn with_lint(mut response: Response, lint: Option<&Value>) -> Response {
+    let Some(kinds) = lint.and_then(|lint| lint["kinds"].as_array()) else {
+        return response;
+    };
+    let joined = kinds
+        .iter()
+        .filter_map(|kind| kind.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    if let Ok(value) = HeaderValue::from_str(&joined) {
+        response.headers_mut().insert("x-inferon-lint", value);
+    }
+    response
+}
+
 /// ITEM-055: tag a response with the request's trace id so a client can attach
 /// a quality signal to it out of band.
 fn with_trace_id(mut response: Response, trace_id: Uuid) -> Response {
@@ -1163,13 +1268,14 @@ fn stream_response(
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
+    let lint = meta.lint.clone();
     let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx, parse_usage);
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    with_trace_id(response, trace_id)
+    with_lint(with_trace_id(response, trace_id), lint.as_ref())
 }
 
 /// Guarded buffered response (ITEM-023). For requests with a JSON-schema
@@ -1220,7 +1326,7 @@ async fn guarded_stream_response(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_trace_id(response, guard_emit.meta.id)
+            with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref())
         }
         Err(reason) => {
             tracing::warn!(
@@ -1333,7 +1439,7 @@ async fn fallback_to_frontier(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_trace_id(response, guard_emit.meta.id)
+            with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref())
         }
     }
 }

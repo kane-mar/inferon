@@ -10,4 +10,8 @@
 ALTER TABLE tenant_configurations
     ADD COLUMN IF NOT EXISTS payload_capture BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE tenant_configurations
-    ADD COLUMN IF NOT EXISTS payload_retention_days INTEGER NOT NULL DEFAULT 30;
+    ADD COLUMN IF NOT EXISTS payload_retention_days BIGINT NOT NULL DEFAULT 30;
+-- Installs that predate this widening created the column as INTEGER; sqlx
+-- refuses to decode INT4 into the i64 the store reads (runtime 500).
+ALTER TABLE tenant_configurations
+    ALTER COLUMN payload_retention_days TYPE BIGINT;

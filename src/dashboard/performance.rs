@@ -96,6 +96,36 @@ pub async fn performance(
     .fetch_all(&state.db)
     .await)?;
 
+    // A dismissed finding is a false positive the tenant told us about: it keeps
+    // its trace, but stops counting as actionable (ITEM-090 AC5).
+    let (linted, dismissed, wasted): (i64, i64, Decimal) = stored(sqlx::query_as(
+        "SELECT
+           COUNT(*) FILTER (WHERE request_lint IS NOT NULL AND lint_dismissed_at IS NULL),
+           COUNT(*) FILTER (WHERE lint_dismissed_at IS NOT NULL),
+           COALESCE(SUM((request_lint->>'wasted_usd_est')::numeric)
+                    FILTER (WHERE request_lint IS NOT NULL AND lint_dismissed_at IS NULL), 0)
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await)?;
+    let by_kind: Vec<(String, i64)> = stored(sqlx::query_as(
+        "SELECT kind, COUNT(*)
+         FROM traces, jsonb_array_elements_text(request_lint->'kinds') AS kind
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND request_lint IS NOT NULL
+           AND lint_dismissed_at IS NULL
+         GROUP BY kind ORDER BY 2 DESC",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await)?;
+
     // Process-wide counters are operator information, not a tenant's.
     let cache = match super::operator_or(&state, &headers).await {
         Ok(()) => Some(cache_json(state.hotpath.stats())),
@@ -133,6 +163,15 @@ pub async fn performance(
             "ttft_p50_ms": ttft_p50,
             "ttft_p95_ms": ttft_p95,
             "proxy_share": proxy_share,
+        },
+        "lint": {
+            "requests": linted,
+            "dismissed": dismissed,
+            "wasted_usd": wasted.to_string(),
+            "by_kind": by_kind
+                .into_iter()
+                .map(|(kind, count)| (kind, json!(count)))
+                .collect::<serde_json::Map<String, Value>>(),
         },
         "cache": cache,
         "by_model": models.into_iter().map(|(model, requests, proxy_p50, proxy_p95, total_p50, total_p95)| json!({

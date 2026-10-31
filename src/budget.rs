@@ -33,6 +33,8 @@ pub struct TenantBudget {
     pub capture_payloads: bool,
     /// ITEM-088: how long raw payloads live (0 = keep forever).
     pub payload_retention_days: i64,
+    /// ITEM-090: run the pre-dispatch lint pass (kill switch).
+    pub lint_enabled: bool,
 }
 
 /// ITEM-046: the tenant's routing/budget controls, as submitted from the UI.
@@ -45,6 +47,8 @@ pub struct ConfigUpdate {
     pub router_threshold: f64,
     pub capture_payloads: bool,
     pub payload_retention_days: i64,
+    /// ITEM-090: the pre-flight lint kill switch.
+    pub lint_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +88,7 @@ pub(crate) type ConfigRow = (
     sqlx::types::Json<Vec<crate::router::TierPair>>,
     bool,
     i64,
+    bool,
 );
 
 /// Lookup seam: budget config per tenant. `None` = no config = unlimited.
@@ -175,6 +180,7 @@ impl BudgetStore for InMemoryBudgetStore {
                 tier_pairs,
                 capture_payloads: update.capture_payloads,
                 payload_retention_days: update.payload_retention_days,
+                lint_enabled: update.lint_enabled,
             },
         );
         Ok(())
@@ -203,6 +209,7 @@ impl BudgetStore for InMemoryBudgetStore {
             tier_pairs: Vec::new(),
             capture_payloads: true,
             payload_retention_days: 30,
+            lint_enabled: true,
         });
         budget.tier_pairs = pairs.to_vec();
         rows.insert(tenant_id, budget);
@@ -231,14 +238,15 @@ impl BudgetStore for PostgresBudgetStore {
                     COALESCE(guard_enabled, TRUE), COALESCE(router_enabled, TRUE),
                     COALESCE(router_threshold, 0.35), tier_pairs,
                     COALESCE(payload_capture, TRUE),
-                    COALESCE(payload_retention_days, 30)
+                    COALESCE(payload_retention_days, 30),
+                    COALESCE(lint_enabled, TRUE)
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled)| {
                 TenantBudget {
                     limit_cents,
                     spent_cents,
@@ -249,6 +257,7 @@ impl BudgetStore for PostgresBudgetStore {
                     tier_pairs: tier_pairs.0,
                     capture_payloads,
                     payload_retention_days,
+                    lint_enabled,
                 }
             },
         ))
@@ -293,12 +302,12 @@ impl BudgetStore for PostgresBudgetStore {
             "INSERT INTO tenant_configurations
                 (tenant_id, budget_limit_cents, cheap_fallback_model,
                  guard_enabled, router_enabled, router_threshold,
-                 payload_capture, payload_retention_days)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 payload_capture, payload_retention_days, lint_enabled)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (tenant_id) DO UPDATE SET
                 budget_limit_cents = $2, cheap_fallback_model = $3,
                 guard_enabled = $4, router_enabled = $5, router_threshold = $6,
-                payload_capture = $7, payload_retention_days = $8",
+                payload_capture = $7, payload_retention_days = $8, lint_enabled = $9",
         )
         .bind(tenant_id)
         .bind(update.budget_limit_cents)
@@ -308,6 +317,7 @@ impl BudgetStore for PostgresBudgetStore {
         .bind(update.router_threshold)
         .bind(update.capture_payloads)
         .bind(update.payload_retention_days)
+        .bind(update.lint_enabled)
         .execute(&self.pool)
         .await?;
         Ok(())

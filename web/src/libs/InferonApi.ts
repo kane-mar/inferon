@@ -194,6 +194,15 @@ export type PerformanceReport = {
     ttft_p95_ms: number | null;
     proxy_share: number | null;
   };
+  /** ITEM-090: pre-flight findings (advisory). */
+  lint: {
+    requests: number;
+    /** Findings the tenant dismissed as false positives. */
+    dismissed: number;
+    /** Estimated waste of the actionable findings, in USD. */
+    wasted_usd: string;
+    by_kind: Record<string, number>;
+  };
   /** Process-wide, operator-only; `null` for a tenant reader. */
   cache: PerformanceCache | null;
   by_model: PerformanceModelRow[];

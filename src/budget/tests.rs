@@ -4,6 +4,7 @@
         TenantBudget {
             capture_payloads: true,
             payload_retention_days: 30,
+            lint_enabled: true,
             limit_cents: limit,
             spent_cents: spent,
             cheap_fallback_model: cheap.map(str::to_string),
@@ -48,6 +49,7 @@
             TenantBudget {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -77,6 +79,7 @@
                 &ConfigUpdate {
                     capture_payloads: true,
                     payload_retention_days: 30,
+            lint_enabled: true,
                     budget_limit_cents: 5000,
                     cheap_fallback_model: Some("deepseek-chat".to_string()),
                     guard_enabled: false,
@@ -101,6 +104,7 @@
                 &ConfigUpdate {
                     capture_payloads: true,
                     payload_retention_days: 30,
+            lint_enabled: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -154,6 +158,7 @@ async fn tier_pairs_survive_a_controls_update_and_work_for_a_fresh_tenant() {
             &ConfigUpdate {
                 capture_payloads: true,
                 payload_retention_days: 30,
+                lint_enabled: true,
                 budget_limit_cents: 5000,
                 cheap_fallback_model: Some("deepseek-chat".to_string()),
                 guard_enabled: true,
@@ -166,4 +171,53 @@ async fn tier_pairs_survive_a_controls_update_and_work_for_a_fresh_tenant() {
     let budget = store.budget_for(tenant).await.unwrap().unwrap();
     assert_eq!(budget.tier_pairs, pairs);
     assert_eq!(budget.router_threshold, 0.5);
+}
+
+/// The type `table.column` is declared with, as the last migration sets it.
+fn declared_type(table: &str, column: &str) -> Option<String> {
+    let mut declared = None;
+    let mut files: Vec<_> = std::fs::read_dir("db/init")
+        .expect("db/init")
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    files.sort();
+    for path in files {
+        let sql = std::fs::read_to_string(&path).expect("migration is readable");
+        let sql = sql
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for statement in sql.split(';') {
+            let words: Vec<&str> = statement.split_whitespace().collect();
+            let targets_table =
+                words.starts_with(&["ALTER", "TABLE", table]) || words.starts_with(&["CREATE", "TABLE", table]);
+            let Some(at) = words.iter().position(|word| *word == column) else {
+                continue;
+            };
+            if !targets_table {
+                continue;
+            }
+            if let Some(kind) = words.get(at + 1) {
+                // `ADD COLUMN <name> BIGINT` and `ALTER COLUMN <name> TYPE BIGINT`.
+                let kind = if *kind == "TYPE" { words.get(at + 2)? } else { kind };
+                declared = Some(kind.trim_matches(|c: char| !c.is_alphanumeric()).to_uppercase());
+            }
+        }
+    }
+    declared
+}
+
+#[test]
+fn the_retention_window_is_as_wide_as_the_i64_it_decodes_into() {
+    // `TenantBudget::payload_retention_days` is i64. sqlx rejects a narrower
+    // column at runtime ("mismatched types ... INT4"), which the in-memory
+    // store cannot catch — so the schema itself is the contract.
+    assert_eq!(
+        declared_type("tenant_configurations", "payload_retention_days").as_deref(),
+        Some("BIGINT"),
+        "the column must be BIGINT to decode into i64"
+    );
 }

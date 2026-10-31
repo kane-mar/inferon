@@ -116,6 +116,7 @@ impl EdgeTrace {
                 example_reason: None,
                 completion_hash: None,
                 session_id: None,
+                request_lint: None,
         }
     }
 }
@@ -443,7 +444,8 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
         "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model, guard_enabled,
                 router_enabled, router_threshold, tier_pairs,
                 COALESCE(payload_capture, TRUE),
-                COALESCE(payload_retention_days, 30)
+                COALESCE(payload_retention_days, 30),
+                COALESCE(lint_enabled, TRUE)
          FROM tenant_configurations WHERE tenant_id = $1",
     )
     .bind(tenant_id)
@@ -471,7 +473,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
         "models": models,
         "policy": policy,
         "budget": config.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled)| {
                 serde_json::json!({
                     "limit_cents": limit_cents,
                     "spent_cents": spent_cents,
@@ -482,6 +484,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
                     "tier_pairs": tier_pairs.0,
                     "capture_payloads": capture_payloads,
                     "payload_retention_days": payload_retention_days,
+                    "lint_enabled": lint_enabled,
                 })
             },
         ),

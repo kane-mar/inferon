@@ -351,6 +351,9 @@ pub struct ConfigBody {
     capture_payloads: bool,
     #[serde(default = "default_retention")]
     payload_retention_days: i64,
+    /// ITEM-090. Defaults keep an older client from switching the lint off.
+    #[serde(default = "default_true")]
+    lint_enabled: bool,
 }
 
 fn default_true() -> bool {

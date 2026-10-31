@@ -494,7 +494,13 @@
     "turns": "Tours",
     "models": "Modèles",
     "cost": "Coût",
-    "errors": "Erreurs"
+    "errors": "Erreurs",
+    "findings": "Constats en vol",
+    "findings_help": "Contrôles indicatifs sur la charge utile avant l'envoi : prompts système répétés, schémas surdimensionnés, texte générique, tours dupliqués. La requête est transmise inchangée.",
+    "findings_none": "Aucun constat sur cette période.",
+    "findings_count": "{count} requête(s) avec constats",
+    "findings_waste": "≈{usd} USD d’entrée évitable",
+    "findings_dismissed": "{count} écarté(s)"
   },
   "DatasetsPage": {
     "title_bar": "Jeux de données",

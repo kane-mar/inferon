@@ -47,6 +47,7 @@ pub mod guard;
 pub mod hotpath;
 pub mod linter;
 pub mod policy;
+pub mod preflight;
 pub mod quality;
 pub mod retention;
 pub mod router;
@@ -73,7 +74,7 @@ pub use tenant::{ApiKeyInfo, InMemoryTenantStore, PostgresTenantStore, Tenant, T
 pub use telemetry::{load_system_prompt_counts, telemetry_worker, PostgresTraceSink, TraceMessage, TraceSink};
 pub use usage::{usage_from_sse_bytes, Usage};
 
-use crate::proxy::{healthz, list_models, proxy_chat_completions, proxy_messages, quality_signal};
+use crate::proxy::{dismiss_lint, healthz, list_models, proxy_chat_completions, proxy_messages, quality_signal};
 
 use axum::{
     body::Body,
@@ -133,6 +134,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/edge/traces", post(edge::ingest))
         .route("/v1/edge/config", get(edge::config))
         .route("/v1/quality", post(quality_signal))
+        .route("/v1/lint/dismiss", post(dismiss_lint))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
         .route("/v1/dashboard/api/performance", get(dashboard::performance))
