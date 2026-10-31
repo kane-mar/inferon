@@ -6,6 +6,7 @@
 //! operator views under `/v1/dashboard/api/operator/*`.
 
 mod datasets;
+pub mod evals;
 mod performance;
 mod sessions;
 mod queries;
@@ -263,6 +264,32 @@ pub struct CreateKeyBody {
 #[derive(serde::Deserialize)]
 pub struct KeyLabelBody {
     label: Option<String>,
+}
+
+/// ITEM-098: pin a gold set (default: the runner's default case count).
+#[derive(serde::Deserialize)]
+pub struct GoldBody {
+    #[serde(default)]
+    cases: Option<i64>,
+}
+
+/// ITEM-098: start an eval run.
+#[derive(serde::Deserialize)]
+pub struct RunBody {
+    model: Option<String>,
+    #[serde(default)]
+    gold_set_id: Option<uuid::Uuid>,
+    #[serde(default)]
+    max_cases: Option<i64>,
+    #[serde(default)]
+    max_cost_cents: Option<i64>,
+}
+
+/// ITEM-098: the regression gate for two runs.
+#[derive(serde::Deserialize)]
+pub struct CompareBody {
+    baseline: uuid::Uuid,
+    challenger: uuid::Uuid,
 }
 
 #[derive(serde::Deserialize)]

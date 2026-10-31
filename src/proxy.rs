@@ -184,7 +184,7 @@ fn apply_provider_headers(
 /// An upstream request with the provider's auth and metadata headers. A keyless
 /// local provider sends no Authorization header at all (ITEM-082); every other
 /// kind sends its credential (Anthropic on `x-api-key`).
-fn provider_request(
+pub(crate) fn provider_request(
     client: &reqwest::Client,
     route: &Route,
 ) -> reqwest::RequestBuilder {

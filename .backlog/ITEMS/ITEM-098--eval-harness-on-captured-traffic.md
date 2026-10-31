@@ -36,3 +36,34 @@ there is no way to run a model comparison over captured inputs.
 
 **Depends on** ITEM-086; feeds ITEM-076.
 **Ranking note.** Rank **13** of 22 · V3/E3 — needed before any adapter is promoted, but its consumer (076) is gated on Slice 3 infra.
+---
+
+**Delivered (2026-10-31).** `src/eval.rs` (pure: `normalize`, `score` →
+exact / schema / outcome, `compare` → insufficient / unchanged / improved /
+regressed with a 20-case floor and a 5-point margin, `answer_text` for both
+surfaces) and `src/eval/runner.rs` (pin, load, execute, finish).
+
+**Pin** copies the exact `raw_prompt` and the reference `raw_completion` out of
+`traces` into `eval_gold_cases`, one case per distinct prompt hash, and versions
+the set per tenant — so later retention, pruning or redaction cannot change what
+a run measured.
+
+**Run** is owner-initiated and bounded twice (`max_cases`, `max_cost_cents`);
+each case is a real provider call with the pinned input, the model substituted,
+streaming off. Scoring never uses a judge model: schema validity when the request
+carried a contract, normalised exact match against the reference when one exists,
+otherwise the outcome signal — and the method is stored per case, so two runs are
+never compared across different measurements. A case that could not even be sent
+is `failed` with a reason; a run with failures or a hit bound is `partial`, never
+padded with zeros (AC5).
+
+**Billing**: eval calls are recorded only in `eval_*` tables, never `traces`, so
+they cannot reach the budget, the aggregates, the router or the policy — AC6 is
+satisfied by construction rather than by a filter.
+
+**Not built**: a dashboard UI (the API is the surface), and the ITEM-076 `Gate`
+adapter — `compare` returns the verdict the promoter will consume, but the
+promoter itself is still gated on Slice 3 infra.
+
+**Verified**: 14 unit tests (scoring precedence, margins, partial runs, both
+answer shapes). The DB orchestration is exercised live after the next deploy.

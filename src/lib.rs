@@ -67,6 +67,7 @@ pub mod translate;
 pub mod clock;
 pub mod embed;
 pub mod errors;
+pub mod eval;
 pub mod metrics;
 pub mod secret;
 pub mod session;
@@ -148,6 +149,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/datasets/purge",
             post(dashboard::purge),
+        )
+        .route("/v1/dashboard/api/evals", get(dashboard::evals::list))
+        .route(
+            "/v1/dashboard/api/evals/gold",
+            post(dashboard::evals::pin_gold),
+        )
+        .route(
+            "/v1/dashboard/api/evals/run",
+            post(dashboard::evals::start_run),
+        )
+        .route(
+            "/v1/dashboard/api/evals/compare",
+            post(dashboard::evals::compare),
         )
         .route(
             "/v1/dashboard/api/datasets/export",
