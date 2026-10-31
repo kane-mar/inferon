@@ -31,6 +31,8 @@ pub struct TraceMessage {
     pub raw_completion: Option<Value>,
     /// ITEM-085: the captured completion hit the size cap (a head, not a pair).
     pub raw_completion_capped: bool,
+    /// ITEM-091: what context pruning removed (None = pruning not in play).
+    pub prune_event: Option<serde_json::Value>,
     pub waste_detected: Option<Value>,
     pub upstream_cost_usd: rust_decimal::Decimal,
     /// ITEM-053: estimated saving vs a no-cache call (the provider's prompt
@@ -141,8 +143,8 @@ const TRACE_INSERT: &str = r#"INSERT INTO traces (
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
                     proxy_ms, proxy_us,
                     example_state, example_reason, completion_hash, session_id,
-                    request_lint
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)"#;
+                    request_lint, prune_event
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)"#;
 
 #[async_trait::async_trait]
 impl TraceSink for PostgresTraceSink {
@@ -194,6 +196,7 @@ impl TraceSink for PostgresTraceSink {
                 .bind(msg.completion_hash.as_deref())
                 .bind(msg.session_id.as_deref())
                 .bind(msg.request_lint.as_ref().map(Json))
+                .bind(msg.prune_event.as_ref().map(Json))
                 .execute(&mut *tx)
                 .await;
             if let Err(e) = result {

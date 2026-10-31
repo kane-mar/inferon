@@ -40,6 +40,7 @@ fn trace(completion: Option<Value>, outcome: Outcome) -> TraceMessage {
         completion_hash: None,
         session_id: None,
         request_lint: None,
+        prune_event: None,
     }
 }
 

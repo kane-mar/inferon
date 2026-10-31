@@ -198,6 +198,36 @@ export default async function PerformancePage(props: {
         </Card>
       </div>
 
+      {/* Opt-in pruning: what was removed, and the held-out control arm. */}
+      {data.pruning.enabled && (
+        <div className="mt-4">
+          <Card title={t('pruning')}>
+            <p className="mb-3 text-xs text-muted-foreground">{t('pruning_help')}</p>
+            <div className="flex flex-wrap items-center gap-4">
+              <span className="text-sm">
+                {t('pruning_rewritten', { count: data.pruning.rewritten })}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {t('pruning_saved', {
+                  tokens: integer(data.pruning.tokens_saved_est),
+                  usd: data.pruning.usd_saved_est,
+                })}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {t('pruning_holdout', { count: data.pruning.holdout_requests })}
+              </span>
+              {data.pruning.delta !== null && (
+                <span className="font-mono text-xs">
+                  {t('pruning_delta', {
+                    delta: `${data.pruning.delta >= 0 ? '+' : ''}${(data.pruning.delta * 100).toFixed(1)}`,
+                  })}
+                </span>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Advisory findings: waste the proxy can see before the call leaves. */}
       <div className="mt-4">
         <Card title={t('findings')}>

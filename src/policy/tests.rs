@@ -52,12 +52,12 @@
         let store = InMemoryPolicyStore::default();
         assert_eq!(store.active(tenant).await.unwrap(), None);
         let v1 = store
-            .publish(tenant, Policy { version: 0, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true, provider_weights: Default::default() })
+            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v1.version, 1);
         let v2 = store
-            .publish(tenant, Policy { version: 0, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true, provider_weights: Default::default() })
+            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v2.version, 2);

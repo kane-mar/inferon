@@ -824,6 +824,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             &*policy_store,
             tenant,
             crate::policy::Policy {
+                prune: None,
                 version: 0,
                 router_threshold: Some(0.0),
                 evidence: json!({}),
@@ -1336,6 +1337,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 completion_hash: None,
                 session_id: None,
                 request_lint: None,
+                prune_event: None,
         }
     }
 
@@ -3443,6 +3445,116 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(
             lint["wasted_usd_est"].as_str().is_some_and(|usd| usd.parse::<f64>().unwrap() > 0.0),
             "the finding is priced: {lint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pruning_rewrites_the_payload_and_is_attributed_on_the_trace() {
+        // ITEM-091: opt-in, holdout-aware, and never silent.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let policy_store = std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default());
+        crate::policy::PolicyStore::publish(
+            policy_store.as_ref(),
+            tenant_id,
+            crate::policy::Policy {
+                version: 0,
+                router_threshold: None,
+                prune: Some(crate::prune::PrunePolicy {
+                    enabled: true,
+                    drop_duplicate_turns: true,
+                    max_prompt_tokens: None,
+                    holdout_percent: 0,
+                }),
+                evidence: serde_json::json!({"why": "test"}),
+                enabled: true,
+                provider_weights: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            policy_store,
+            ..base_state(&mock_upstream().await)
+        });
+        let router = build_router(state);
+        let duplicate = "z".repeat(400);
+        let body = format!(
+            r#"{{"model":"content","messages":[
+                {{"role":"user","content":"{duplicate}"}},
+                {{"role":"user","content":"{duplicate}"}},
+                {{"role":"user","content":"the question"}}
+            ]}}"#
+        );
+        let response = router
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let msg = rx.recv().await.expect("trace");
+        let event = msg.prune_event.expect("the rewrite is traced");
+        assert_eq!(event["held_out"], false);
+        assert_eq!(event["kinds"]["duplicate_turn"], 1);
+        assert!(event["tokens_saved_est"].as_i64().unwrap() > 50);
+        assert!(event["usd_saved_est"].as_str().unwrap().parse::<f64>().unwrap() > 0.0);
+        assert_eq!(
+            msg.raw_prompt.as_ref().unwrap()["messages"].as_array().unwrap().len(),
+            2,
+            "the duplicate was not sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_held_out_request_is_sent_unpruned_so_the_effect_is_measurable() {
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let policy_store = std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default());
+        crate::policy::PolicyStore::publish(
+            policy_store.as_ref(),
+            tenant_id,
+            crate::policy::Policy {
+                version: 0,
+                router_threshold: None,
+                prune: Some(crate::prune::PrunePolicy {
+                    enabled: true,
+                    drop_duplicate_turns: true,
+                    max_prompt_tokens: None,
+                    holdout_percent: 100, // every request held out
+                }),
+                evidence: serde_json::json!({"why": "test"}),
+                enabled: true,
+                provider_weights: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            policy_store,
+            ..base_state(&mock_upstream().await)
+        });
+        let router = build_router(state);
+        let duplicate = "z".repeat(400);
+        let body = format!(
+            r#"{{"model":"content","messages":[
+                {{"role":"user","content":"{duplicate}"}},
+                {{"role":"user","content":"{duplicate}"}},
+                {{"role":"user","content":"the question"}}
+            ]}}"#
+        );
+        let _ = router
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let msg = rx.recv().await.expect("trace");
+        let event = msg.prune_event.expect("a held-out request is still recorded");
+        assert_eq!(event["held_out"], true);
+        assert_eq!(event["turns_removed"], 0);
+        assert_eq!(
+            msg.raw_prompt.as_ref().unwrap()["messages"].as_array().unwrap().len(),
+            3,
+            "the held-out arm is the control: sent as written"
         );
     }
 

@@ -126,6 +126,34 @@ pub async fn performance(
     .fetch_all(&state.db)
     .await)?;
 
+    // ITEM-091: what pruning removed, and whether the held-out arm answered
+    // better. `delta` is pruned minus held-out on the ok rate — negative is a
+    // regression and the kill switch has already fired by the time it is large.
+    let pruning: (i64, i64, Decimal, i64, i64, i64, i64) = stored(sqlx::query_as(
+        "SELECT
+           COUNT(*) FILTER (WHERE NOT held_out),
+           COALESCE(SUM((prune_event->>'tokens_saved_est')::bigint)
+                    FILTER (WHERE NOT held_out), 0),
+           COALESCE(SUM((prune_event->>'usd_saved_est')::numeric)
+                    FILTER (WHERE NOT held_out), 0),
+           COUNT(*) FILTER (WHERE NOT held_out AND outcome = 'ok'),
+           COUNT(*) FILTER (WHERE held_out),
+           COUNT(*) FILTER (WHERE held_out AND outcome = 'ok'),
+           COUNT(*)
+         FROM traces,
+              LATERAL (SELECT (prune_event->>'held_out')::boolean AS held_out) AS arm
+         WHERE tenant_id = $1
+           AND prune_event IS NOT NULL
+           AND prune_event->>'held_out' IS NOT NULL
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await)?;
+    let (pruned, tokens_saved, usd_saved, pruned_ok, holdout, holdout_ok, pruned_and_holdout) = pruning;
+    let rate = |ok: i64, total: i64| (total > 0).then(|| ok as f64 / total as f64);
+
     // Process-wide counters are operator information, not a tenant's.
     let cache = match super::operator_or(&state, &headers).await {
         Ok(()) => Some(cache_json(state.hotpath.stats())),
@@ -172,6 +200,19 @@ pub async fn performance(
                 .into_iter()
                 .map(|(kind, count)| (kind, json!(count)))
                 .collect::<serde_json::Map<String, Value>>(),
+        },
+        "pruning": {
+            "enabled": pruned_and_holdout > 0,
+            "rewritten": pruned,
+            "holdout_requests": holdout,
+            "tokens_saved_est": tokens_saved,
+            "usd_saved_est": usd_saved.to_string(),
+            "pruned_ok_rate": rate(pruned_ok, pruned),
+            "holdout_ok_rate": rate(holdout_ok, holdout),
+            "delta": match (rate(pruned_ok, pruned), rate(holdout_ok, holdout)) {
+                (Some(pruned), Some(holdout)) => Some(pruned - holdout),
+                _ => None,
+            },
         },
         "cache": cache,
         "by_model": models.into_iter().map(|(model, requests, proxy_p50, proxy_p95, total_p50, total_p95)| json!({

@@ -194,6 +194,17 @@ export type PerformanceReport = {
     ttft_p95_ms: number | null;
     proxy_share: number | null;
   };
+  /** ITEM-091: context pruning and its held-out control arm. */
+  pruning: {
+    enabled: boolean;
+    rewritten: number;
+    holdout_requests: number;
+    tokens_saved_est: number;
+    usd_saved_est: string;
+    pruned_ok_rate: number | null;
+    holdout_ok_rate: number | null;
+    delta: number | null;
+  };
   /** ITEM-090: pre-flight findings (advisory). */
   lint: {
     requests: number;

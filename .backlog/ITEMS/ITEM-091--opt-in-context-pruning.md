@@ -41,3 +41,22 @@ budget zone) but never the *messages*: no truncation, no dedupe, no context budg
 
 **Depends on** ITEM-090 (evidence), ITEM-064 (versioned policy), ITEM-092 (cache).
 **Ranking note.** Rank **9** of 22 · V4/E4 — high savings, highest risk — it changes answers; only after 090 proves which payloads are redundant, and with versioned rollback.
+---
+
+**Delivered (2026-10-31).** `src/prune.rs`: `PrunePolicy` (default **off**),
+`rewrite` (exact duplicate turns; a token budget removes the oldest stale turns;
+system prompts, tool definitions and the final turn are protected), `in_holdout`
+(deterministic on tenant + prompt hash, clamped at 50%), `Rewrite::event` (kinds,
+turns, bytes, tokens and USD through the cost engine, plus the original payload
+hash) and `evaluate` (24 h, 20-request floor per arm, 5-point regression margin →
+publishes a version with `prune.enabled = false` and logs the rates).
+
+The policy rides `tenant_policies.prune`, so freeze/rollback/version are the
+ITEM-064 surface rather than a second config mechanism. The hot path reads it once
+with the rest of the policy, applies it after routing, and records the event on
+the trace; a rewrite failure or an already-minimal payload forwards the original.
+
+Verified: 12 unit tests (rules, protection, budget order, holdout distribution,
+event pricing, kill-switch decision) + 2 handler tests (rewritten trace vs
+held-out control). Not yet enabled for a tenant: the item's own gate was ITEM-090
+evidence, which only starts accumulating now.

@@ -117,6 +117,7 @@ impl EdgeTrace {
                 completion_hash: None,
                 session_id: None,
                 request_lint: None,
+                prune_event: None,
         }
     }
 }

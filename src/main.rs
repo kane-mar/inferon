@@ -34,6 +34,8 @@ const RETENTION_INTERVAL_SECS: u64 = 6 * 60 * 60;
 /// ITEM-089: embed and cluster the pending task texts. One embed is ~150 ms on
 /// the production tier, so this runs off the request path on a slow cadence.
 const SIGNATURE_INTERVAL_SECS: u64 = 300;
+/// ITEM-091: compare pruned vs held-out quality and kill a policy that hurts.
+const PRUNE_EVAL_INTERVAL_SECS: u64 = 900;
 
 /// Run an async task forever on a fixed cadence. The first tick fires
 /// immediately; missed ticks are skipped rather than burst-run, so a slow pass
@@ -135,6 +137,19 @@ fn spawn_workers(
             let embedder = signature_embedder.clone();
             async move {
                 inferon::signatures::run_pass(&pool, embedder.as_ref()).await;
+            }
+        },
+    );
+
+    // ITEM-091: the pruning kill switch. Savings never outrank a worse answer.
+    let prune_pool = pool.clone();
+    spawn_periodic(
+        "prune-evaluation",
+        std::time::Duration::from_secs(PRUNE_EVAL_INTERVAL_SECS),
+        move || {
+            let pool = prune_pool.clone();
+            async move {
+                inferon::prune::evaluate(&pool).await;
             }
         },
     );

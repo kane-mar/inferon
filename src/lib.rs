@@ -48,6 +48,7 @@ pub mod hotpath;
 pub mod linter;
 pub mod policy;
 pub mod preflight;
+pub mod prune;
 pub mod quality;
 pub mod retention;
 pub mod router;

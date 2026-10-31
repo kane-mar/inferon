@@ -365,6 +365,8 @@ struct ModelPlan {
     /// as the `from_model` of a fallback event.
     primary: String,
     chain: Vec<(String, Route)>,
+    /// ITEM-091: the tenant's pruning policy, read with the rest of the policy.
+    prune: Option<crate::prune::PrunePolicy>,
 }
 
 /// Turn the request into a model plan: read the adaptive policy, resolve the
@@ -415,7 +417,12 @@ async fn plan_models(
     let fallbacks = state.hotpath.fallbacks(state, tenant_id).await;
     let chain =
         build_model_chain(state, tenant, &route, primary.clone(), fallbacks, policy_weights).await;
-    Ok(ModelPlan { route, primary, chain })
+    Ok(ModelPlan {
+        route,
+        primary,
+        chain,
+        prune: policy.as_ref().and_then(|policy| policy.prune.clone()),
+    })
 }
 
 /// ITEM-044 AC4: never select a model the tenant disabled — the requested model
@@ -547,6 +554,7 @@ pub(crate) async fn proxy_chat_completions(
         capture_payloads: true,
         session_id,
         lint: None,
+        prune_event: None,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
@@ -556,10 +564,15 @@ pub(crate) async fn proxy_chat_completions(
         route,
         primary,
         chain: allowed,
+        prune,
     } = match plan_models(&state, &tenant, &mut meta, started).await {
         Ok(plan) => plan,
         Err(resp) => return resp,
     };
+
+    // ITEM-091: rewrite the payload when the tenant opted in and this request is
+    // not part of the holdout. The rewrite is attributed on the trace.
+    prune_payload(&mut meta, prune.as_ref(), &tenant_id.to_string());
 
     let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
@@ -747,9 +760,17 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         capture_payloads: true,
         session_id,
         lint: None,
+        prune_event: None,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
+    let policy = state.hotpath.policy(&state, tenant_id).await;
+    meta.policy_version = policy.as_ref().map(|policy| policy.version);
+    prune_payload(
+        &mut meta,
+        policy.as_ref().and_then(|policy| policy.prune.as_ref()),
+        &tenant_id.to_string(),
+    );
     let decision = match state
         .hotpath
         .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
@@ -946,6 +967,8 @@ struct RequestMeta {
     session_id: Option<String>,
     /// ITEM-090: pre-flight payload findings (None = nothing fired).
     lint: Option<Value>,
+    /// ITEM-091: what pruning removed (or that this request was held out).
+    prune_event: Option<Value>,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -1018,6 +1041,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         completion_hash: None,
         session_id: meta.session_id.clone(),
         request_lint: meta.lint.clone(),
+        prune_event: meta.prune_event.clone(),
         is_local: meta.is_local,
     }
 }
@@ -1225,6 +1249,41 @@ async fn preflight(state: &Arc<AppState>, tenant_id: Uuid, meta: &mut RequestMet
             .note_prompt(tenant_id, hash, crate::preflight::REPEAT_WINDOW)
     });
     meta.lint = crate::preflight::inspect(&meta.raw_prompt, repeated, &meta.model);
+}
+
+/// ITEM-091: apply the tenant's pruning policy, holding out a deterministic
+/// share unpruned so the effect is measurable.
+///
+/// A rewrite that produces nothing (disabled policy, nothing redundant) leaves
+/// the payload untouched; a rewrite never fails the request. Held-out requests
+/// still record an event, so the dashboard can compare the two groups.
+fn prune_payload(
+    meta: &mut RequestMeta,
+    policy: Option<&crate::prune::PrunePolicy>,
+    tenant_id: &str,
+) {
+    let Some(policy) = policy.filter(|policy| policy.enabled) else {
+        return;
+    };
+    let seed = format!(
+        "{tenant_id}:{}",
+        meta.system_prompt_hash.as_deref().unwrap_or_default()
+    );
+    if crate::prune::in_holdout(&seed, policy) {
+        meta.prune_event = Some(json!({
+            "policy_version": meta.policy_version,
+            "held_out": true,
+            "turns_removed": 0,
+        }));
+        return;
+    }
+    let Some(rewrite) = crate::prune::rewrite(&meta.raw_prompt, policy) else {
+        return;
+    };
+    let mut event = rewrite.event(&meta.model, meta.policy_version.unwrap_or(0));
+    event["held_out"] = json!(false);
+    meta.prune_event = Some(event);
+    meta.raw_prompt = rewrite.payload;
 }
 
 /// ITEM-090: put the finding kinds on the response (`X-Inferon-Lint`), so the

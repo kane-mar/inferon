@@ -59,6 +59,9 @@ pub struct Policy {
     /// (the default) means "no opinion" — the static ordering applies.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub provider_weights: std::collections::BTreeMap<String, f64>,
+    /// ITEM-091: the opt-in payload-pruning policy. Absent = pruning off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prune: Option<crate::prune::PrunePolicy>,
     /// Human-readable evidence for this version (why it changed).
     pub evidence: serde_json::Value,
     /// When true (the default), the hot path uses this policy. A kill switch
@@ -191,17 +194,19 @@ impl PolicyStore for PostgresPolicyStore {
             serde_json::Value,
             bool,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+            Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
         )> = sqlx::query_as(
-            "SELECT version, router_threshold, evidence, enabled, provider_weights
+            "SELECT version, router_threshold, evidence, enabled, provider_weights, prune
              FROM tenant_policies WHERE tenant_id = $1 AND enabled
              ORDER BY version DESC LIMIT 1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(version, router_threshold, evidence, enabled, weights)| Policy {
+        Ok(row.map(|(version, router_threshold, evidence, enabled, weights, prune)| Policy {
             version,
             router_threshold,
+            prune: prune.map(|prune| prune.0),
             evidence,
             enabled,
             provider_weights: weights.0,
@@ -215,21 +220,24 @@ impl PolicyStore for PostgresPolicyStore {
             serde_json::Value,
             bool,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+            Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
         ) = sqlx::query_as(
-            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled, provider_weights)
-             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4, $5)
-             RETURNING version, router_threshold, evidence, enabled, provider_weights",
+            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled, provider_weights, prune)
+             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4, $5, $6)
+             RETURNING version, router_threshold, evidence, enabled, provider_weights, prune",
         )
         .bind(tenant_id)
         .bind(policy.router_threshold)
         .bind(sqlx::types::Json(policy.evidence))
         .bind(policy.enabled)
         .bind(sqlx::types::Json(policy.provider_weights.clone()))
+        .bind(policy.prune.clone().map(sqlx::types::Json))
         .fetch_one(&self.pool)
         .await?;
         Ok(Policy {
             version: row.0,
             router_threshold: row.1,
+            prune: row.5.map(|prune| prune.0),
             evidence: row.2,
             enabled: row.3,
             provider_weights: row.4.0,
@@ -241,15 +249,16 @@ impl PolicyStore for PostgresPolicyStore {
             Option<f64>,
             serde_json::Value,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
+            Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
         )> = sqlx::query_as(
-            "SELECT router_threshold, evidence, provider_weights FROM tenant_policies
+            "SELECT router_threshold, evidence, provider_weights, prune FROM tenant_policies
              WHERE tenant_id = $1 AND version = $2",
         )
         .bind(tenant_id)
         .bind(version)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((router_threshold, evidence, weights)) = source else {
+        let Some((router_threshold, evidence, weights, prune)) = source else {
             return Ok(None);
         };
         self.publish(
@@ -257,6 +266,7 @@ impl PolicyStore for PostgresPolicyStore {
             Policy {
                 version: 0,
                 router_threshold,
+                prune: prune.map(|prune| prune.0),
                 evidence,
                 enabled: true,
                 provider_weights: weights.0,
@@ -365,6 +375,7 @@ pub async fn run_adaptation(pool: &sqlx::PgPool) {
         });
         let policy = Policy {
             version: 0,
+            prune: None,
             router_threshold: Some(threshold),
             provider_weights,
             evidence,
