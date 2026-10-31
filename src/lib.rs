@@ -34,6 +34,7 @@ pub mod edge;
 pub mod edge_runtime;
 // Data plane.
 pub mod proxy;
+pub mod promptreg;
 // Routing intelligence.
 pub mod affinity;
 pub mod audit;
@@ -150,6 +151,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/datasets/purge",
             post(dashboard::purge),
+        )
+        .route(
+            "/v1/dashboard/api/prompts",
+            get(dashboard::prompts::prompts),
+        )
+        .route(
+            "/v1/dashboard/api/prompts/labels",
+            post(dashboard::prompts::label),
+        )
+        .route(
+            "/v1/dashboard/api/prompts/labels/:name/:hash",
+            axum::routing::delete(dashboard::prompts::unlabel),
+        )
+        .route(
+            "/v1/dashboard/api/prompts/diff",
+            get(dashboard::prompts::diff),
         )
         .route("/v1/dashboard/api/evals", get(dashboard::evals::list))
         .route(

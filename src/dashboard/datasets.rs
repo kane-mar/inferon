@@ -20,6 +20,9 @@ pub struct DatasetQuery {
     /// `hash` (default) or `cluster`.
     #[serde(default)]
     group: Option<String>,
+    /// ITEM-097: scope to a named prompt (every hash labelled with that name).
+    #[serde(default)]
+    prompt: Option<String>,
 }
 
 /// `(group_key, model, requests, qualified, distinct, excluded, spend, last_seen)`.
@@ -63,6 +66,15 @@ pub async fn datasets(
         _ => "hash",
     };
 
+    // ITEM-097 AC5: a named prompt scopes the counts to its labelled versions.
+    let scope = match &query.prompt {
+        Some(name) => format!(
+            "AND t.system_prompt_hash IN (SELECT system_prompt_hash FROM prompt_labels
+                 WHERE tenant_id = $1 AND prompt_name = '{}')",
+            name.replace('\'', "''")
+        ),
+        None => String::new(),
+    };
     let group_key = if grouping == "cluster" {
         "COALESCE(t.task_cluster, t.system_prompt_hash)"
     } else {
@@ -83,6 +95,7 @@ pub async fn datasets(
          WHERE t.tenant_id = $1
            AND t.system_prompt_hash IS NOT NULL
            AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
+           {scope}
          GROUP BY {group_key}, t.request_model
          ORDER BY 5 DESC
          LIMIT 50"
@@ -98,6 +111,7 @@ pub async fn datasets(
          WHERE t.tenant_id = $1
            AND t.example_state = 'excluded'
            AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
+           {scope}
          GROUP BY {group_key}, t.request_model, t.example_reason"
     ))
     .bind(tenant_id)
@@ -166,6 +180,9 @@ pub struct ExportQuery {
     cluster: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    /// ITEM-097: export by named prompt (every labelled version).
+    #[serde(default)]
+    prompt: Option<String>,
     #[serde(default)]
     days: Option<i64>,
 }
@@ -207,7 +224,12 @@ pub async fn export(
         ));
     }
     let days = query.days.unwrap_or(30).clamp(1, 3650);
-    let Some(selector) = query.prompt_hash.clone().or_else(|| query.cluster.clone()) else {
+    let Some(selector) = query
+        .prompt_hash
+        .clone()
+        .or_else(|| query.cluster.clone())
+        .or_else(|| query.prompt.clone())
+    else {
         return Err(crate::json_error(
             StatusCode::BAD_REQUEST,
             "missing_selector",
@@ -218,6 +240,7 @@ pub async fn export(
     let prompt_hash = query.prompt_hash.clone();
     let cluster = query.cluster.clone();
     let model = query.model.clone();
+    let named = query.prompt.clone();
     let filename = format!(
         "inferon-{}.jsonl",
         selector[..selector.len().min(16)].replace(['/', ':'], "-")
@@ -236,6 +259,9 @@ pub async fn export(
                AND ($2::text IS NULL OR t.system_prompt_hash = $2)
                AND ($3::text IS NULL OR t.task_cluster = $3)
                AND ($4::text IS NULL OR t.request_model = $4)
+               AND ($6::text IS NULL OR t.system_prompt_hash IN (
+                       SELECT system_prompt_hash FROM prompt_labels
+                       WHERE tenant_id = $1 AND prompt_name = $6))
                AND t.example_state = 'qualified'
                AND down.trace_id IS NULL
                AND t.raw_prompt IS NOT NULL
@@ -249,6 +275,7 @@ pub async fn export(
         .bind(cluster.clone())
         .bind(model.clone())
         .bind(days)
+        .bind(named.clone())
         .fetch(&pool);
         while let Some(row) = rows.try_next().await.transpose() {
             match row {

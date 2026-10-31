@@ -35,3 +35,24 @@ unrelated hash with no link to its predecessor.
 - A diff needs the raw prompt, so it obeys ITEM-088's capture switch.
 
 **Ranking note.** Rank **15** of 22 · V2/E2 — prompt tooling — observability parity.
+---
+
+**Delivered (2026-10-31).** `prompt_labels (tenant_id, prompt_name,
+system_prompt_hash)` — additive by design: identity stays the content hash, so
+unmanaged prompts keep working and naming is retroactive. Versions are a view
+over `traces` ordered by first-seen, never a rewrite of history.
+
+`GET /api/prompts` returns every name with its versions (first/last seen,
+requests, spend, ok rate, thumbs down); a label on a hash no traffic produced is
+listed with zero counts rather than hidden. `POST /api/prompts/labels` (owner)
+names a hash and is idempotent; `DELETE /api/prompts/labels/:name/:hash` drops
+the label only. `GET /api/prompts/diff` returns an LCS line diff of two
+versions' captured system prompts — owner-only and refused when the tenant does
+not capture payloads (ITEM-088).
+
+**Scoping**: `GET /api/datasets?prompt=<name>` and the export both restrict to
+the hashes labelled with that name (AC5).
+
+**Verified**: 6 unit tests on the diff (identical, insert, remove, replace,
+symmetric counts, the size bound). The DB surface is exercised live after the
+next deploy.

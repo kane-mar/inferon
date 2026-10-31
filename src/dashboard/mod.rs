@@ -7,6 +7,7 @@
 
 mod datasets;
 pub mod evals;
+pub mod prompts;
 mod performance;
 mod sessions;
 mod queries;
@@ -264,6 +265,21 @@ pub struct CreateKeyBody {
 #[derive(serde::Deserialize)]
 pub struct KeyLabelBody {
     label: Option<String>,
+}
+
+/// ITEM-097: name a content hash.
+#[derive(serde::Deserialize)]
+pub struct LabelBody {
+    name: String,
+    prompt_hash: String,
+}
+
+/// ITEM-097: diff two labelled versions.
+#[derive(serde::Deserialize)]
+pub struct DiffQuery {
+    name: String,
+    from: String,
+    to: String,
 }
 
 /// ITEM-098: pin a gold set (default: the runner's default case count).
