@@ -23,11 +23,20 @@ import {
   formatMs,
   moneyDeltaPct,
 } from '@/libs/dashboardMetrics';
+import { collectOverview } from '@/libs/dashboardOverview';
 import { Link } from '@/libs/I18nNavigation';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
 const RANGES = [7, 30, 90] as const;
+
+/** One `label · value` line inside a card. */
+const MetricRow = (props: { label: string; value: string }) => (
+  <div className="flex items-center justify-between gap-3">
+    <dt className="text-muted-foreground">{props.label}</dt>
+    <dd className="tabular-nums">{props.value}</dd>
+  </div>
+);
 const METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
 
 const VALUE_FORMAT: Record<ChartMetric, ValueFormat> = {
@@ -70,33 +79,36 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   const t = await getTranslations({ locale, namespace: 'DashboardIndexPage' });
 
   const api = InferonApi.fromEnv();
-  const [summary, previous, series, previousSeries, waste, byProvider, quality] = await Promise.all([
-    api.summary(view.days, 0, session.cookie),
-    view.compare ? api.summary(view.days, view.days, session.cookie) : null,
-    api.timeseries(view.days, 0, session.cookie),
-    view.compare ? api.timeseries(view.days, view.days, session.cookie) : null,
-    api.waste(view.days, session.cookie),
-    api.byProvider(view.days, 0, session.cookie),
-    api.quality(view.days, session.cookie),
+  // The single dashboard draws from every report. A report that fails costs its
+  // own card, never the page (the performance model once 500'd and blanked it).
+  const [summary, previous, series, previousSeries, waste, byProvider, quality]
+    = await Promise.all([
+      api.summary(view.days, 0, session.cookie),
+      view.compare ? api.summary(view.days, view.days, session.cookie) : null,
+      api.timeseries(view.days, 0, session.cookie),
+      view.compare ? api.timeseries(view.days, view.days, session.cookie) : null,
+      api.waste(view.days, session.cookie),
+      api.byProvider(view.days, 0, session.cookie),
+      api.quality(view.days, session.cookie),
+    ]);
+  const [performance, datasets] = await Promise.all([
+    api.performance(view.days, session.cookie).catch(() => null),
+    api.datasets(view.days, session.cookie).catch(() => null),
   ]);
+  const overview = collectOverview({ summary, quality, performance, datasets, waste });
 
-  // The overview is the headline: top spenders, what is leaking, how the
-  // responses behave. The full tables live in the spend report.
+  // One dashboard: the headline from each report — spend, the audit's
+  // recoverable waste, quality, the proxy's own overhead and the dataset the
+  // traffic produced. Each card links to its full report.
   const topProviders = byProvider.providers
     .filter(provider => Number(provider.cost_usd) > 0)
     .slice(0, 3);
-  const recoverable = Object.values(waste).reduce(
-    (total, row) => total + Number(row.savings_est_usd),
-    0,
-  );
-  const leakRequests = Object.values(waste).reduce((total, row) => total + row.requests, 0);
-  const topFailure = Object.entries(quality.overall.errors_by_class).sort((a, b) => b[1] - a[1])[0];
 
-  const tokens = summary.total_prompt_tokens + summary.total_completion_tokens;
+  const tokens = overview.tokens;
   const previousTokens = previous
     ? previous.total_prompt_tokens + previous.total_completion_tokens
     : null;
-  const errorRate = errorRatePct(summary.requests, summary.errors);
+  const errorRate = overview.errorRatePct;
   const previousErrorRate = previous
     ? errorRatePct(previous.requests, previous.errors)
     : null;
@@ -250,7 +262,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
 
       <div className="
         mt-4 grid grid-cols-1 gap-4
-        lg:grid-cols-3
+        lg:grid-cols-2
       "
       >
         <Card
@@ -291,10 +303,10 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
             : (
                 <>
                   <p className="text-2xl font-semibold tabular-nums">
-                    {formatUsd(recoverable.toFixed(6))}
+                    {formatUsd(overview.recoverableUsd)}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {t('recoverable_over', { requests: formatInt(leakRequests) })}
+                    {t('recoverable_over', { requests: formatInt(overview.leakRequests) })}
                   </p>
                   <ul className="mt-3 space-y-1.5 text-sm">
                     {wasteRows.map(([flag, row]) => (
@@ -311,6 +323,97 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                       </li>
                     ))}
                   </ul>
+                </>
+              )}
+        </Card>
+
+        <Card
+          title={t('performance_card')}
+          action={(
+            <Link href="/dashboard/performance" className="text-sm text-primary">
+              {t('view_performance')}
+            </Link>
+          )}
+        >
+          {overview.performance.state !== 'ok'
+            ? (
+                <p className="text-sm text-muted-foreground">
+                  {overview.performance.state === 'empty'
+                    ? t('performance_empty')
+                    : t('report_unavailable')}
+                </p>
+              )
+            : (
+                <dl className="space-y-1.5 text-sm">
+                  <MetricRow
+                    label={t('proxy_p50')}
+                    value={overview.performance.value.proxyP50Us == null
+                      ? '—'
+                      : `${formatInt(overview.performance.value.proxyP50Us)} µs`}
+                  />
+                  <MetricRow
+                    label={t('under_1ms')}
+                    value={overview.performance.value.under1msRate == null
+                      ? '—'
+                      : `${(overview.performance.value.under1msRate * 100).toFixed(1)}%`}
+                  />
+                  <MetricRow
+                    label={t('p95_total')}
+                    value={formatMs(overview.performance.value.totalP95Ms)}
+                  />
+                  <MetricRow
+                    label={t('p95_ttft')}
+                    value={formatMs(overview.performance.value.ttftP95Ms)}
+                  />
+                  <MetricRow
+                    label={t('cache_hit')}
+                    value={overview.performance.value.cacheHitRate == null
+                      ? '—'
+                      : `${(overview.performance.value.cacheHitRate * 100).toFixed(1)}%`}
+                  />
+                </dl>
+              )}
+        </Card>
+
+        <Card
+          title={t('datasets_card')}
+          action={(
+            <Link href="/dashboard/datasets" className="text-sm text-primary">
+              {t('view_datasets')}
+            </Link>
+          )}
+        >
+          {overview.datasets.state !== 'ok'
+            ? (
+                <p className="text-sm text-muted-foreground">
+                  {overview.datasets.state === 'empty'
+                    ? t('datasets_empty')
+                    : t('report_unavailable')}
+                </p>
+              )
+            : (
+                <>
+                  <p className="text-2xl font-semibold tabular-nums">
+                    {formatInt(overview.datasets.value.examples)}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t('verified_examples', {
+                      clusters: formatInt(overview.datasets.value.clusters),
+                      grouping: overview.datasets.value.grouping === 'cluster'
+                        ? t('grouping_cluster')
+                        : t('grouping_hash'),
+                    })}
+                  </p>
+                  <dl className="mt-3 space-y-1.5 text-sm">
+                    <MetricRow
+                      label={t('datasets_spend')}
+                      value={formatUsd(overview.datasets.value.spendUsd)}
+                    />
+                    <MetricRow
+                      label={t('datasets_excluded')}
+                      value={formatInt(overview.datasets.value.excluded)}
+                    />
+                  </dl>
                 </>
               )}
         </Card>
@@ -341,7 +444,17 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
             <div className="flex items-center justify-between gap-3">
               <dt className="text-muted-foreground">{t('top_failure')}</dt>
               <dd className="truncate text-right tabular-nums">
-                {topFailure ? `${topFailure[0]} · ${formatInt(topFailure[1])}` : t('none')}
+                {overview.topErrorClass
+                  ? `${overview.topErrorClass.name} · ${formatInt(overview.topErrorClass.count)}`
+                  : t('none')}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <dt className="text-muted-foreground">{t('thumbs')}</dt>
+              <dd className="tabular-nums">
+                {formatInt(overview.thumbsUp)}
+                {' / '}
+                {formatInt(overview.thumbsDown)}
               </dd>
             </div>
           </dl>

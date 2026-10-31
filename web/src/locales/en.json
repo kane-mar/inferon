@@ -61,7 +61,7 @@
     "meta_description": "Your Inferon cost and routing dashboard."
   },
   "DashboardNav": {
-    "home": "Overview",
+    "home": "Dashboard",
     "connect": "Connect",
     "providers": "Providers",
     "routing": "Routing",
@@ -81,8 +81,8 @@
     "menu": "Menu"
   },
   "DashboardIndexPage": {
-    "title_bar": "Overview",
-    "title_bar_description": "Tenant usage over the last {days} days.",
+    "title_bar": "Dashboard",
+    "title_bar_description": "One view of the last {days} days: spend, recoverable waste, response quality, the proxy’s own overhead and the dataset your traffic produced.",
     "requests": "Requests",
     "errors": "Errors",
     "total_cost": "Total cost",
@@ -138,7 +138,24 @@
     "truncated": "Truncated",
     "top_failure": "Most common failure",
     "none": "None",
-    "view_audit": "Cost audit →"
+    "view_audit": "Cost audit →",
+    "performance_card": "Proxy performance",
+    "view_performance": "Performance report →",
+    "performance_empty": "No measured requests yet — the first one fills this in.",
+    "report_unavailable": "This report could not be loaded just now. Its own page is still available.",
+    "proxy_p50": "Proxy p50 (own overhead)",
+    "under_1ms": "Under 1 ms",
+    "p95_total": "P95 end to end",
+    "cache_hit": "Prompt cache hit",
+    "datasets_card": "Verified dataset",
+    "view_datasets": "Datasets →",
+    "datasets_empty": "No verified examples yet — the dataset page shows why traffic did not qualify.",
+    "verified_examples": "{clusters} prompt clusters, grouped by {grouping}",
+    "grouping_cluster": "task cluster",
+    "grouping_hash": "prompt hash",
+    "datasets_spend": "Spend on these prompts",
+    "datasets_excluded": "Excluded pairs",
+    "thumbs": "Thumbs up / down"
   },
   "KeysPage": {
     "title_bar": "API keys",

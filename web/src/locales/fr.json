@@ -61,7 +61,7 @@
     "meta_description": "Votre tableau de bord Inferon des coûts et du routage."
   },
   "DashboardNav": {
-    "home": "Vue d'ensemble",
+    "home": "Tableau de bord",
     "connect": "Connexion",
     "providers": "Fournisseurs",
     "routing": "Routage",
@@ -81,8 +81,8 @@
     "menu": "Menu"
   },
   "DashboardIndexPage": {
-    "title_bar": "Vue d'ensemble",
-    "title_bar_description": "Usage du locataire sur les {days} derniers jours.",
+    "title_bar": "Tableau de bord",
+    "title_bar_description": "Une vue des {days} derniers jours : dépenses, gaspillage récupérable, qualité des réponses, surcoût du proxy et jeu de données produit par votre trafic.",
     "requests": "Requêtes",
     "errors": "Erreurs",
     "total_cost": "Coût total",
@@ -138,7 +138,24 @@
     "truncated": "Tronquées",
     "top_failure": "Échec le plus fréquent",
     "none": "Aucun",
-    "view_audit": "Audit de coûts →"
+    "view_audit": "Audit de coûts →",
+    "performance_card": "Performance du proxy",
+    "view_performance": "Rapport de performance →",
+    "performance_empty": "Aucune requête mesurée pour l’instant — la première remplira cette carte.",
+    "report_unavailable": "Ce rapport n’a pas pu être chargé à l’instant. Sa page reste disponible.",
+    "proxy_p50": "Proxy p50 (surcoût propre)",
+    "under_1ms": "Sous 1 ms",
+    "p95_total": "P95 de bout en bout",
+    "cache_hit": "Cache de prompt",
+    "datasets_card": "Jeu de données vérifié",
+    "view_datasets": "Jeux de données →",
+    "datasets_empty": "Aucun exemple vérifié pour l’instant — la page des jeux de données explique pourquoi le trafic n’a pas qualifié.",
+    "verified_examples": "{clusters} groupes de prompts, regroupés par {grouping}",
+    "grouping_cluster": "groupe de tâches",
+    "grouping_hash": "empreinte du prompt",
+    "datasets_spend": "Dépense sur ces prompts",
+    "datasets_excluded": "Paires exclues",
+    "thumbs": "Pouces haut / bas"
   },
   "KeysPage": {
     "title_bar": "Clés API",
