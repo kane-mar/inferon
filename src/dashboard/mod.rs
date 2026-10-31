@@ -367,7 +367,15 @@ pub struct ConfigBody {
     rpm_limit: i64,
     #[serde(default)]
     tpm_limit: i64,
+    /// ITEM-096: detection is on by default; redaction is opt-in per mode.
+    #[serde(default = "default_true")]
+    pii_detection: bool,
+    #[serde(default)]
+    pii_redact_storage: bool,
+    #[serde(default)]
+    pii_redact_wire: bool,
 }
+
 
 fn default_true() -> bool {
     true

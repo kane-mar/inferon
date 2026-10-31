@@ -224,6 +224,14 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
     let rate_limits = config
         .as_ref()
         .map_or((0, 0), |budget| (budget.rpm_limit, budget.tpm_limit));
+    // ITEM-096: detection is on by default; redaction is opt-in per mode.
+    let pii = config.as_ref().map_or((true, false, false), |budget| {
+        (
+            budget.pii_detection,
+            budget.pii_redact_storage,
+            budget.pii_redact_wire,
+        )
+    });
     let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention, lint, translate) =
         match config {
             Some(budget) => (
@@ -256,6 +264,9 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "translate_surfaces": translate,
         "rpm_limit": rate_limits.0,
         "tpm_limit": rate_limits.1,
+        "pii_detection": pii.0,
+        "pii_redact_storage": pii.1,
+        "pii_redact_wire": pii.2,
         "prune": state
             .policy_store
             .active(tenant_id)
@@ -327,6 +338,9 @@ pub async fn tenant_config_set(
         translate_surfaces: body.translate_surfaces,
         rpm_limit: body.rpm_limit.max(0),
         tpm_limit: body.tpm_limit.max(0),
+        pii_detection: body.pii_detection,
+        pii_redact_storage: body.pii_redact_storage,
+        pii_redact_wire: body.pii_redact_wire,
     };
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => {

@@ -41,6 +41,7 @@
                 session_id: None,
                 request_lint: None,
                 prune_event: None,
+                pii: None,
         }
     }
 

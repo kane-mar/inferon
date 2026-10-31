@@ -599,6 +599,31 @@ impl HotPath {
         }
     }
 
+    /// ITEM-096: detection and redaction modes for this tenant. Detection is on
+    /// unless the config says otherwise; the redactions are opt-in.
+    pub(crate) async fn pii_plan(&self, state: &Arc<AppState>, tenant_id: Uuid) -> crate::proxy::PiiPlan {
+        match self.refresh(state, tenant_id).await {
+            Ok(entry) => {
+                let entry = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                match entry.budget.as_ref() {
+                    Some(budget) => crate::proxy::PiiPlan {
+                        detect: budget.pii_detection,
+                        redact_storage: budget.pii_redact_storage,
+                        redact_wire: budget.pii_redact_wire,
+                    },
+                    None => crate::proxy::PiiPlan {
+                        detect: true,
+                        ..Default::default()
+                    },
+                }
+            }
+            Err(_) => crate::proxy::PiiPlan {
+                detect: true,
+                ..Default::default()
+            },
+        }
+    }
+
     /// The guard switch, fail-open (a store error never removes the safety net).
     pub async fn guard_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
         match self.budget(state, tenant_id).await {

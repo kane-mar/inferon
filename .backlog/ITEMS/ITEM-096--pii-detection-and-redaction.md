@@ -35,3 +35,34 @@ stored by default (see ITEM-088).
 - Do not log a match value anywhere (only the class and a count).
 
 **Ranking note.** Rank **12** of 22 · V3/E2.5 — a gate for regulated datasets; parity, but its value rises with 087.
+---
+
+**Delivered (2026-10-31).** `src/pii.rs` — deterministic scanners (no service, no
+model) for email, phone, card (13–19 digits + Luhn), SSN shape (area 000/666/9xx
+excluded) and API-key shapes (`sk-`, `AKIA`, `ghp_`/`gho_`/`github_pat_`).
+Overlapping candidates are resolved before counting, so a card number is never
+also a phone; `redact` writes `<class>` placeholders and is idempotent (a second
+pass finds nothing it wrote). `scan_value`/`redact_value` walk a JSON payload,
+keys included.
+
+Storage: detection and redaction happen in `build_trace`, before the payload is
+stored — so the dataset export and the audit share inherit the redaction with no
+second code path. The trace record (`traces.pii`) is `{version, classes, total,
+storage, wire}`; no matched value is ever written, logged or traced. Wire
+redaction runs after pruning and before dispatch, with a deterministic 10%
+holdout (`pii::WIRE_HOLDOUT`) so a tenant can see what redaction costs; the
+stored payload is what the model actually saw, so a dataset pair always matches.
+
+**Cost (measured).** 1.53 ms for a 200 KB payload in release (~7.6 µs/KB, so
+~30 µs for a typical 4 KB prompt), single linear pass; a unit test fails if the
+pass stops being linear. Detection is skipped entirely when the kill switch is
+off.
+
+**Limits (stated, not a guarantee).** Shapes only: names, addresses, free-form
+identifiers and obfuscated values ("j o h n at example dot com") are invisible;
+a clean scan means "no shapes found". `pii_version` is stored with every count so
+detector changes are never compared as the same measurement.
+
+**Verified:** 13 unit tests (each class, Luhn, overlaps, idempotence, large
+payload, no-value-in-record) + 3 handler tests (counts by default, storage
+redaction, wire mode with its holdout, kill switch).

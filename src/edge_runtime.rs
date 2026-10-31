@@ -182,6 +182,9 @@ impl BudgetStore for EdgeState {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
         }))
     }
 

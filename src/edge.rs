@@ -118,6 +118,7 @@ impl EdgeTrace {
                 session_id: None,
                 request_lint: None,
                 prune_event: None,
+                pii: None,
         }
     }
 }
@@ -449,7 +450,10 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
                 COALESCE(lint_enabled, TRUE),
                 COALESCE(translate_surfaces, TRUE),
                 COALESCE(rpm_limit, 0),
-                COALESCE(tpm_limit, 0)
+                COALESCE(tpm_limit, 0),
+                COALESCE(pii_detection, TRUE),
+                COALESCE(pii_redact_storage, FALSE),
+                COALESCE(pii_redact_wire, FALSE),
          FROM tenant_configurations WHERE tenant_id = $1",
     )
     .bind(tenant_id)
@@ -477,7 +481,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
         "models": models,
         "policy": policy,
         "budget": config.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit, pii_detection, pii_redact_storage, pii_redact_wire)| {
                 serde_json::json!({
                     "limit_cents": limit_cents,
                     "spent_cents": spent_cents,
@@ -492,6 +496,9 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
                     "translate_surfaces": translate_surfaces,
                     "rpm_limit": rpm_limit,
                     "tpm_limit": tpm_limit,
+                    "pii_detection": pii_detection,
+                    "pii_redact_storage": pii_redact_storage,
+                    "pii_redact_wire": pii_redact_wire,
                 })
             },
         ),

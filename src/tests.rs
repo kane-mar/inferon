@@ -802,6 +802,9 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
             limit_cents: 100,
             spent_cents: 100,
             cheap_fallback_model: None,
@@ -1398,6 +1401,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 session_id: None,
                 request_lint: None,
                 prune_event: None,
+                pii: None,
         }
     }
 
@@ -1631,6 +1635,9 @@ async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1703,6 +1710,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1749,6 +1759,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -1779,6 +1792,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -1842,6 +1858,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1875,6 +1894,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1907,6 +1929,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -2852,6 +2877,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3078,6 +3106,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3176,6 +3207,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3200,6 +3234,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3389,6 +3426,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3427,6 +3467,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3492,6 +3535,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
             },
         );
         let (response, mut rx) = traced_request_with_budget(
@@ -3695,6 +3741,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 translate_surfaces: false,
                 rpm_limit: 0,
                 tpm_limit: 0,
+                pii_detection: true,
+                pii_redact_storage: false,
+                pii_redact_wire: false,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3782,6 +3831,172 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             2,
             "the duplicate was not sent"
         );
+    }
+
+    #[tokio::test]
+    async fn pii_is_counted_on_every_trace_and_redacted_only_when_asked() {
+        // ITEM-096 AC1/AC2: counts by class always; the stored value replaced
+        // only in redaction mode — and never the value itself.
+        let body = r#"{"model":"content","messages":[
+            {"role":"user","content":"mail jane@example.com or call +1 415 555 0132"}
+        ]}"#;
+
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let _ = build_router(state)
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let traced = rx.recv().await.expect("trace");
+        let pii = traced.pii.expect("scanned by default");
+        assert_eq!(pii["classes"]["email"], 1, "{pii}");
+        assert_eq!(pii["classes"]["phone"], 1, "{pii}");
+        assert_eq!(pii["storage"], "stored");
+        assert_eq!(pii["wire"], "off");
+        let stored = traced.raw_prompt.expect("stored payload").to_string();
+        assert!(stored.contains("jane@example.com"), "unchanged without redaction");
+
+        // Redaction mode: the stored payload is irreversible, counts survive.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
+                lint_enabled: true,
+                translate_surfaces: true,
+                rpm_limit: 0,
+                tpm_limit: 0,
+                pii_detection: true,
+                pii_redact_storage: true,
+                pii_redact_wire: false,
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            ..base_state(&mock_upstream().await)
+        });
+        let _ = build_router(state)
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let traced = rx.recv().await.expect("trace");
+        let stored = traced.raw_prompt.expect("stored payload").to_string();
+        assert!(!stored.contains("jane@example.com"), "redacted before storage: {stored}");
+        assert!(!stored.contains("415 555"), "redacted before storage: {stored}");
+        assert!(stored.contains("<email>"));
+        let pii = traced.pii.expect("counts");
+        assert_eq!(pii["storage"], "redacted");
+        assert_eq!(pii["classes"]["email"], 1);
+    }
+
+    #[tokio::test]
+    async fn wire_redaction_changes_what_the_provider_sees() {
+        // ITEM-096 AC2: the forwarded request, separate from storage. The seed is
+        // held out for 10% of prompts, so this test drives the same prompt twice
+        // and accepts either arm for the first, pinning the invariant instead.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
+                lint_enabled: true,
+                translate_surfaces: true,
+                rpm_limit: 0,
+                tpm_limit: 0,
+                pii_detection: true,
+                pii_redact_storage: false,
+                pii_redact_wire: true,
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            ..base_state(&mock_upstream().await)
+        });
+        let body = r#"{"model":"content","messages":[
+            {"role":"user","content":"mail jane@example.com"}
+        ]}"#;
+        let _ = build_router(state)
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let traced = rx.recv().await.expect("trace");
+        let pii = traced.pii.expect("counts");
+        // Either it was redacted on the wire, or it was held out on purpose.
+        // The stored payload is what the model actually saw, so the dataset
+        // export cannot pair a redacted answer with an unredacted question.
+        let stored = traced.raw_prompt.unwrap().to_string();
+        match pii["wire"].as_str() {
+            Some("redacted") => assert!(stored.contains("<email>"), "{stored}"),
+            Some("held_out") => assert!(stored.contains("jane@example.com"), "{stored}"),
+            other => panic!("unexpected wire mode: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_pii_kill_switch_stops_detection() {
+        // AC4: a tenant can turn scanning off; nothing is recorded.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant_id,
+            budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
+                lint_enabled: true,
+                translate_surfaces: true,
+                rpm_limit: 0,
+                tpm_limit: 0,
+                pii_detection: false,
+                pii_redact_storage: false,
+                pii_redact_wire: false,
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            ..base_state(&mock_upstream().await)
+        });
+        let body = r#"{"model":"content","messages":[{"role":"user","content":"jane@example.com"}]}"#;
+        let _ = build_router(state)
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let traced = rx.recv().await.expect("trace");
+        assert!(traced.pii.is_none(), "no scan, no record");
+        assert!(traced.raw_prompt.unwrap().to_string().contains("jane@example.com"));
     }
 
     #[tokio::test]
@@ -3913,6 +4128,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 translate_surfaces: true,
                 rpm_limit: 0,
                 tpm_limit: 0,
+                pii_detection: true,
+                pii_redact_storage: false,
+                pii_redact_wire: false,
             },
         );
         let store: std::sync::Arc<dyn budget::BudgetStore> =

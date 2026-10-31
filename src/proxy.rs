@@ -567,11 +567,13 @@ pub(crate) async fn proxy_chat_completions(
         session_id,
         lint: None,
         prune_event: None,
+        pii: PiiPlan::default(),
         translate_to: None,
         rate_limit: None,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
+    meta.pii = state.hotpath.pii_plan(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
     // ITEM-095: velocity first — a rejected request costs nothing and never
     // reaches the budget breaker.
@@ -600,6 +602,9 @@ pub(crate) async fn proxy_chat_completions(
     // ITEM-091: rewrite the payload when the tenant opted in and this request is
     // not part of the holdout. The rewrite is attributed on the trace.
     prune_payload(&mut meta, prune.as_ref(), &tenant_id.to_string());
+    // ITEM-096: the wire copy, after pruning so the counts describe what is
+    // actually sent. A deterministic share is held out to measure the effect.
+    redact_wire(&mut meta, tenant_id);
 
     let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
@@ -782,10 +787,12 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         session_id,
         lint: None,
         prune_event: None,
+        pii: PiiPlan::default(),
         translate_to: None,
         rate_limit: None,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
+    meta.pii = state.hotpath.pii_plan(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
     let policy = state.hotpath.policy(&state, tenant_id).await;
     meta.policy_version = policy.as_ref().map(|policy| policy.version);
@@ -794,6 +801,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         policy.as_ref().and_then(|policy| policy.prune.as_ref()),
         &tenant_id.to_string(),
     );
+    redact_wire(&mut meta, tenant_id);
     let decision = match state
         .hotpath
         .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
@@ -1026,6 +1034,68 @@ struct RequestMeta {
     translate_to: Option<Surface>,
     /// ITEM-095: this request's velocity window, for the response headers.
     rate_limit: Option<(crate::ratelimit::Limits, crate::ratelimit::Usage)>,
+    /// ITEM-096: detection and the two redaction modes for this request.
+    pii: PiiPlan,
+}
+
+/// ITEM-096: what the trace path should do with this payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PiiPlan {
+    pub(crate) detect: bool,
+    pub(crate) redact_storage: bool,
+    pub(crate) redact_wire: bool,
+}
+
+impl PiiPlan {
+    /// Whether the wire payload was left unredacted on purpose (the holdout).
+    pub(crate) fn wire_held_out(&self, tenant_id: Uuid, prompt_hash: Option<&str>) -> bool {
+        let seed = format!("{tenant_id}:{}", prompt_hash.unwrap_or_default());
+        let policy = crate::prune::PrunePolicy {
+            holdout_percent: crate::pii::WIRE_HOLDOUT,
+            ..Default::default()
+        };
+        crate::prune::in_holdout(&seed, &policy)
+    }
+}
+
+/// ITEM-096: scan (and optionally redact) a payload for storage.
+///
+/// Returns the payload to store and the trace record. The record carries counts
+/// by class only — never a matched value — so the trace cannot leak what it
+/// found. Redaction here is what the dataset export and the audit share read.
+/// ITEM-096: redact the payload that leaves the perimeter, when the tenant
+/// opted in. Held-out requests are forwarded as written so the effect on quality
+/// is measurable — the same discipline as ITEM-091.
+fn redact_wire(meta: &mut RequestMeta, tenant_id: Uuid) {
+    if !meta.pii.redact_wire
+        || meta
+            .pii
+            .wire_held_out(tenant_id, meta.system_prompt_hash.as_deref())
+    {
+        return;
+    }
+    let (redacted, _) = crate::pii::redact_value(&meta.raw_prompt);
+    meta.raw_prompt = redacted;
+}
+
+/// ITEM-096: scan (and optionally redact) one payload for storage.
+///
+/// The counts are by class only — never a matched value — so the trace cannot
+/// leak what it found. Redaction here is what the dataset export and the audit
+/// share read, which is why it happens before the payload is stored.
+fn pii_payload(plan: PiiPlan, payload: Option<Value>) -> (Option<Value>, crate::pii::Counts) {
+    let Some(payload) = payload else {
+        return (None, crate::pii::Counts::default());
+    };
+    if !plan.detect {
+        return (Some(payload), crate::pii::Counts::default());
+    }
+    if plan.redact_storage {
+        let (redacted, counts) = crate::pii::redact_value(&payload);
+        return (Some(redacted), counts);
+    }
+    let counts = crate::pii::scan_value(&payload);
+    (Some(payload), counts)
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -1062,6 +1132,28 @@ impl TraceOutcome {
 }
 
 fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> TraceMessage {
+    // ITEM-096: the stored payload is the redacted one; the trace keeps counts.
+    let (raw_prompt, prompt_counts) = pii_payload(
+        meta.pii,
+        meta.capture_payloads.then(|| meta.raw_prompt.clone()),
+    );
+    let (raw_completion, completion_counts) = pii_payload(
+        meta.pii,
+        meta.capture_payloads.then_some(outcome.raw_completion).flatten(),
+    );
+    let mut counts = prompt_counts;
+    counts.merge(&completion_counts);
+    let pii = (meta.pii.detect && (meta.capture_payloads || meta.pii.redact_wire)).then(|| {
+        let storage = if meta.pii.redact_storage { "redacted" } else { "stored" };
+        let wire = if !meta.pii.redact_wire {
+            "off"
+        } else if meta.pii.wire_held_out(tenant_id, meta.system_prompt_hash.as_deref()) {
+            "held_out"
+        } else {
+            "redacted"
+        };
+        crate::pii::trace_record(&counts, storage, wire)
+    });
     TraceMessage {
         id: meta.id,
         tenant_id,
@@ -1073,8 +1165,8 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         ttft_ms: outcome.ttft_ms,
         total_duration_ms: outcome.total_duration_ms,
         status_code: outcome.status,
-        raw_prompt: meta.capture_payloads.then(|| meta.raw_prompt.clone()),
-        raw_completion: if meta.capture_payloads { outcome.raw_completion } else { None },
+        raw_prompt,
+        raw_completion,
         raw_completion_capped: meta.capture_payloads && outcome.raw_completion_capped,
         waste_detected: None,
         upstream_cost_usd: rust_decimal::Decimal::ZERO,
@@ -1099,6 +1191,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         session_id: meta.session_id.clone(),
         request_lint: meta.lint.clone(),
         prune_event: meta.prune_event.clone(),
+        pii,
         is_local: meta.is_local,
     }
 }

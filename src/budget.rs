@@ -40,6 +40,12 @@ pub struct TenantBudget {
     /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
     pub rpm_limit: i64,
     pub tpm_limit: i64,
+    /// ITEM-096: scan payloads for PII shapes (counts only).
+    pub pii_detection: bool,
+    /// ITEM-096: replace matches in the stored payload.
+    pub pii_redact_storage: bool,
+    /// ITEM-096: replace matches in the forwarded request.
+    pub pii_redact_wire: bool,
 }
 
 /// ITEM-046: the tenant's routing/budget controls, as submitted from the UI.
@@ -59,6 +65,10 @@ pub struct ConfigUpdate {
     /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
     pub rpm_limit: i64,
     pub tpm_limit: i64,
+    /// ITEM-096: detection and the two redaction modes.
+    pub pii_detection: bool,
+    pub pii_redact_storage: bool,
+    pub pii_redact_wire: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +112,9 @@ pub(crate) type ConfigRow = (
     bool,
     i64,
     i64,
+    bool,
+    bool,
+    bool,
 );
 
 /// Lookup seam: budget config per tenant. `None` = no config = unlimited.
@@ -197,6 +210,9 @@ impl BudgetStore for InMemoryBudgetStore {
                 translate_surfaces: update.translate_surfaces,
                 rpm_limit: update.rpm_limit,
                 tpm_limit: update.tpm_limit,
+                pii_detection: update.pii_detection,
+                pii_redact_storage: update.pii_redact_storage,
+                pii_redact_wire: update.pii_redact_wire,
             },
         );
         Ok(())
@@ -229,6 +245,9 @@ impl BudgetStore for InMemoryBudgetStore {
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
         });
         budget.tier_pairs = pairs.to_vec();
         rows.insert(tenant_id, budget);
@@ -261,14 +280,17 @@ impl BudgetStore for PostgresBudgetStore {
                     COALESCE(lint_enabled, TRUE),
                     COALESCE(translate_surfaces, TRUE),
                     COALESCE(rpm_limit, 0),
-                    COALESCE(tpm_limit, 0)
+                    COALESCE(tpm_limit, 0),
+                    COALESCE(pii_detection, TRUE),
+                    COALESCE(pii_redact_storage, FALSE),
+                    COALESCE(pii_redact_wire, FALSE),
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit, pii_detection, pii_redact_storage, pii_redact_wire)| {
                 TenantBudget {
                     limit_cents,
                     spent_cents,
@@ -283,6 +305,9 @@ impl BudgetStore for PostgresBudgetStore {
                     translate_surfaces,
                     rpm_limit,
                     tpm_limit,
+                    pii_detection,
+                    pii_redact_storage,
+                    pii_redact_wire,
                 }
             },
         ))
@@ -328,13 +353,16 @@ impl BudgetStore for PostgresBudgetStore {
                 (tenant_id, budget_limit_cents, cheap_fallback_model,
                  guard_enabled, router_enabled, router_threshold,
                  payload_capture, payload_retention_days, lint_enabled, translate_surfaces,
-                 rpm_limit, tpm_limit)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 rpm_limit, tpm_limit,
+                 pii_detection, pii_redact_storage, pii_redact_wire)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
              ON CONFLICT (tenant_id) DO UPDATE SET
                 budget_limit_cents = $2, cheap_fallback_model = $3,
                 guard_enabled = $4, router_enabled = $5, router_threshold = $6,
                 payload_capture = $7, payload_retention_days = $8, lint_enabled = $9,
-                translate_surfaces = $10, rpm_limit = $11, tpm_limit = $12",
+                translate_surfaces = $10, rpm_limit = $11, tpm_limit = $12,
+                pii_detection = $13, pii_redact_storage = $14,
+                pii_redact_wire = $15",
         )
         .bind(tenant_id)
         .bind(update.budget_limit_cents)
@@ -348,6 +376,9 @@ impl BudgetStore for PostgresBudgetStore {
         .bind(update.translate_surfaces)
         .bind(update.rpm_limit)
         .bind(update.tpm_limit)
+        .bind(update.pii_detection)
+        .bind(update.pii_redact_storage)
+        .bind(update.pii_redact_wire)
         .execute(&self.pool)
         .await?;
         Ok(())

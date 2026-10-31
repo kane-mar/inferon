@@ -198,6 +198,47 @@ export default async function PerformancePage(props: {
         </Card>
       </div>
 
+      {/* PII: counts by class, never the values, plus what was redacted. */}
+      {data.pii.scanned > 0 && (
+        <div className="mt-4">
+          <Card title={t('pii')}>
+            <p className="mb-3 text-xs text-muted-foreground">{t('pii_help')}</p>
+            <div className="flex flex-wrap items-center gap-4">
+              <span className="text-sm">
+                {t('pii_scanned', { count: data.pii.scanned })}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {t('pii_matches', { count: data.pii.matches })}
+              </span>
+              {(data.pii.redacted_storage > 0 || data.pii.redacted_wire > 0) && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  {t('pii_redacted', {
+                    storage: data.pii.redacted_storage,
+                    wire: data.pii.redacted_wire,
+                  })}
+                </span>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(data.pii.by_class).map(([piiClass, count]) => (
+                  <span
+                    key={piiClass}
+                    className="
+                      rounded-md border px-2 py-1 font-mono text-xs
+                      text-muted-foreground
+                    "
+                  >
+                    {piiClass}
+                    {' '}
+                    ·
+                    {integer(count)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* Opt-in pruning: what was removed, and the held-out control arm. */}
       {data.pruning.enabled && (
         <div className="mt-4">

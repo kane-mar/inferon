@@ -194,6 +194,14 @@ export type PerformanceReport = {
     ttft_p95_ms: number | null;
     proxy_share: number | null;
   };
+  /** ITEM-096: PII shapes found (counts only — never a value). */
+  pii: {
+    scanned: number;
+    redacted_storage: number;
+    redacted_wire: number;
+    matches: number;
+    by_class: Record<string, number>;
+  };
   /** ITEM-091: context pruning and its held-out control arm. */
   pruning: {
     enabled: boolean;

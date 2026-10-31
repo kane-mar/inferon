@@ -154,6 +154,35 @@ pub async fn performance(
     let (pruned, tokens_saved, usd_saved, pruned_ok, holdout, holdout_ok, pruned_and_holdout) = pruning;
     let rate = |ok: i64, total: i64| (total > 0).then(|| ok as f64 / total as f64);
 
+    // ITEM-096: PII counts by class, and how much of the traffic was redacted.
+    // `by_class` is summed over traces, never over values.
+    let (pii_scanned, pii_redacted, pii_wire, pii_total): (i64, i64, i64, i64) =
+        stored(sqlx::query_as(
+            "SELECT COUNT(*) FILTER (WHERE pii IS NOT NULL),
+                    COUNT(*) FILTER (WHERE pii->>'storage' = 'redacted'),
+                    COUNT(*) FILTER (WHERE pii->>'wire' = 'redacted'),
+                    COALESCE(SUM((pii->>'total')::bigint) FILTER (WHERE pii IS NOT NULL), 0)
+             FROM traces
+             WHERE tenant_id = $1
+               AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+        )
+        .bind(tenant_id)
+        .bind(days)
+        .fetch_one(&state.db)
+        .await)?;
+    let pii_by_class: Vec<(String, i64)> = stored(sqlx::query_as(
+        "SELECT class, SUM(count)
+         FROM traces, jsonb_each_text(pii->'classes') AS found(class, count)
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND pii IS NOT NULL
+         GROUP BY class ORDER BY 2 DESC",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await)?;
+
     // Process-wide counters are operator information, not a tenant's.
     let cache = match super::operator_or(&state, &headers).await {
         Ok(()) => Some(cache_json(state.hotpath.stats())),
@@ -213,6 +242,16 @@ pub async fn performance(
                 (Some(pruned), Some(holdout)) => Some(pruned - holdout),
                 _ => None,
             },
+        },
+        "pii": {
+            "scanned": pii_scanned,
+            "redacted_storage": pii_redacted,
+            "redacted_wire": pii_wire,
+            "matches": pii_total,
+            "by_class": pii_by_class
+                .into_iter()
+                .map(|(class, count)| (class, json!(count)))
+                .collect::<serde_json::Map<String, Value>>(),
         },
         "cache": cache,
         "by_model": models.into_iter().map(|(model, requests, proxy_p50, proxy_p95, total_p50, total_p95)| json!({
