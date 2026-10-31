@@ -1509,6 +1509,11 @@ fn prune_payload(
     let Some(policy) = policy.filter(|policy| policy.enabled) else {
         return;
     };
+    // A schema contract is a promise about the answer; do not change its input
+    // in the same request that asks it to prove the output (ITEM-091 note).
+    if crate::guard::request_schema(&meta.raw_prompt).is_some() {
+        return;
+    }
     let seed = format!(
         "{tenant_id}:{}",
         meta.system_prompt_hash.as_deref().unwrap_or_default()

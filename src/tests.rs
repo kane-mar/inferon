@@ -3785,6 +3785,60 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     }
 
     #[tokio::test]
+    async fn a_schema_contract_request_is_never_pruned() {
+        // ITEM-091 note: the guard validates this answer against the schema, so
+        // the payload that asks for it is left exactly as written.
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let policy_store = std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default());
+        crate::policy::PolicyStore::publish(
+            policy_store.as_ref(),
+            tenant_id,
+            crate::policy::Policy {
+                version: 0,
+                router_threshold: None,
+                prune: Some(crate::prune::PrunePolicy {
+                    enabled: true,
+                    drop_duplicate_turns: true,
+                    max_prompt_tokens: None,
+                    holdout_percent: 0,
+                }),
+                evidence: serde_json::json!({"why": "test"}),
+                enabled: true,
+                provider_weights: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            policy_store,
+            ..base_state(&mock_upstream().await)
+        });
+        let router = build_router(state);
+        let duplicate = "z".repeat(400);
+        let body = format!(
+            r#"{{"model":"content","response_format":{{"type":"json_schema","json_schema":{{"name":"a","schema":{{"type":"object","required":["answer"],"properties":{{"answer":{{"type":"string"}}}}}}}}}},
+                "messages":[
+                    {{"role":"user","content":"{duplicate}"}},
+                    {{"role":"user","content":"{duplicate}"}},
+                    {{"role":"user","content":"the question"}}
+                ]}}"#
+        );
+        let _ = router
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        let msg = rx.recv().await.expect("trace");
+        assert!(msg.prune_event.is_none(), "no rewrite is attempted");
+        assert_eq!(
+            msg.raw_prompt.as_ref().unwrap()["messages"].as_array().unwrap().len(),
+            3,
+            "the schema request is sent as written"
+        );
+    }
+
+    #[tokio::test]
     async fn a_held_out_request_is_sent_unpruned_so_the_effect_is_measurable() {
         let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
         let policy_store = std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default());
