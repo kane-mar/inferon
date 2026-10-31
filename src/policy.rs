@@ -74,6 +74,32 @@ fn default_true() -> bool {
     true
 }
 
+/// ITEM-091: the policy a tenant's pruning opt-in publishes.
+///
+/// An existing policy keeps its router threshold and provider weights — opting
+/// into pruning must not silently reset routing — and the previous version is
+/// recorded in the evidence for the audit trail.
+pub fn prune_policy_from(
+    current: Option<&Policy>,
+    body: crate::prune::PrunePolicy,
+) -> Policy {
+    Policy {
+        version: current.map_or(0, |policy| policy.version),
+        router_threshold: current.and_then(|policy| policy.router_threshold),
+        provider_weights: current.map(|policy| policy.provider_weights.clone()).unwrap_or_default(),
+        prune: Some(crate::prune::PrunePolicy {
+            holdout_percent: body.holdout_percent.min(50),
+            ..body
+        }),
+        evidence: serde_json::json!({
+            "why": "tenant_opt_in",
+            "enabled": body.enabled,
+            "previous_version": current.map(|policy| policy.version),
+        }),
+        enabled: true,
+    }
+}
+
 /// The next router threshold, bounded. Moves **up** (downgrade less) when the
 /// router's cheap tier is measurably worse than the tenant's baseline, **down**
 /// (downgrade more) when it is at least as good, and not at all when the sample

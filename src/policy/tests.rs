@@ -71,3 +71,70 @@
         store.freeze(tenant).await.unwrap();
         assert_eq!(store.active(tenant).await.unwrap(), None);
     }
+
+#[test]
+fn a_pruning_opt_in_keeps_the_routing_policy_and_records_the_previous_version() {
+    // ITEM-091 AC6: opting into pruning must not reset routing, and the change
+    // must be attributable to the version it replaced.
+    let current = Policy {
+        version: 4,
+        router_threshold: Some(0.3),
+        prune: None,
+        evidence: serde_json::json!({"why": "adaptive"}),
+        enabled: true,
+        provider_weights: [("p1".to_string(), 0.5)].into_iter().collect(),
+    };
+    let next = prune_policy_from(
+        Some(&current),
+        crate::prune::PrunePolicy {
+            enabled: true,
+            drop_duplicate_turns: true,
+            max_prompt_tokens: Some(4_000),
+            holdout_percent: 99,
+        },
+    );
+    assert_eq!(next.version, 4, "the store assigns the new version");
+    assert_eq!(next.router_threshold, Some(0.3), "routing is untouched");
+    assert_eq!(next.provider_weights, current.provider_weights);
+    assert_eq!(next.evidence["previous_version"], 4);
+    assert_eq!(next.prune.as_ref().unwrap().holdout_percent, 50, "holdout is clamped");
+    assert!(next.prune.as_ref().unwrap().enabled);
+}
+
+#[test]
+fn a_tenant_without_a_policy_can_still_opt_in() {
+    let next = prune_policy_from(
+        None,
+        crate::prune::PrunePolicy {
+            enabled: true,
+            drop_duplicate_turns: true,
+            max_prompt_tokens: None,
+            holdout_percent: 10,
+        },
+    );
+    assert_eq!(next.version, 0);
+    assert_eq!(next.router_threshold, None, "no opinion on routing");
+    assert_eq!(next.evidence["previous_version"], serde_json::Value::Null);
+    assert!(next.enabled);
+}
+
+#[test]
+fn opting_out_publishes_a_disabled_policy_rather_than_deleting_history() {
+    let current = Policy {
+        version: 2,
+        router_threshold: None,
+        prune: Some(crate::prune::PrunePolicy::default()),
+        evidence: serde_json::json!({}),
+        enabled: true,
+        provider_weights: Default::default(),
+    };
+    let next = prune_policy_from(
+        Some(&current),
+        crate::prune::PrunePolicy {
+            enabled: false,
+            ..Default::default()
+        },
+    );
+    assert!(!next.prune.as_ref().unwrap().enabled);
+    assert_eq!(next.evidence["enabled"], false);
+}

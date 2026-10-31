@@ -256,8 +256,47 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "translate_surfaces": translate,
         "rpm_limit": rate_limits.0,
         "tpm_limit": rate_limits.1,
+        "prune": state
+            .policy_store
+            .active(tenant_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|policy| policy.prune),
         "role": role,
     }))
+}
+
+/// POST /v1/dashboard/api/prune (owner-only) — turn context pruning on or off.
+///
+/// ITEM-091: the decision belongs to the tenant, and it is published as a new
+/// version of the item-064 policy, so freeze and rollback work on it like on
+/// every other adaptive decision. Turning it off publishes `enabled: false`
+/// rather than deleting history.
+pub async fn tenant_prune_set(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<crate::prune::PrunePolicy>,
+) -> Response {
+    let (tenant_id, role) = match session_membership(&state, &headers).await {
+        Ok(membership) => membership,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = owner_only(&role) {
+        return resp;
+    }
+    let current = match state.policy_store.active(tenant_id).await {
+        Ok(policy) => policy,
+        Err(e) => return internal(e.to_string()),
+    };
+    let next = crate::policy::prune_policy_from(current.as_ref(), body);
+    match state.policy_store.publish(tenant_id, next).await {
+        Ok(published) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "version": published.version, "prune": published.prune }))
+        }
+        Err(e) => internal(e.to_string()),
+    }
 }
 
 /// POST /v1/dashboard/api/config (owner-only) — update the controls.
