@@ -66,7 +66,7 @@ pub(super) async fn forward_buffered(
     if let Some(content_type) = content_type.or(upstream_content_type) {
         response.headers_mut().insert(CONTENT_TYPE, content_type);
     }
-    with_rate_limit(with_lint(with_trace_id(response, meta.id), meta.lint.as_ref()), meta)
+    decorate(response, meta)
 }
 
 /// ITEM-094: translate a buffered upstream body to the client surface. Errors
@@ -169,6 +169,15 @@ pub(crate) fn rate_limited_response(
             .unwrap_or_else(|_| HeaderValue::from_static("60")),
     );
     response
+}
+
+/// Everything a proxied response carries back to the client: the trace id, the
+/// pre-flight findings and the rate-limit window. One place, so a new header
+/// cannot be forgotten on one of the three response paths.
+pub(super) fn decorate(response: Response, meta: &RequestMeta) -> Response {
+    let response = with_trace_id(response, meta.id);
+    let response = with_lint(response, meta.lint.as_ref());
+    with_rate_limit(response, meta)
 }
 
 /// ITEM-095: advertise the window on any response the key produced.
@@ -354,8 +363,8 @@ pub(super) fn stream_response(
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
-    let lint = meta.lint.clone();
-    // The window headers outlive the trace: `meta` moves into the stream.
+    // The headers outlive the trace: `meta` moves into the stream.
+
     let header_meta = meta.clone();
     // ITEM-094: when the provider speaks the other surface, the translator wraps
     // the raw stream *before* the telemetry tap — so usage parsing and completion
@@ -390,10 +399,7 @@ pub(super) fn stream_response(
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    with_rate_limit(
-        with_lint(with_trace_id(response, trace_id), lint.as_ref()),
-        &header_meta,
-    )
+    decorate(response, &header_meta)
 }
 
 /// Guarded buffered response (ITEM-023). For requests with a JSON-schema
@@ -444,10 +450,7 @@ pub(super) async fn guarded_stream_response(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_rate_limit(
-                with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref()),
-                &guard_emit.meta,
-            )
+            decorate(response, &guard_emit.meta)
         }
         Err(reason) => {
             tracing::warn!(
@@ -560,10 +563,7 @@ pub(super) async fn fallback_to_frontier(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_rate_limit(
-                with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref()),
-                &guard_emit.meta,
-            )
+            decorate(response, &guard_emit.meta)
         }
     }
 }
