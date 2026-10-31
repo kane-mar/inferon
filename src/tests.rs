@@ -34,6 +34,7 @@
                 id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 upstream_openai_key: Some(MASTER_KEY.to_string()),
                 api_key_id: None,
+                limits: crate::ratelimit::Limits::default(),
             },
         );
         InMemoryTenantStore::new(by_hash)
@@ -697,6 +698,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
             upstream_openai_key: Some(MASTER_KEY.to_string()),
             api_key_id: None,
+            limits: crate::ratelimit::Limits::default(),
         }
     }
 
@@ -798,6 +800,8 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             payload_retention_days: 30,
             lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
             limit_cents: 100,
             spent_cents: 100,
             cheap_fallback_model: None,
@@ -1252,6 +1256,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),
                 upstream_openai_key: None,
                 api_key_id: None,
+                limits: crate::ratelimit::Limits::default(),
             },
         );
         let (tx, _rx) = mpsc::channel(8);
@@ -1624,6 +1629,8 @@ async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
             payload_retention_days: 30,
             lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1694,6 +1701,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             payload_retention_days: 30,
             lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1738,6 +1747,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -1766,6 +1777,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     payload_retention_days: 30,
                     lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -1827,6 +1840,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1858,6 +1873,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1888,6 +1905,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -2831,6 +2850,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3055,6 +3076,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3151,6 +3174,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3173,6 +3198,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     payload_retention_days: 30,
                     lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3360,6 +3387,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3396,6 +3425,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     payload_retention_days: 30,
                     lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3459,6 +3490,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
             },
         );
         let (response, mut rx) = traced_request_with_budget(
@@ -3515,6 +3548,21 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             lint["wasted_usd_est"].as_str().is_some_and(|usd| usd.parse::<f64>().unwrap() > 0.0),
             "the finding is priced: {lint}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_limited_request_is_refused_with_the_standard_headers() {
+        // ITEM-095: AC2 — the 429 carries Retry-After and the rate-limit headers.
+        let response = proxy::rate_limited_response(crate::ratelimit::Axis::Requests, 60, 12);
+        assert_eq!(response.status(), axum::http::StatusCode::TOO_MANY_REQUESTS);
+        let headers = response.headers();
+        assert_eq!(headers.get("retry-after").unwrap(), "12");
+        assert_eq!(headers.get("x-ratelimit-limit").unwrap(), "60");
+        assert_eq!(headers.get("x-ratelimit-remaining").unwrap(), "0");
+        let bytes = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["error"]["type"], "rate_limited");
+        assert!(json["error"]["message"].as_str().unwrap().contains("requests"));
     }
 
     #[tokio::test]
@@ -3645,6 +3693,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 payload_retention_days: 30,
                 lint_enabled: true,
                 translate_surfaces: false,
+                rpm_limit: 0,
+                tpm_limit: 0,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3807,6 +3857,8 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 router_threshold: 0.35,
                 tier_pairs: Vec::new(),
                 translate_surfaces: true,
+                rpm_limit: 0,
+                tpm_limit: 0,
             },
         );
         let store: std::sync::Arc<dyn budget::BudgetStore> =

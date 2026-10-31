@@ -568,10 +568,24 @@ pub(crate) async fn proxy_chat_completions(
         lint: None,
         prune_event: None,
         translate_to: None,
+        rate_limit: None,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
+    // ITEM-095: velocity first — a rejected request costs nothing and never
+    // reaches the budget breaker.
+    if let Err(resp) = enforce_rate_limit(&state, &tenant, &mut meta).await {
+        trace_error(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            429,
+            ErrorClass::RateLimited,
+        );
+        return resp;
+    }
     let plan_started = Instant::now();
     let ModelPlan {
         route,
@@ -769,6 +783,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         lint: None,
         prune_event: None,
         translate_to: None,
+        rate_limit: None,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
@@ -818,6 +833,17 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         None => body_bytes,
     };
     meta.translate_to = route.translate;
+    if let Err(resp) = enforce_rate_limit(&state, &tenant, &mut meta).await {
+        trace_error(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            429,
+            ErrorClass::RateLimited,
+        );
+        return resp;
+    }
     let upstream = match request.body(wire).send().await {
         Ok(response) => response,
         Err(e) => {
@@ -958,7 +984,7 @@ async fn forward_buffered(
     if let Some(content_type) = content_type.or(upstream_content_type) {
         response.headers_mut().insert(CONTENT_TYPE, content_type);
     }
-    with_lint(with_trace_id(response, meta.id), meta.lint.as_ref())
+    with_rate_limit(with_lint(with_trace_id(response, meta.id), meta.lint.as_ref()), meta)
 }
 
 /// Request-derived fields shared by every trace of this request.
@@ -998,6 +1024,8 @@ struct RequestMeta {
     prune_event: Option<Value>,
     /// ITEM-094: the surface the provider spoke, when it was not the client's.
     translate_to: Option<Surface>,
+    /// ITEM-095: this request's velocity window, for the response headers.
+    rate_limit: Option<(crate::ratelimit::Limits, crate::ratelimit::Usage)>,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -1281,6 +1309,118 @@ fn translated_body(bytes: &axum::body::Bytes, target: Surface) -> Option<axum::b
     Some(axum::body::Bytes::from(translated.to_string()))
 }
 
+/// ITEM-095: charge this request against the key's velocity window and refuse
+/// it when a limit is exceeded.
+///
+/// Pre-flight and pre-budget: a rejected request consumes no spend. Keys with no
+/// limits (the default) touch no database at all; a counter failure fails open.
+async fn enforce_rate_limit(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    meta: &mut RequestMeta,
+) -> Result<(), Response> {
+    let Some(key_id) = tenant.api_key_id else {
+        return Ok(());
+    };
+    // A key may set its own limits; otherwise the tenant default applies.
+    let limits = if tenant.limits.is_unlimited() {
+        match state.hotpath.budget(state, tenant.id).await {
+            Ok(Some(budget)) => crate::ratelimit::Limits {
+                requests_per_minute: budget.rpm_limit,
+                tokens_per_minute: budget.tpm_limit,
+            },
+            _ => crate::ratelimit::Limits::default(),
+        }
+    } else {
+        tenant.limits
+    };
+    if limits.is_unlimited() {
+        return Ok(());
+    }
+
+    let estimate = crate::ratelimit::estimate_tokens(meta.raw_prompt.to_string().len());
+    let Some(usage) = crate::ratelimit::charge(&state.db, key_id, estimate).await else {
+        return Ok(()); // the limiter is down; the data plane keeps working
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0);
+    match crate::ratelimit::decide(limits, usage, crate::ratelimit::retry_after_secs(now)) {
+        crate::ratelimit::Decision::Allowed(usage) => {
+            meta.rate_limit = Some((limits, usage));
+            Ok(())
+        }
+        crate::ratelimit::Decision::Limited {
+            axis,
+            limit,
+            retry_after_secs,
+        } => {
+            tracing::warn!(
+                key_id = %key_id, axis = axis.as_str(), limit,
+                "rate limit exceeded"
+            );
+            Err(rate_limited_response(axis, limit, retry_after_secs))
+        }
+    }
+}
+
+/// ITEM-095: the 429 a limited key receives — typed body plus the standard
+/// rate-limit headers.
+pub(crate) fn rate_limited_response(
+    axis: crate::ratelimit::Axis,
+    limit: i64,
+    retry_after_secs: i64,
+) -> Response {
+    let mut response = json_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        &format!("{} per minute exceeded for this key", axis.as_str()),
+    );
+    let headers = response.headers_mut();
+    if let Ok(value) = HeaderValue::from_str(&retry_after_secs.to_string()) {
+        headers.insert("retry-after", value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&limit.to_string()) {
+        headers.insert("x-ratelimit-limit", value);
+    }
+    headers.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+    headers.insert(
+        "x-ratelimit-reset",
+        HeaderValue::from_str(&retry_after_secs.to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("60")),
+    );
+    response
+}
+
+/// ITEM-095: advertise the window on any response the key produced.
+fn with_rate_limit(mut response: Response, meta: &RequestMeta) -> Response {
+    let Some((limits, usage)) = meta.rate_limit else {
+        return response;
+    };
+    let headers = response.headers_mut();
+    let limit = if limits.requests_per_minute > 0 {
+        limits.requests_per_minute
+    } else {
+        limits.tokens_per_minute
+    };
+    let used = if limits.requests_per_minute > 0 {
+        usage.requests
+    } else {
+        usage.tokens
+    };
+    if let Ok(value) = HeaderValue::from_str(&limit.to_string()) {
+        headers.insert("x-ratelimit-limit", value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&(limit - used).max(0).to_string()) {
+        headers.insert("x-ratelimit-remaining", value);
+    }
+    if let Ok(value) = HeaderValue::from_str("60") {
+        headers.insert("x-ratelimit-reset", value);
+    }
+    response
+}
+
 /// ITEM-094: the body actually sent, translated when the provider speaks the
 /// other surface. Routing, the guard, pruning and the pre-flight lint all run on
 /// the *client's* shape; translation is the last step before the wire.
@@ -1432,6 +1572,8 @@ fn stream_response(
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
     let lint = meta.lint.clone();
+    // The window headers outlive the trace: `meta` moves into the stream.
+    let header_meta = meta.clone();
     // ITEM-094: when the provider speaks the other surface, the translator wraps
     // the raw stream *before* the telemetry tap — so usage parsing and completion
     // capture read exactly the frames the client receives.
@@ -1465,7 +1607,10 @@ fn stream_response(
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-    with_lint(with_trace_id(response, trace_id), lint.as_ref())
+    with_rate_limit(
+        with_lint(with_trace_id(response, trace_id), lint.as_ref()),
+        &header_meta,
+    )
 }
 
 /// Guarded buffered response (ITEM-023). For requests with a JSON-schema
@@ -1516,7 +1661,10 @@ async fn guarded_stream_response(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref())
+            with_rate_limit(
+                with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref()),
+                &guard_emit.meta,
+            )
         }
         Err(reason) => {
             tracing::warn!(
@@ -1629,7 +1777,10 @@ async fn fallback_to_frontier(
             response
                 .headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref())
+            with_rate_limit(
+                with_lint(with_trace_id(response, guard_emit.meta.id), guard_emit.meta.lint.as_ref()),
+                &guard_emit.meta,
+            )
         }
     }
 }

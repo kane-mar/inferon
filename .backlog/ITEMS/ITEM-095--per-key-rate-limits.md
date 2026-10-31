@@ -35,3 +35,25 @@ and the budget breaker; there is no request or token rate limit and no 429 with
 - Keep it off the hot path when unset (no extra query for tenants with no limits).
 
 **Ranking note.** Rank **11** of 22 · V3/E2.5 — enterprise velocity protection; parity.
+---
+
+**Delivered (2026-10-31).** `src/ratelimit.rs`: `Limits` (0 = unlimited),
+`decide` (requests first, then tokens; the request boundary is limit-1 / limit /
+limit+1), `estimate_tokens` (prompt chars/4), `retry_after_secs`, and `charge` —
+one atomic `INSERT … ON CONFLICT DO UPDATE … RETURNING` into `api_key_usage`, so
+two instances cannot both see "limit - 1". `charge_tokens` reconciles the actual
+completion after the fact.
+
+Per-key limits are read by the same query that authenticates (`Tenant.limits`),
+so a limited key costs no extra query; the tenant default rides the cached
+config row. Enforcement runs before planning, so a rejected request never
+touches the budget. A limiter outage fails open — like every other switch, it
+must not take the data plane down.
+
+Token rule (documented choice): the prompt is estimated and charged pre-flight,
+the completion is added when the trace is written; a request is rejected on what
+the client can act on before spending anything.
+
+Verified: 7 unit tests (boundaries, axes, Retry-After, estimate) + a response
+test for the 429 headers. Live: `X-RateLimit-*` on a successful call, 429 with
+`Retry-After` past a configured cap.

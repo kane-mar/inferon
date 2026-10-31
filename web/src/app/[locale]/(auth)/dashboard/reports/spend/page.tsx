@@ -80,6 +80,8 @@ export default async function SpendReportPage(props: {
     requests: key.requests,
     tokens: key.prompt_tokens + key.completion_tokens,
     limitCents: key.spend_limit_cents,
+    rpmLimit: key.rpm_limit,
+    tpmLimit: key.tpm_limit,
   }));
 
   return (

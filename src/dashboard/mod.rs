@@ -268,6 +268,11 @@ pub struct KeyLabelBody {
 #[derive(serde::Deserialize)]
 pub struct KeyLimitBody {
     spend_limit_cents: i64,
+    /// ITEM-095: per-key velocity limits (0 = fall back to the tenant default).
+    #[serde(default)]
+    rpm_limit: i64,
+    #[serde(default)]
+    tpm_limit: i64,
 }
 
 /// Owner-gate for tenant management actions (ITEM-038/039): members can view
@@ -357,6 +362,11 @@ pub struct ConfigBody {
     /// ITEM-094. Defaults keep an older client from disabling translation.
     #[serde(default = "default_true")]
     translate_surfaces: bool,
+    /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
+    #[serde(default)]
+    rpm_limit: i64,
+    #[serde(default)]
+    tpm_limit: i64,
 }
 
 fn default_true() -> bool {

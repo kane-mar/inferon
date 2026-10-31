@@ -15,6 +15,9 @@ pub struct Tenant {
     /// ITEM-047: the `api_keys` row this request authenticated with (for per-key
     /// spend attribution). `None` on non-auth lookups (`tenant_by_id`).
     pub api_key_id: Option<Uuid>,
+    /// ITEM-095: this key's velocity limits (0 = unlimited). Read by the same
+    /// query that authenticates, so the hot path pays nothing extra.
+    pub limits: crate::ratelimit::Limits,
 }
 
 /// Metadata for one `api_keys` row (ITEM-034). Only metadata is exposed — key
@@ -30,6 +33,9 @@ pub struct ApiKeyInfo {
     pub last_used_at: Option<String>,
     /// ITEM-047: monthly spend cap in cents; 0 = no limit.
     pub spend_limit_cents: i64,
+    /// ITEM-095: velocity limits for this key; 0 = unlimited.
+    pub rpm_limit: i64,
+    pub tpm_limit: i64,
 }
 
 impl ApiKeyInfo {
@@ -104,6 +110,18 @@ pub trait TenantStore: Send + Sync {
         key_id: Uuid,
         limit_cents: i64,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// ITEM-095: set a key's velocity limits (0 = unlimited). Keys that do not
+    /// override fall back to the tenant default.
+    async fn set_key_limits(
+        &self,
+        _tenant_id: Uuid,
+        _key_id: Uuid,
+        _requests_per_minute: i64,
+        _tokens_per_minute: i64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(false)
+    }
 }
 
 #[derive(Clone)]
@@ -114,6 +132,8 @@ struct InMemoryApiKey {
     key_hash: String,
     revoked: bool,
     spend_limit_cents: i64,
+    rpm_limit: i64,
+    tpm_limit: i64,
 }
 
 #[derive(Default)]
@@ -150,6 +170,8 @@ impl InMemoryTenantStore {
                 key_hash: hash,
                 revoked: false,
                 spend_limit_cents: 0,
+                rpm_limit: 0,
+                tpm_limit: 0,
             });
         }
         store
@@ -215,6 +237,8 @@ impl TenantStore for InMemoryTenantStore {
             key_hash: key_hash.to_string(),
             revoked: false,
             spend_limit_cents: 0,
+            rpm_limit: 0,
+            tpm_limit: 0,
         });
         Ok(id)
     }
@@ -236,6 +260,8 @@ impl TenantStore for InMemoryTenantStore {
                 revoked_at: if k.revoked { Some(now.clone()) } else { None },
                 last_used_at: None,
                 spend_limit_cents: k.spend_limit_cents,
+                rpm_limit: k.rpm_limit,
+                tpm_limit: k.tpm_limit,
             })
             .collect();
         // Oldest first (in-memory keys are appended in mint order).
@@ -267,6 +293,7 @@ impl TenantStore for InMemoryTenantStore {
                 id,
                 upstream_openai_key: upstream_key.map(str::to_string),
                 api_key_id: None,
+                limits: crate::ratelimit::Limits::default(),
             },
         );
         Ok(id)
@@ -308,6 +335,27 @@ impl TenantStore for InMemoryTenantStore {
             None => Ok(false),
         }
     }
+
+    async fn set_key_limits(
+        &self,
+        tenant_id: Uuid,
+        key_id: Uuid,
+        requests_per_minute: i64,
+        tokens_per_minute: i64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let mut keys = self.keys();
+        match keys
+            .iter_mut()
+            .find(|k| k.id == key_id && k.tenant_id == tenant_id)
+        {
+            Some(k) => {
+                k.rpm_limit = requests_per_minute.max(0);
+                k.tpm_limit = tokens_per_minute.max(0);
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
 }
 
 pub struct PostgresTenantStore {
@@ -326,18 +374,23 @@ impl TenantStore for PostgresTenantStore {
         &self,
         api_key_hash: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let row = sqlx::query_as::<_, (Uuid, Option<String>, Uuid)>(
-            "SELECT t.id, t.upstream_openai_key, k.id
+        let row = sqlx::query_as::<_, (Uuid, Option<String>, Uuid, i64, i64)>(
+            "SELECT t.id, t.upstream_openai_key, k.id,
+                    COALESCE(k.rpm_limit, 0), COALESCE(k.tpm_limit, 0)
              FROM api_keys k JOIN tenants t ON t.id = k.tenant_id
              WHERE k.key_hash = $1 AND k.revoked_at IS NULL",
         )
         .bind(api_key_hash)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(id, upstream_openai_key, api_key_id)| Tenant {
+        Ok(row.map(|(id, upstream_openai_key, api_key_id, rpm_limit, tpm_limit)| Tenant {
             id,
             upstream_openai_key,
             api_key_id: Some(api_key_id),
+            limits: crate::ratelimit::Limits {
+                requests_per_minute: rpm_limit,
+                tokens_per_minute: tpm_limit,
+            },
         }))
     }
 
@@ -355,6 +408,7 @@ impl TenantStore for PostgresTenantStore {
             id,
             upstream_openai_key,
             api_key_id: None,
+            limits: crate::ratelimit::Limits::default(),
         }))
     }
 
@@ -380,9 +434,12 @@ impl TenantStore for PostgresTenantStore {
         &self,
         tenant_id: Uuid,
     ) -> Result<Vec<ApiKeyInfo>, Box<dyn std::error::Error + Send + Sync>> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<String>, Option<String>, i64)>(
+        let rows = sqlx::query_as::<
+            _,
+            (Uuid, Uuid, String, String, Option<String>, Option<String>, i64, i64, i64),
+        >(
             "SELECT id, tenant_id, label, created_at::text, revoked_at::text, last_used_at::text,
-                    spend_limit_cents
+                    spend_limit_cents, COALESCE(rpm_limit, 0), COALESCE(tpm_limit, 0)
              FROM api_keys WHERE tenant_id = $1 ORDER BY created_at",
         )
         .bind(tenant_id)
@@ -390,7 +447,7 @@ impl TenantStore for PostgresTenantStore {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(id, tenant_id, label, created_at, revoked_at, last_used_at, spend_limit_cents)| ApiKeyInfo {
+            .map(|(id, tenant_id, label, created_at, revoked_at, last_used_at, spend_limit_cents, rpm_limit, tpm_limit)| ApiKeyInfo {
                 id,
                 tenant_id,
                 label,
@@ -398,6 +455,8 @@ impl TenantStore for PostgresTenantStore {
                 revoked_at,
                 last_used_at,
                 spend_limit_cents,
+                rpm_limit,
+                tpm_limit,
             })
             .collect())
     }
@@ -454,6 +513,26 @@ impl TenantStore for PostgresTenantStore {
         .bind(key_id)
         .bind(tenant_id)
         .bind(limit_cents.max(0))
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn set_key_limits(
+        &self,
+        tenant_id: Uuid,
+        key_id: Uuid,
+        requests_per_minute: i64,
+        tokens_per_minute: i64,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let result = sqlx::query(
+            "UPDATE api_keys SET rpm_limit = $3, tpm_limit = $4
+             WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(key_id)
+        .bind(tenant_id)
+        .bind(requests_per_minute.max(0))
+        .bind(tokens_per_minute.max(0))
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)

@@ -19,6 +19,9 @@ export type SpendBreakdownRow = {
   requests: number;
   tokens: number;
   limitCents: number;
+  /** ITEM-095: velocity limits (key rows; 0 = unlimited). */
+  rpmLimit?: number;
+  tpmLimit?: number;
   /** ITEM-061: provider health (absent for key rows). */
   errorRate?: number | null;
   p95Ms?: number | null;
@@ -51,11 +54,16 @@ const LimitEditor = (props: {
   kind: 'key' | 'provider';
   id: string;
   limitCents: number;
+  rpmLimit?: number;
+  tpmLimit?: number;
   onDone: () => void;
 }) => {
   const t = useTranslations('DashboardIndexPage');
   const router = useRouter();
   const [draft, setDraft] = useState(() => centsToUsd(props.limitCents));
+  // ITEM-095: velocity limits are edited alongside the monthly cap.
+  const [rpm, setRpm] = useState(() => String(props.rpmLimit ?? 0));
+  const [tpm, setTpm] = useState(() => String(props.tpmLimit ?? 0));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +73,10 @@ const LimitEditor = (props: {
     setError(null);
     try {
       if (props.kind === 'key') {
-        await InferonApi.sameOrigin().setKeyLimit(props.id, cents);
+        await InferonApi.sameOrigin().setKeyLimit(props.id, cents, undefined, {
+          rpm_limit: Math.max(0, Math.round(Number(rpm) || 0)),
+          tpm_limit: Math.max(0, Math.round(Number(tpm) || 0)),
+        });
       } else {
         await InferonApi.sameOrigin().updateProvider(props.id, { spend_limit_cents: cents });
       }
@@ -86,6 +97,24 @@ const LimitEditor = (props: {
         value={draft}
         onChange={event => setDraft(event.target.value)}
       />
+      {props.kind === 'key' && (
+        <>
+          <input
+            className={COMPACT_INPUT}
+            inputMode="numeric"
+            title={t('rpm_limit')}
+            value={rpm}
+            onChange={event => setRpm(event.target.value)}
+          />
+          <input
+            className={COMPACT_INPUT}
+            inputMode="numeric"
+            title={t('tpm_limit')}
+            value={tpm}
+            onChange={event => setTpm(event.target.value)}
+          />
+        </>
+      )}
       <Button size="sm" disabled={busy} onClick={save}>
         {t('save')}
       </Button>
@@ -126,6 +155,8 @@ const LimitCell = (props: {
               kind={props.kind}
               id={row.id}
               limitCents={row.limitCents}
+              rpmLimit={row.rpmLimit}
+              tpmLimit={row.tpmLimit}
               onDone={() => setEditing(false)}
             />
           )

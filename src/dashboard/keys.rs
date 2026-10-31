@@ -11,6 +11,8 @@ pub(crate) fn key_json(k: &crate::tenant::ApiKeyInfo) -> Value {
         "revoked_at": k.revoked_at,
         "last_used_at": k.last_used_at,
         "spend_limit_cents": k.spend_limit_cents,
+        "rpm_limit": k.rpm_limit,
+        "tpm_limit": k.tpm_limit,
     })
 }
 
@@ -67,6 +69,14 @@ pub async fn tenant_key_limit(
     if let Err(resp) = owner_only(&role) {
         return resp;
     }
+    // ITEM-095: velocity limits ride the same owner-only endpoint.
+    if let Err(e) = state
+        .tenant_store
+        .set_key_limits(tenant_id, key_id, body.rpm_limit, body.tpm_limit)
+        .await
+    {
+        return internal(e.to_string());
+    }
     match state
         .tenant_store
         .set_key_spend_limit(tenant_id, key_id, body.spend_limit_cents)
@@ -75,6 +85,8 @@ pub async fn tenant_key_limit(
         Ok(true) => json_ok(json!({
             "key_id": key_id.to_string(),
             "spend_limit_cents": body.spend_limit_cents.max(0),
+            "rpm_limit": body.rpm_limit.max(0),
+            "tpm_limit": body.tpm_limit.max(0),
         })),
         Ok(false) => crate::json_error(StatusCode::NOT_FOUND, "not_found", "no such key"),
         Err(e) => internal(e.to_string()),

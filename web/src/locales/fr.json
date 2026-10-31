@@ -97,6 +97,8 @@
     "spike": "Pic",
     "save": "Enregistrer",
     "cancel": "Annuler",
+    "rpm_limit": "Requêtes/min (0 = illimité)",
+    "tpm_limit": "Tokens/min (0 = illimité)",
     "limit_error": "Impossible de mettre à jour le plafond — veuillez réessayer.",
     "empty_title": "Aucune requête pour l'instant",
     "empty_body": "Pointez votre SDK vers Inferon pour voir ici les dépenses, les répartitions et les plafonds.",

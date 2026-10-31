@@ -127,6 +127,7 @@ impl TenantStore for EdgeState {
             id: config.tenant_id.unwrap_or_else(Uuid::nil),
             upstream_openai_key: None,
             api_key_id: None,
+            limits: crate::ratelimit::Limits::default(),
         }))
     }
 
@@ -139,6 +140,7 @@ impl TenantStore for EdgeState {
             id: tenant_id,
             upstream_openai_key: None,
             api_key_id: None,
+            limits: crate::ratelimit::Limits::default(),
         }))
     }
 
@@ -178,6 +180,8 @@ impl BudgetStore for EdgeState {
             // The edge runs the same advisory pass (ITEM-090).
             lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
         }))
     }
 

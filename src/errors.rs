@@ -17,6 +17,8 @@ pub enum ErrorClass {
     /// Inferon itself refused the request (budget cap, no provider, disabled
     /// model, bad input) — a typed 4xx.
     Inferon4xx,
+    /// ITEM-095: the key exceeded its requests/tokens per minute.
+    RateLimited,
     /// Inferon itself failed (serialization/internal) — a 5xx.
     Inferon5xx,
     /// The request to the upstream failed at the transport level.
@@ -36,6 +38,7 @@ impl ErrorClass {
             ErrorClass::Upstream5xx => "upstream_5xx",
             ErrorClass::Client4xx => "client_4xx",
             ErrorClass::Inferon4xx => "inferon_4xx",
+            ErrorClass::RateLimited => "rate_limited",
             ErrorClass::Inferon5xx => "inferon_5xx",
             ErrorClass::Transport => "transport",
             ErrorClass::Timeout => "timeout",

@@ -221,6 +221,9 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         Ok(config) => config,
         Err(e) => return internal(e.to_string()),
     };
+    let rate_limits = config
+        .as_ref()
+        .map_or((0, 0), |budget| (budget.rpm_limit, budget.tpm_limit));
     let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention, lint, translate) =
         match config {
             Some(budget) => (
@@ -251,6 +254,8 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "payload_retention_days": retention,
         "lint_enabled": lint,
         "translate_surfaces": translate,
+        "rpm_limit": rate_limits.0,
+        "tpm_limit": rate_limits.1,
         "role": role,
     }))
 }
@@ -281,6 +286,8 @@ pub async fn tenant_config_set(
         payload_retention_days: body.payload_retention_days.clamp(0, 3650),
         lint_enabled: body.lint_enabled,
         translate_surfaces: body.translate_surfaces,
+        rpm_limit: body.rpm_limit.max(0),
+        tpm_limit: body.tpm_limit.max(0),
     };
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => {

@@ -37,6 +37,9 @@ pub struct TenantBudget {
     pub lint_enabled: bool,
     /// ITEM-094: translate across surfaces when the provider speaks the other one.
     pub translate_surfaces: bool,
+    /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
+    pub rpm_limit: i64,
+    pub tpm_limit: i64,
 }
 
 /// ITEM-046: the tenant's routing/budget controls, as submitted from the UI.
@@ -53,6 +56,9 @@ pub struct ConfigUpdate {
     pub lint_enabled: bool,
     /// ITEM-094: cross-surface translation.
     pub translate_surfaces: bool,
+    /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
+    pub rpm_limit: i64,
+    pub tpm_limit: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,6 +100,8 @@ pub(crate) type ConfigRow = (
     i64,
     bool,
     bool,
+    i64,
+    i64,
 );
 
 /// Lookup seam: budget config per tenant. `None` = no config = unlimited.
@@ -187,6 +195,8 @@ impl BudgetStore for InMemoryBudgetStore {
                 payload_retention_days: update.payload_retention_days,
                 lint_enabled: update.lint_enabled,
                 translate_surfaces: update.translate_surfaces,
+                rpm_limit: update.rpm_limit,
+                tpm_limit: update.tpm_limit,
             },
         );
         Ok(())
@@ -217,6 +227,8 @@ impl BudgetStore for InMemoryBudgetStore {
             payload_retention_days: 30,
             lint_enabled: true,
             translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
         });
         budget.tier_pairs = pairs.to_vec();
         rows.insert(tenant_id, budget);
@@ -247,14 +259,16 @@ impl BudgetStore for PostgresBudgetStore {
                     COALESCE(payload_capture, TRUE),
                     COALESCE(payload_retention_days, 30),
                     COALESCE(lint_enabled, TRUE),
-                    COALESCE(translate_surfaces, TRUE)
+                    COALESCE(translate_surfaces, TRUE),
+                    COALESCE(rpm_limit, 0),
+                    COALESCE(tpm_limit, 0)
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit)| {
                 TenantBudget {
                     limit_cents,
                     spent_cents,
@@ -267,6 +281,8 @@ impl BudgetStore for PostgresBudgetStore {
                     payload_retention_days,
                     lint_enabled,
                     translate_surfaces,
+                    rpm_limit,
+                    tpm_limit,
                 }
             },
         ))
@@ -311,13 +327,14 @@ impl BudgetStore for PostgresBudgetStore {
             "INSERT INTO tenant_configurations
                 (tenant_id, budget_limit_cents, cheap_fallback_model,
                  guard_enabled, router_enabled, router_threshold,
-                 payload_capture, payload_retention_days, lint_enabled, translate_surfaces)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 payload_capture, payload_retention_days, lint_enabled, translate_surfaces,
+                 rpm_limit, tpm_limit)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              ON CONFLICT (tenant_id) DO UPDATE SET
                 budget_limit_cents = $2, cheap_fallback_model = $3,
                 guard_enabled = $4, router_enabled = $5, router_threshold = $6,
                 payload_capture = $7, payload_retention_days = $8, lint_enabled = $9,
-                translate_surfaces = $10",
+                translate_surfaces = $10, rpm_limit = $11, tpm_limit = $12",
         )
         .bind(tenant_id)
         .bind(update.budget_limit_cents)
@@ -329,6 +346,8 @@ impl BudgetStore for PostgresBudgetStore {
         .bind(update.payload_retention_days)
         .bind(update.lint_enabled)
         .bind(update.translate_surfaces)
+        .bind(update.rpm_limit)
+        .bind(update.tpm_limit)
         .execute(&self.pool)
         .await?;
         Ok(())

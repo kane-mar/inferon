@@ -97,6 +97,8 @@
     "spike": "Spike",
     "save": "Save",
     "cancel": "Cancel",
+    "rpm_limit": "Requests/min (0 = unlimited)",
+    "tpm_limit": "Tokens/min (0 = unlimited)",
     "limit_error": "Could not update the limit — please retry.",
     "empty_title": "No requests yet",
     "empty_body": "Point your SDK at Inferon to see spend, breakdowns and limits here.",

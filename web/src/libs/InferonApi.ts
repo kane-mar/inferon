@@ -276,6 +276,9 @@ export type KeySpendRow = {
   completion_tokens: number;
   cost_usd: string;
   spend_limit_cents: number;
+  /** ITEM-095: velocity limits in force for this key (0 = unlimited). */
+  rpm_limit: number;
+  tpm_limit: number;
 };
 
 export type ByKey = { window_days: number; offset_days: number; keys: KeySpendRow[] };
@@ -754,8 +757,14 @@ export class InferonApi {
     keyId: string,
     spendLimitCents: number,
     cookie?: string,
-  ): Promise<{ key_id: string; spend_limit_cents: number }> {
-    return this.request('POST', `/v1/dashboard/api/keys/${keyId}/limit`, { spend_limit_cents: spendLimitCents }, { cookie });
+    limits: { rpm_limit?: number; tpm_limit?: number } = {},
+  ): Promise<{ key_id: string; spend_limit_cents: number; rpm_limit: number; tpm_limit: number }> {
+    return this.request(
+      'POST',
+      `/v1/dashboard/api/keys/${keyId}/limit`,
+      { spend_limit_cents: spendLimitCents, ...limits },
+      { cookie },
+    );
   }
 
   members(cookie?: string): Promise<MembersResponse> {

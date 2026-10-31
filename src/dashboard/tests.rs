@@ -20,6 +20,7 @@
                 id: uuid::Uuid::parse_str(SEEDED_TENANT).unwrap(),
                 upstream_openai_key: Some("sk-master".to_string()),
                 api_key_id: None,
+                limits: crate::ratelimit::Limits::default(),
             },
         );
         std::sync::Arc::new(crate::InMemoryTenantStore::new(tenants))
