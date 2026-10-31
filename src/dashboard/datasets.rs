@@ -11,7 +11,18 @@ use uuid::Uuid;
 
 use super::*;
 
-/// `(prompt_hash, model, requests, qualified, distinct, excluded, spend, last_seen)`.
+/// The dataset list's grouping (ITEM-089 AC3): exact prompt hash, or the
+/// semantic cluster when one has been assigned.
+#[derive(serde::Deserialize)]
+pub struct DatasetQuery {
+    #[serde(default)]
+    days: Option<i64>,
+    /// `hash` (default) or `cluster`.
+    #[serde(default)]
+    group: Option<String>,
+}
+
+/// `(group_key, model, requests, qualified, distinct, excluded, spend, last_seen)`.
 type ClusterRow = (
     String,
     String,
@@ -31,12 +42,34 @@ type ReasonRow = (String, String, String, i64);
 pub async fn datasets(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(window): Query<Window>,
+    Query(query): Query<DatasetQuery>,
 ) -> Result<Response, Response> {
     let (tenant_id, role) = session_membership(&state, &headers).await?;
+    let days = query.days.unwrap_or(7).clamp(1, 365);
 
-    let rows: Vec<ClusterRow> = stored(sqlx::query_as(
-        "SELECT t.system_prompt_hash, t.request_model,
+    // "Which grouping is in use": a tenant with labelled clusters gets the
+    // semantic view unless it asks for the exact hash.
+    let (clustered,): (i64,) = stored(sqlx::query_as(
+        "SELECT COUNT(*) FROM traces
+         WHERE tenant_id = $1 AND task_cluster_source = 'embedding'",
+    )
+    .bind(tenant_id)
+    .fetch_one(&state.db)
+    .await)?;
+    let grouping = match query.group.as_deref() {
+        Some("hash") => "hash",
+        Some("cluster") => "cluster",
+        _ if clustered > 0 => "cluster",
+        _ => "hash",
+    };
+
+    let group_key = if grouping == "cluster" {
+        "COALESCE(t.task_cluster, t.system_prompt_hash)"
+    } else {
+        "t.system_prompt_hash"
+    };
+    let rows: Vec<ClusterRow> = stored(sqlx::query_as(&format!(
+        "SELECT {group_key}, t.request_model,
                 COUNT(*),
                 COUNT(*) FILTER (WHERE t.example_state = 'qualified' AND down.trace_id IS NULL),
                 COUNT(DISTINCT t.completion_hash)
@@ -50,25 +83,25 @@ pub async fn datasets(
          WHERE t.tenant_id = $1
            AND t.system_prompt_hash IS NOT NULL
            AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
-         GROUP BY t.system_prompt_hash, t.request_model
+         GROUP BY {group_key}, t.request_model
          ORDER BY 5 DESC
-         LIMIT 50",
-    )
+         LIMIT 50"
+    ))
     .bind(tenant_id)
-    .bind(window.days())
+    .bind(days)
     .fetch_all(&state.db)
     .await)?;
 
-    let reasons: Vec<ReasonRow> = stored(sqlx::query_as(
-        "SELECT system_prompt_hash, request_model, example_reason, COUNT(*)
-         FROM traces
-         WHERE tenant_id = $1
-           AND example_state = 'excluded'
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
-         GROUP BY system_prompt_hash, request_model, example_reason",
-    )
+    let reasons: Vec<ReasonRow> = stored(sqlx::query_as(&format!(
+        "SELECT {group_key}, request_model, example_reason, COUNT(*)
+         FROM traces t
+         WHERE t.tenant_id = $1
+           AND t.example_state = 'excluded'
+           AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
+         GROUP BY {group_key}, t.request_model, t.example_reason"
+    ))
     .bind(tenant_id)
-    .bind(window.days())
+    .bind(days)
     .fetch_all(&state.db)
     .await)?;
 
@@ -102,8 +135,9 @@ pub async fn datasets(
         .collect();
 
     Ok(json_ok(json!({
-        "window": {"days": window.days()},
+        "window": {"days": days},
         "role": role,
+        "grouping": grouping,
         "clusters": clusters,
     })))
 }
@@ -122,11 +156,16 @@ pub async fn purge(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Re
     }
 }
 
-/// Query for one cluster's export.
+/// Query for one cluster's export: by exact prompt hash or by semantic cluster
+/// label (ITEM-089 AC3), optionally narrowed to one model.
 #[derive(serde::Deserialize)]
 pub struct ExportQuery {
-    prompt_hash: String,
-    model: String,
+    #[serde(default)]
+    prompt_hash: Option<String>,
+    #[serde(default)]
+    cluster: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
     #[serde(default)]
     days: Option<i64>,
 }
@@ -168,43 +207,53 @@ pub async fn export(
         ));
     }
     let days = query.days.unwrap_or(30).clamp(1, 3650);
+    let Some(selector) = query.prompt_hash.clone().or_else(|| query.cluster.clone()) else {
+        return Err(crate::json_error(
+            StatusCode::BAD_REQUEST,
+            "missing_selector",
+            "pass prompt_hash=<hash> or cluster=<label>",
+        ));
+    };
 
     let prompt_hash = query.prompt_hash.clone();
+    let cluster = query.cluster.clone();
     let model = query.model.clone();
     let filename = format!(
-        "inferon-{}-{}.jsonl",
-        &query.prompt_hash[..query.prompt_hash.len().min(8)],
-        query.model.replace(['/', ':'], "-")
+        "inferon-{}.jsonl",
+        selector[..selector.len().min(16)].replace(['/', ':'], "-")
     );
 
     let pool = state.db.clone();
     let body = async_stream::stream! {
         let mut written = 0u64;
-        let mut rows = sqlx::query_as::<_, (Value, Value, Uuid)>(
-            "SELECT DISTINCT ON (t.completion_hash) t.raw_prompt, t.raw_completion, t.id
+        let mut rows = sqlx::query_as::<_, (Value, Value, Uuid, String)>(
+            "SELECT DISTINCT ON (t.completion_hash)
+                    t.raw_prompt, t.raw_completion, t.id, t.request_model
              FROM traces t
              LEFT JOIN (SELECT trace_id FROM trace_quality WHERE signal = 'down') down
                     ON down.trace_id = t.id
              WHERE t.tenant_id = $1
-               AND t.system_prompt_hash = $2
-               AND t.request_model = $3
+               AND ($2::text IS NULL OR t.system_prompt_hash = $2)
+               AND ($3::text IS NULL OR t.task_cluster = $3)
+               AND ($4::text IS NULL OR t.request_model = $4)
                AND t.example_state = 'qualified'
                AND down.trace_id IS NULL
                AND t.raw_prompt IS NOT NULL
                AND t.raw_completion IS NOT NULL
-               AND t.created_at >= NOW() - ($4 * INTERVAL '1 day')
+               AND t.created_at >= NOW() - ($5 * INTERVAL '1 day')
              ORDER BY t.completion_hash, t.created_at
              LIMIT 10000",
         )
         .bind(tenant_id)
         .bind(prompt_hash.clone())
+        .bind(cluster.clone())
         .bind(model.clone())
         .bind(days)
         .fetch(&pool);
         while let Some(row) = rows.try_next().await.transpose() {
             match row {
-                Ok((prompt, completion, trace_id)) => {
-                    if let Some(line) = jsonl_line(&prompt, &completion, &model, trace_id) {
+                Ok((prompt, completion, trace_id, line_model)) => {
+                    if let Some(line) = jsonl_line(&prompt, &completion, &line_model, trace_id) {
                         written += 1;
                         yield Ok::<_, std::io::Error>(axum::body::Bytes::from(format!("{line}\n")));
                     }
@@ -216,7 +265,7 @@ pub async fn export(
             }
         }
         tracing::info!(
-            "dataset export: tenant {tenant_id} prompt {prompt_hash} model {model} rows {written}"
+            "dataset export: tenant {tenant_id} selector {selector} rows {written}"
         );
     };
 

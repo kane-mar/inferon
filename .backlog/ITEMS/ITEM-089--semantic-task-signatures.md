@@ -39,3 +39,20 @@ staged and gated on traffic.
 
 **Depends on** ITEM-085/086 for the pairs; independent of ITEM-029's routing use.
 **Ranking note.** Rank **8** of 22 · V3.5/E3 — grouping quality; the flywheel works on exact hashes until this lands, so it does not block 087.
+---
+
+**Delivered (2026-10-31).** `src/signatures.rs` (pure: `task_text`, `cosine`,
+`assign_clusters` — deterministic leader clustering in key order, label = the
+representative prompt's hash so a superset keeps the labels it shared). The
+periodic pass (`run_pass`, every 300 s, `PASS_BATCH` = 50) reads one payload per
+distinct unclustered prompt, embeds off the request path, upserts
+`task_signatures` (vector + version + model + source) and points the traces at
+the label. Prompts whose payload was not captured, or where `NoEmbedder` returns
+nothing, get the exact-hash label — so the pass always drains and the page never
+empties. Datasets read model groups by `COALESCE(task_cluster, system_prompt_hash)`
+when clustering is in use (`grouping` in the payload says which), and export
+accepts `cluster=<label>` as well as `prompt_hash=<hash>`.
+
+Verified: 10 unit tests (text selection, cosine, cluster/dedup/order-independence,
+superset stability). Live verification: after the deploy, the datasets payload
+reports `grouping`, and the pass logs `task signatures: labelled N prompt(s)`.

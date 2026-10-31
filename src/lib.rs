@@ -52,6 +52,7 @@ pub mod quality;
 pub mod retention;
 pub mod router;
 pub mod routing;
+pub mod signatures;
 pub mod usage;
 // Stores (trait seam + Postgres + in-memory).
 pub mod models;

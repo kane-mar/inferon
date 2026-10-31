@@ -31,6 +31,9 @@ const PROVIDER_PROBE_INTERVAL_SECS: u64 = 300;
 /// Payload retention cadence (ITEM-088): raw prompts/completions are purged past
 /// each tenant's window. Costs and aggregates are never touched.
 const RETENTION_INTERVAL_SECS: u64 = 6 * 60 * 60;
+/// ITEM-089: embed and cluster the pending task texts. One embed is ~150 ms on
+/// the production tier, so this runs off the request path on a slow cadence.
+const SIGNATURE_INTERVAL_SECS: u64 = 300;
 
 /// Run an async task forever on a fixed cadence. The first tick fires
 /// immediately; missed ticks are skipped rather than burst-run, so a slow pass
@@ -115,6 +118,23 @@ fn spawn_workers(
             let pool = evolution_pool.clone();
             async move {
                 inferon::evolution::run_evolution(&pool).await;
+            }
+        },
+    );
+
+    // ITEM-089: label unclustered prompts with a semantic task signature. The
+    // embedder is the same artifact the router uses; without it the pass
+    // degrades to exact-hash labels instead of failing.
+    let signature_pool = pool.clone();
+    let signature_embedder = inferon::embed::from_env();
+    spawn_periodic(
+        "task-signatures",
+        std::time::Duration::from_secs(SIGNATURE_INTERVAL_SECS),
+        move || {
+            let pool = signature_pool.clone();
+            let embedder = signature_embedder.clone();
+            async move {
+                inferon::signatures::run_pass(&pool, embedder.as_ref()).await;
             }
         },
     );

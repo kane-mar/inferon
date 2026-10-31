@@ -444,8 +444,9 @@ export type ModelsResponse = { providers: ProviderModelsGroup[]; role: Role };
 export type TierPair = { frontier: string; cheap: string };
 export type ActiveTierPair = TierPair & { active: boolean };
 
-/** ITEM-086: one prompt/model cluster of qualified dataset pairs. */
+/** ITEM-086/089: one prompt (or semantic task) / model cluster of pairs. */
 export type DatasetCluster = {
+  /** The prompt hash, or the cluster label when grouping by cluster. */
   prompt_hash: string;
   model: string;
   requests: number;
@@ -483,6 +484,8 @@ export type SessionsReport = {
 export type Datasets = {
   window: { days: number };
   role: Role;
+  /** ITEM-089 AC3: which grouping the numbers are using. */
+  grouping: 'hash' | 'cluster';
   clusters: DatasetCluster[];
 };
 
@@ -662,13 +665,9 @@ export class InferonApi {
     return this.request<ByModel>('GET', `/v1/dashboard/api/by-model${windowQuery(days)}`, undefined, { cookie });
   }
 
-  datasets(days: number, cookie?: string): Promise<Datasets> {
-    return this.request<Datasets>(
-      'GET',
-      `/v1/dashboard/api/datasets${windowQuery(days)}`,
-      undefined,
-      { cookie },
-    );
+  datasets(days: number, cookie?: string, group?: 'hash' | 'cluster'): Promise<Datasets> {
+    const query = `${windowQuery(days)}${group ? `&group=${group}` : ''}`;
+    return this.request<Datasets>('GET', `/v1/dashboard/api/datasets${query}`, undefined, { cookie });
   }
 
   sessions(days: number, cookie?: string): Promise<SessionsReport> {

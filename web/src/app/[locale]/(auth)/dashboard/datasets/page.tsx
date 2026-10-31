@@ -15,9 +15,9 @@ const integer = (value: number) => value.toLocaleString('en-US');
 const short = (hash: string) => hash.slice(0, 10);
 
 /** The per-cluster JSONL download (owner-only, session cookie). */
-const exportHref = (promptHash: string, model: string): string =>
+const exportHref = (selector: string, model: string, grouping: 'hash' | 'cluster'): string =>
   `/v1/dashboard/api/datasets/export?${new URLSearchParams({
-    prompt_hash: promptHash,
+    [grouping === 'cluster' ? 'cluster' : 'prompt_hash']: selector,
     model,
     days: String(DAYS),
   })}`;
@@ -41,6 +41,9 @@ export default async function DatasetsPage(props: {
   const t = await getTranslations({ locale, namespace: 'DatasetsPage' });
   const data = await InferonApi.fromEnv().datasets(DAYS, session.cookie);
   const clusters = data.clusters;
+  // ITEM-089: say which grouping produced these rows — the exact prompt hash,
+  // or the semantic task cluster once the signatures have been computed.
+  const groupingLabel = data.grouping === 'cluster' ? t('grouping_cluster') : t('grouping_hash');
 
   const examples = clusters.reduce((sum, cluster) => sum + cluster.distinct_examples, 0);
   const excluded = clusters.reduce((sum, cluster) => sum + cluster.excluded, 0);
@@ -60,6 +63,7 @@ export default async function DatasetsPage(props: {
         <KpiCard label={t('clusters')} value={integer(clusters.length)} />
         <KpiCard label={t('spend')} value={formatUsd(spend.toString())} hint={t('spend_help')} />
         <KpiCard label={t('excluded')} value={integer(excluded)} goodWhen="down" />
+        <KpiCard label={t('grouping')} value={groupingLabel} hint={t('grouping_help')} />
       </div>
 
       <div className="mt-4">
@@ -133,7 +137,7 @@ export default async function DatasetsPage(props: {
                       {cluster.distinct_examples > 0 && (
                         <a
                           className="text-sm underline underline-offset-4"
-                          href={exportHref(cluster.prompt_hash, cluster.model)}
+                          href={exportHref(cluster.prompt_hash, cluster.model, data.grouping)}
                         >
                           {t('export')}
                         </a>
