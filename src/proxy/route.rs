@@ -164,23 +164,23 @@ pub(super) async fn balance_across_providers(
     surface: Surface,
     weights: Option<&std::collections::BTreeMap<String, f64>>,
 ) -> Option<Result<Route, Response>> {
-    let ids = state.provider_store.providers_for_model(tenant.id, model).await.ok()?;
-    if ids.len() < 2 {
+    // One lookup for the whole candidate set (the hot path cannot afford a
+    // query per provider). Unreachable providers are not candidates: the
+    // reachability probe already told us, and an attempt would only fail.
+    let resolved = state
+        .provider_store
+        .resolved_for_model(tenant.id, model)
+        .await
+        .ok()?;
+    let eligible: Vec<_> = resolved
+        .into_iter()
+        .filter(|provider| provider.last_check_ok != Some(false))
+        .collect();
+    if eligible.len() < 2 {
         return None;
     }
     let empty = std::collections::BTreeMap::new();
     let weights = weights.unwrap_or(&empty);
-    let mut eligible = Vec::new();
-    for id in ids {
-        if let Ok(Some(provider)) = state.provider_store.resolve_provider(tenant.id, id).await {
-            if provider.last_check_ok != Some(false) {
-                eligible.push(provider);
-            }
-        }
-    }
-    if eligible.len() < 2 {
-        return None;
-    }
     let candidates: Vec<crate::loadbalance::Candidate> = eligible
         .iter()
         .enumerate()

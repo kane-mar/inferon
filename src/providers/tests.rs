@@ -418,3 +418,55 @@ fn a_keyless_local_provider_sends_no_authorization_header() {
         assert_eq!(check(up), Some(true));
         assert_eq!(check(down), Some(false));
     }
+
+/// Two providers that both serve `shared`, the second one made the default
+/// later — the load balancer needs both, in the store's best-first order,
+/// **without** a lookup per candidate (item-100's N+1).
+#[tokio::test]
+async fn resolved_for_model_returns_every_provider_that_serves_the_model() {
+    use crate::providers::{NewProvider, ProviderStore};
+
+    let store = InMemoryProviderStore::default();
+    let tenant = Uuid::new_v4();
+    let new = |name: &str| NewProvider {
+        kind: "deepseek".to_string(),
+        name: name.to_string(),
+        base_url: format!("https://{name}.test/v1"),
+        key: format!("sk-{name}"),
+        metadata: Default::default(),
+        spend_limit_cents: 0,
+    };
+    let first = store.insert(tenant, &new("a")).await.unwrap();
+    let second = store.insert(tenant, &new("b")).await.unwrap();
+    store
+        .record_models(first, &["shared".to_string()])
+        .await
+        .unwrap();
+    store
+        .record_models(second, &["shared".to_string(), "other".to_string()])
+        .await
+        .unwrap();
+
+    let resolved = store
+        .resolved_for_model(tenant, "shared")
+        .await
+        .expect("resolved");
+    assert_eq!(
+        resolved.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![first, second],
+        "both providers, best-first, in one call"
+    );
+    assert_eq!(resolved[1].api_key, "sk-b", "credentials are resolved, not ids");
+    assert_eq!(resolved[0].base_url, "https://a.test/v1");
+
+    // A provider that does not advertise the model is not a candidate.
+    let other = store.resolved_for_model(tenant, "other").await.unwrap();
+    assert_eq!(other.iter().map(|p| p.id).collect::<Vec<_>>(), vec![second]);
+
+    // And another tenant sees nothing.
+    assert!(store
+        .resolved_for_model(Uuid::new_v4(), "shared")
+        .await
+        .unwrap()
+        .is_empty());
+}

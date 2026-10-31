@@ -276,6 +276,25 @@ pub trait ProviderStore: Send + Sync {
         tenant_id: Uuid,
         id: Uuid,
     ) -> StoreResult<Option<ResolvedProvider>>;
+    /// Every provider that serves `model`, resolved, best-first — the load
+    /// balancer's candidate list (ITEM-100).
+    ///
+    /// One call so a multi-provider model does not cost a lookup per candidate
+    /// on the hot path. The default composes the two methods above; the bundled
+    /// stores override it with a single query.
+    async fn resolved_for_model(
+        &self,
+        tenant_id: Uuid,
+        model: &str,
+    ) -> StoreResult<Vec<ResolvedProvider>> {
+        let mut resolved = Vec::new();
+        for id in self.providers_for_model(tenant_id, model).await? {
+            if let Some(provider) = self.resolve_provider(tenant_id, id).await? {
+                resolved.push(provider);
+            }
+        }
+        Ok(resolved)
+    }
 }
 
 /// How many providers one reachability pass probes. Bounded so a large
@@ -665,6 +684,49 @@ impl ProviderStore for PostgresProviderStore {
         }
     }
 
+    async fn resolved_for_model(
+        &self,
+        tenant_id: Uuid,
+        model: &str,
+    ) -> StoreResult<Vec<ResolvedProvider>> {
+        let Some(secrets) = self.secrets.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let rows: Vec<(
+            Uuid,
+            String,
+            String,
+            String,
+            sqlx::types::Json<ProviderMetadata>,
+            Option<bool>,
+        )> = sqlx::query_as(
+            "SELECT p.id, p.kind, p.base_url, p.key_ciphertext, p.metadata, p.last_check_ok
+             FROM providers p
+             JOIN provider_models pm ON pm.provider_id = p.id
+             WHERE p.tenant_id = $1 AND pm.model_id = $2
+             ORDER BY p.is_default DESC, p.created_at",
+        )
+        .bind(tenant_id)
+        .bind(model)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, kind, base_url, ciphertext, metadata, last_check_ok)| {
+                // A provider whose key cannot be decrypted is not a candidate:
+                // including it would only turn into a 400 on the attempt.
+                secrets.decrypt(&ciphertext).map(|api_key| ResolvedProvider {
+                    id,
+                    kind,
+                    base_url,
+                    api_key,
+                    metadata: metadata.0,
+                    last_check_ok,
+                })
+            })
+            .collect())
+    }
+
     async fn resolve_provider(
         &self,
         tenant_id: Uuid,
@@ -983,6 +1045,36 @@ impl ProviderStore for InMemoryProviderStore {
             metadata: row.provider.metadata.clone(),
             last_check_ok: row.provider.last_check_ok,
         }))
+    }
+
+    async fn resolved_for_model(
+        &self,
+        tenant_id: Uuid,
+        model: &str,
+    ) -> StoreResult<Vec<ResolvedProvider>> {
+        let rows = self.rows.lock().unwrap();
+        let models = self.models.lock().unwrap();
+        let mut candidates: Vec<&InMemoryRow> = rows
+            .iter()
+            .filter(|row| {
+                row.provider.tenant_id == tenant_id
+                    && models
+                        .get(&row.provider.id)
+                        .is_some_and(|ids| ids.iter().any(|id| id == model))
+            })
+            .collect();
+        candidates.sort_by_key(|row| (!row.provider.is_default, row.provider.created_at.clone()));
+        Ok(candidates
+            .into_iter()
+            .map(|row| ResolvedProvider {
+                id: row.provider.id,
+                kind: row.provider.kind.clone(),
+                base_url: row.provider.base_url.clone(),
+                api_key: row.api_key.clone(),
+                metadata: row.provider.metadata.clone(),
+                last_check_ok: row.provider.last_check_ok,
+            })
+            .collect())
     }
 
     async fn resolve_provider(
