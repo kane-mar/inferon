@@ -461,3 +461,15 @@ pub async fn operator_evolution_detect(
     let queued = crate::evolution::run_evolution(&state.db).await;
     json_ok(json!({ "queued": queued }))
 }
+
+#[derive(serde::Deserialize)]
+pub struct KeyQuery {
+    tenant_id: uuid::Uuid,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreateKeyBody {
+    tenant_id: uuid::Uuid,
+    label: Option<String>,
+}
+

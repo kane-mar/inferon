@@ -141,3 +141,19 @@ pub async fn tenant_key_revoke(
         Err(e) => internal(e.to_string()),
     }
 }
+
+#[derive(serde::Deserialize)]
+pub struct KeyLabelBody {
+    label: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct KeyLimitBody {
+    spend_limit_cents: i64,
+    /// ITEM-095: per-key velocity limits (0 = fall back to the tenant default).
+    #[serde(default)]
+    rpm_limit: i64,
+    #[serde(default)]
+    tpm_limit: i64,
+}
+

@@ -350,3 +350,46 @@ pub async fn tenant_config_set(
         Err(e) => internal(e.to_string()),
     }
 }
+
+#[derive(serde::Deserialize)]
+pub struct RoutingBody {
+    fallbacks: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct TierPairsBody {
+    tier_pairs: Vec<crate::router::TierPair>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ConfigBody {
+    budget_limit_cents: i64,
+    cheap_fallback_model: Option<String>,
+    guard_enabled: bool,
+    router_enabled: bool,
+    router_threshold: f64,
+    /// ITEM-088. Defaults keep an older client from turning capture off.
+    #[serde(default = "default_true")]
+    capture_payloads: bool,
+    #[serde(default = "default_retention")]
+    payload_retention_days: i64,
+    /// ITEM-090. Defaults keep an older client from switching the lint off.
+    #[serde(default = "default_true")]
+    lint_enabled: bool,
+    /// ITEM-094. Defaults keep an older client from disabling translation.
+    #[serde(default = "default_true")]
+    translate_surfaces: bool,
+    /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
+    #[serde(default)]
+    rpm_limit: i64,
+    #[serde(default)]
+    tpm_limit: i64,
+    /// ITEM-096: detection is on by default; redaction is opt-in per mode.
+    #[serde(default = "default_true")]
+    pii_detection: bool,
+    #[serde(default)]
+    pii_redact_storage: bool,
+    #[serde(default)]
+    pii_redact_wire: bool,
+}
+

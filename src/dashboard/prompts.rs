@@ -229,3 +229,19 @@ async fn prompt_text(
             .map(str::to_string)
     }))
 }
+
+/// ITEM-097: name a content hash.
+#[derive(serde::Deserialize)]
+pub struct LabelBody {
+    name: String,
+    prompt_hash: String,
+}
+
+/// ITEM-097: diff two labelled versions.
+#[derive(serde::Deserialize)]
+pub struct DiffQuery {
+    name: String,
+    from: String,
+    to: String,
+}
+

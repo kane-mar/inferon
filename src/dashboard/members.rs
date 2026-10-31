@@ -94,3 +94,9 @@ pub async fn tenant_member_remove(
         Err(e) => internal(e.to_string()),
     }
 }
+
+#[derive(serde::Deserialize)]
+pub struct MemberInviteBody {
+    github_login: String,
+}
+

@@ -75,3 +75,9 @@ pub async fn tenant_edge_node_revoke(
         Err(e) => internal(e.to_string()),
     }
 }
+
+#[derive(serde::Deserialize)]
+pub struct EdgeNodeBody {
+    name: String,
+}
+

@@ -507,3 +507,45 @@ pub(crate) async fn model_is_disabled(state: &Arc<AppState>, tenant_id: uuid::Uu
         .await
         .unwrap_or(false)
 }
+
+#[derive(serde::Deserialize)]
+pub struct ProviderBody {
+    kind: String,
+    name: Option<String>,
+    base_url: String,
+    key: String,
+    #[serde(default)]
+    metadata: crate::providers::ProviderMetadata,
+    #[serde(default)]
+    spend_limit_cents: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProviderUpdateBody {
+    name: Option<String>,
+    base_url: Option<String>,
+    key: Option<String>,
+    #[serde(default)]
+    metadata: Option<crate::providers::ProviderMetadata>,
+    #[serde(default)]
+    spend_limit_cents: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProviderProbeBody {
+    base_url: String,
+    key: String,
+    /// The kind being probed — decides the auth header + model-list surface
+    /// (ITEM-050). Defaults to the OpenAI-compatible shape when absent.
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    metadata: crate::providers::ProviderMetadata,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ModelUpdateBody {
+    enabled: Option<bool>,
+    is_default: Option<bool>,
+}
+
