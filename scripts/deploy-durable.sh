@@ -25,6 +25,10 @@ SSH_KEY="$HOME/.ssh/inferon_deploy"
 STATE_DIR="${INFERON_DURABLE_STATE:-$HOME/.cache/inferon-durable}"
 STATE="$STATE_DIR/state"
 OP_FILE="$STATE_DIR/operator_key"
+# Provider credentials are encrypted at rest with this key; it was generated on
+# the first deploy and must survive every redeploy (a container recreated
+# without it cannot decrypt a single provider).
+ENC_FILE="$STATE_DIR/provider_encryption_key"
 # Vultr firewall group to attach (web ingress). Defaults to the account's
 # "inferon-durable: web ingress" group when set by the operator.
 FIREWALL_GROUP="${VULTR_FIREWALL_GROUP:-}"
@@ -151,6 +155,11 @@ bundle_upload() {
 # command line (same channel as the operator key).
 compose_env() {
     local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' NEXT_PUBLIC_APP_URL='https://$INFERON_HOST'"
+    # The encryption key is a saved secret, not a shell variable: read it the
+    # same way as the operator key so a redeploy can never drop it.
+    if [ -z "${PROVIDER_ENCRYPTION_KEY:-}" ] && [ -f "$ENC_FILE" ]; then
+        PROVIDER_ENCRYPTION_KEY=$(tr -d '\n' < "$ENC_FILE")
+    fi
     local var val
     for var in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET SESSION_SECRET UPSTREAM_MASTER_KEY \
                PROVIDER_ENCRYPTION_KEY \
@@ -182,12 +191,33 @@ remote_health() {
     for _ in $(seq 1 60); do
         if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" "curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1"; then
             echo "stack healthz (proxy + web) OK"
+            remote_smoke "$ip" || return 1
             return 0
         fi
         sleep 5
     done
     echo "health check failed" >&2
     return 1
+}
+
+# A liveness probe cannot see a broken schema, a dropped provider key or a
+# missing migration — those all answer 200 on /healthz and 500/400 on a real
+# call (2026-10-30 and 2026-10-31 both shipped that way). Finish the deploy by
+# proxying one real completion with the saved developer key.
+remote_smoke() {
+    local ip=$1 key
+    [ -f "$STATE_DIR/first-real-developer.key" ] || {
+        echo "no saved developer key; skipping the completion smoke" >&2
+        return 0
+    }
+    key=$(tr -d '\n' < "$STATE_DIR/first-real-developer.key")
+    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$ip" \
+        "curl -sS -m 60 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer $key' \
+              -H 'Content-Type: application/json' \
+              -d '{\"model\":\"deepseek-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}' \
+              http://127.0.0.1:8080/v1/chat/completions" \
+        | grep -qx 200 || { echo "FAILED: a real completion did not answer 200" >&2; return 1; }
+    echo "a real completion answered 200"
 }
 
 redeploy() {
