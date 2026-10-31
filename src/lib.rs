@@ -60,6 +60,7 @@ pub mod models;
 pub mod providers;
 pub mod tenant;
 pub mod telemetry;
+pub mod translate;
 // Shared primitives.
 pub mod clock;
 pub mod embed;

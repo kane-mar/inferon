@@ -446,7 +446,8 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
                 router_enabled, router_threshold, tier_pairs,
                 COALESCE(payload_capture, TRUE),
                 COALESCE(payload_retention_days, 30),
-                COALESCE(lint_enabled, TRUE)
+                COALESCE(lint_enabled, TRUE),
+                COALESCE(translate_surfaces, TRUE)
          FROM tenant_configurations WHERE tenant_id = $1",
     )
     .bind(tenant_id)
@@ -474,7 +475,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
         "models": models,
         "policy": policy,
         "budget": config.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled)| {
+            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces)| {
                 serde_json::json!({
                     "limit_cents": limit_cents,
                     "spent_cents": spent_cents,
@@ -486,6 +487,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
                     "capture_payloads": capture_payloads,
                     "payload_retention_days": payload_retention_days,
                     "lint_enabled": lint_enabled,
+                    "translate_surfaces": translate_surfaces,
                 })
             },
         ),

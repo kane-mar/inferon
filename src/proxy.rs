@@ -142,6 +142,9 @@ pub(crate) struct Route {
     pub(crate) kind: String,
     /// ITEM-077: a locally hosted provider — costed at zero.
     pub(crate) is_local: bool,
+    /// ITEM-094: the surface the provider speaks when it is not the client's.
+    /// The body and the response are translated across this seam.
+    pub(crate) translate: Option<Surface>,
 }
 
 /// The ingress→upstream surface (ITEM-050): OpenAI is the chat-completions
@@ -229,18 +232,26 @@ pub(crate) async fn resolve_route(
     };
     match resolved {
         Ok(Some(provider)) => {
-            // ITEM-050 AC5: never cross surfaces — an Anthropic provider serves
-            // only /v1/messages, an OpenAI-shaped one only /v1/chat/completions.
-            if providers::is_anthropic(&provider.kind) != (surface == Surface::Anthropic) {
+            // ITEM-094: a provider that speaks the other surface is reachable
+            // through the translation seam when the tenant allows it; without
+            // it the typed error of ITEM-050 AC5 stands.
+            let native = if providers::is_anthropic(&provider.kind) {
+                Surface::Anthropic
+            } else {
+                Surface::OpenAi
+            };
+            let translate = (native != surface).then_some(native);
+            if translate.is_some() && !state.hotpath.translation_enabled(state, tenant.id).await {
                 return Err(surface_mismatch(surface));
             }
             Ok(Route {
-                url: surface.endpoint(&provider.base_url),
+                url: native.endpoint(&provider.base_url),
                 is_local: providers::is_local(&provider.kind),
                 key: provider.api_key,
                 metadata: provider.metadata,
                 provider_id: Some(provider.id),
                 kind: provider.kind,
+                translate,
             })
         }
         Ok(None) => {
@@ -255,6 +266,7 @@ pub(crate) async fn resolve_route(
                     provider_id: None,
                     kind: "openai".to_string(),
                     is_local: false,
+                    translate: (surface == Surface::Anthropic).then_some(Surface::OpenAi),
                 }),
                 None => Err(json_error(
                     StatusCode::BAD_REQUEST,
@@ -555,6 +567,7 @@ pub(crate) async fn proxy_chat_completions(
         session_id,
         lint: None,
         prune_event: None,
+        translate_to: None,
     };
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
@@ -593,16 +606,9 @@ pub(crate) async fn proxy_chat_completions(
         // fallback to a provider that honours json_schema keeps the contract.
         let downgrade_schema = guard::request_schema(&meta.raw_prompt).is_some()
             && !providers::supports_json_schema(&attempt_route.kind, &model);
-        let body = match budget::forward_body(&meta.raw_prompt, &model, downgrade_schema) {
+        let body = match wire_body(&meta.raw_prompt, attempt_route, &model, downgrade_schema) {
             Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::error!("payload reserialization failed: {e}");
-                return json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "serialization_error",
-                    "failed to reserialize the request payload",
-                );
-            }
+            Err(resp) => return resp,
         };
         meta.wire_format = downgrade_schema.then_some("json_object");
         let attempt = provider_request(&state.http_client, attempt_route)
@@ -616,6 +622,7 @@ pub(crate) async fn proxy_chat_completions(
                 let reason = routing::fallback_reason(status.as_u16());
                 if status.is_success() || is_last || reason.is_none() {
                     meta.model = model;
+                    meta.translate_to = attempt_route.translate;
                     upstream = Some(response);
                     break;
                 }
@@ -761,6 +768,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         session_id,
         lint: None,
         prune_event: None,
+        translate_to: None,
     };
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     preflight(&state, tenant_id, &mut meta).await;
@@ -800,7 +808,17 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
     meta.proxy_us = Some(request_started.elapsed().as_micros() as i64);
     let request = provider_request(&state.http_client, &route);
-    let upstream = match request.body(body_bytes).send().await {
+    let wire = match route.translate {
+        // Translated: the body is rebuilt in the provider's shape.
+        Some(_) => match wire_body(&meta.raw_prompt, &route, &meta.model, false) {
+            Ok(bytes) => bytes,
+            Err(resp) => return resp,
+        },
+        // Native Anthropic: forward the caller's bytes unchanged.
+        None => body_bytes,
+    };
+    meta.translate_to = route.translate;
+    let upstream = match request.body(wire).send().await {
         Ok(response) => response,
         Err(e) => {
             tracing::error!("anthropic upstream request failed: {e}");
@@ -902,6 +920,15 @@ async fn forward_buffered(
         }
     };
     let response_json: Option<Value> = serde_json::from_slice(&bytes).ok();
+    // ITEM-094: the trace (usage, outcome) is read from the provider's own
+    // shape; the client gets the shape it asked for — the opposite surface.
+    let bytes = match meta.translate_to {
+        Some(Surface::OpenAi) => {
+            translated_body(&bytes, Surface::Anthropic).unwrap_or(bytes)
+        }
+        Some(Surface::Anthropic) => translated_body(&bytes, Surface::OpenAi).unwrap_or(bytes),
+        None => bytes,
+    };
     let usage = parse_usage(&response_json);
     let outcome = outcome_for_json(status.as_u16(), &response_json);
     let error_class = (!status.is_success())
@@ -969,6 +996,8 @@ struct RequestMeta {
     lint: Option<Value>,
     /// ITEM-091: what pruning removed (or that this request was held out).
     prune_event: Option<Value>,
+    /// ITEM-094: the surface the provider spoke, when it was not the client's.
+    translate_to: Option<Surface>,
 }
 
 /// The outcome of a proxied request, as recorded on its trace.
@@ -1234,6 +1263,81 @@ pub(crate) async fn dismiss_lint(
     }
 }
 
+/// ITEM-094: translate a buffered upstream body to the client surface. Errors
+/// are translated too, so a provider failure arrives in the caller's shape.
+fn translated_body(bytes: &axum::body::Bytes, target: Surface) -> Option<axum::body::Bytes> {
+    let value: Value = serde_json::from_slice(bytes).ok()?;
+    let translated = if value.get("error").is_some() && value.get("choices").is_none() {
+        match target {
+            Surface::Anthropic => crate::translate::error_to_anthropic(&value),
+            Surface::OpenAi => crate::translate::error_to_openai(&value),
+        }
+    } else {
+        match target {
+            Surface::Anthropic => crate::translate::response_to_anthropic(&value).ok()?,
+            Surface::OpenAi => crate::translate::response_to_openai(&value).ok()?,
+        }
+    };
+    Some(axum::body::Bytes::from(translated.to_string()))
+}
+
+/// ITEM-094: the body actually sent, translated when the provider speaks the
+/// other surface. Routing, the guard, pruning and the pre-flight lint all run on
+/// the *client's* shape; translation is the last step before the wire.
+fn wire_body(
+    payload: &Value,
+    route: &Route,
+    model: &str,
+    downgrade_schema: bool,
+) -> Result<axum::body::Bytes, Response> {
+    let Some(target) = route.translate else {
+        return budget::forward_body(payload, model, downgrade_schema)
+            .map(axum::body::Bytes::from)
+            .map_err(|e| {
+                tracing::error!("payload reserialization failed: {e}");
+                json_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "serialization_error",
+                    "failed to reserialize the request payload",
+                )
+            });
+    };
+    let translated = match target {
+        Surface::OpenAi => crate::translate::request_to_openai(payload),
+        Surface::Anthropic => crate::translate::request_to_anthropic(payload),
+    };
+    let mut translated = match translated {
+        Ok(value) => value,
+        Err(missing) => {
+            return Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "surface_translation_unsupported",
+                &format!("{}: {}", missing.field, missing.detail),
+            ))
+        }
+    };
+    // The router may have chosen a different model than the client asked for;
+    // the wire model is the one we are actually calling.
+    translated["model"] = json!(model);
+    if downgrade_schema {
+        // The structured-output normalization is OpenAI-only (ITEM-067).
+        if let Some(schema) = translated.get("response_format").cloned() {
+            translated["response_format"] = json!({"type": "json_object"});
+            translated["_inferon_schema"] = schema;
+        }
+    }
+    serde_json::to_vec(&translated)
+        .map(axum::body::Bytes::from)
+        .map_err(|e| {
+            tracing::error!("translated payload serialization failed: {e}");
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "serialization_error",
+                "failed to serialize the translated request payload",
+            )
+        })
+}
+
 /// ITEM-090: inspect the payload before dispatch. Advisory only — nothing is
 /// rewritten; the finding rides the trace and `X-Inferon-Lint`. Skipped when the
 /// tenant turned the switch off, and a failed lookup never fails the request.
@@ -1328,7 +1432,34 @@ fn stream_response(
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
     let lint = meta.lint.clone();
-    let stream = stream_with_trace(byte_stream, started, meta, tenant_id, status, tx, parse_usage);
+    // ITEM-094: when the provider speaks the other surface, the translator wraps
+    // the raw stream *before* the telemetry tap — so usage parsing and completion
+    // capture read exactly the frames the client receives.
+    let stream = match meta.translate_to {
+        Some(provider) => futures_util::future::Either::Left(stream_with_trace(
+            crate::translate::sse::adapt(
+                byte_stream,
+                provider,
+                meta.model.clone(),
+                trace_id.to_string(),
+            ),
+            started,
+            meta,
+            tenant_id,
+            status,
+            tx,
+            parse_usage,
+        )),
+        None => futures_util::future::Either::Right(stream_with_trace(
+            byte_stream,
+            started,
+            meta,
+            tenant_id,
+            status,
+            tx,
+            parse_usage,
+        )),
+    };
     let mut response = Response::new(Body::from_stream(stream));
     *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
     response

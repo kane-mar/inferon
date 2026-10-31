@@ -702,12 +702,23 @@ pub struct InMemoryProviderStore {
 impl InMemoryProviderStore {
     /// Seed a ready-to-resolve provider (raw key held in memory — test only).
     pub fn with_provider(tenant_id: Uuid, base_url: &str, api_key: &str) -> Self {
+        Self::with_provider_kind(tenant_id, "deepseek", base_url, api_key)
+    }
+
+    /// A seeded provider of a specific kind — needed to exercise the
+    /// cross-surface translation seam (ITEM-094).
+    pub fn with_provider_kind(
+        tenant_id: Uuid,
+        kind: &str,
+        base_url: &str,
+        api_key: &str,
+    ) -> Self {
         let store = Self::default();
         store.rows.lock().unwrap().push(InMemoryRow {
             provider: Provider {
                 id: Uuid::new_v4(),
                 tenant_id,
-                kind: "deepseek".to_string(),
+                kind: kind.to_string(),
                 name: "seeded".to_string(),
                 base_url: base_url.to_string(),
                 key_hint: key_hint(api_key),

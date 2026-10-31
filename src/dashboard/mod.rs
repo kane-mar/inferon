@@ -354,6 +354,9 @@ pub struct ConfigBody {
     /// ITEM-090. Defaults keep an older client from switching the lint off.
     #[serde(default = "default_true")]
     lint_enabled: bool,
+    /// ITEM-094. Defaults keep an older client from disabling translation.
+    #[serde(default = "default_true")]
+    translate_surfaces: bool,
 }
 
 fn default_true() -> bool {

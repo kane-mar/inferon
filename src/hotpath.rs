@@ -585,6 +585,20 @@ impl HotPath {
         }
     }
 
+    /// ITEM-094: may a provider that speaks the other surface be reached through
+    /// the translation seam? Fail-open, like the other switches.
+    pub async fn translation_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
+        match self.refresh(state, tenant_id).await {
+            Ok(entry) => entry
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .budget
+                .as_ref()
+                .is_none_or(|budget| budget.translate_surfaces),
+            Err(_) => true,
+        }
+    }
+
     /// The guard switch, fail-open (a store error never removes the safety net).
     pub async fn guard_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
         match self.budget(state, tenant_id).await {

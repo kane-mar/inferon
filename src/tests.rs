@@ -114,6 +114,30 @@
                 }),
             )
             .route(
+                "/v1/messages",
+                axum::routing::post(
+                    |payload: axum::Json<serde_json::Value>| async move {
+                        // ITEM-094: an Anthropic provider. `echo` reports the
+                        // translated request back as a text block.
+                        axum::response::Response::builder()
+                            .header("content-type", "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "id": "msg_echo",
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "model": payload["model"],
+                                    "content": [{"type": "text", "text": payload.to_string()}],
+                                    "stop_reason": "end_turn",
+                                    "usage": {"input_tokens": 2, "output_tokens": 1},
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap()
+                    },
+                ),
+            )
+            .route(
                 "/v1/chat/completions",
             axum::routing::post(
                 |headers: axum::http::HeaderMap, payload: axum::Json<serde_json::Value>| async move {
@@ -278,6 +302,36 @@
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
                                 .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                                .unwrap()
+                        }
+                        Some("stream") => {
+                            // ITEM-094 AC4: an OpenAI stream for the translator.
+                            axum::response::Response::builder()
+                                .header("content-type", "text/event-stream")
+                                .body(Body::from(
+                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n\
+data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n\
+data: [DONE]\n\n",
+                                ))
+                                .unwrap()
+                        }
+                        Some("echo") => {
+                            // ITEM-094: echo the payload the provider received, so
+                            // a test can assert the translated request shape.
+                            axum::response::Response::builder()
+                                .header("content-type", "application/json")
+                                .body(Body::from(
+                                    json!({
+                                        "id": "echo",
+                                        "model": payload["model"],
+                                        "choices": [{
+                                            "message": {"role": "assistant", "content": payload.to_string()},
+                                            "finish_reason": "stop",
+                                        }],
+                                        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                                    })
+                                    .to_string(),
+                                ))
                                 .unwrap()
                         }
                         Some("content") => {
@@ -743,6 +797,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             capture_payloads: true,
             payload_retention_days: 30,
             lint_enabled: true,
+            translate_surfaces: true,
             limit_cents: 100,
             spent_cents: 100,
             cheap_fallback_model: None,
@@ -1568,6 +1623,7 @@ async fn a_tenant_tier_pair_routes_simple_traffic_to_the_tenant_model() {
             capture_payloads: true,
             payload_retention_days: 30,
             lint_enabled: true,
+            translate_surfaces: true,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1637,6 +1693,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             capture_payloads: true,
             payload_retention_days: 30,
             lint_enabled: true,
+            translate_surfaces: true,
             limit_cents: 0,
             spent_cents: 0,
             cheap_fallback_model: None,
@@ -1680,6 +1737,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -1707,6 +1765,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     capture_payloads: true,
                     payload_retention_days: 30,
                     lint_enabled: true,
+            translate_surfaces: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -1767,6 +1826,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 1000,
                 spent_cents: 1000,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1797,6 +1857,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 1000,
                 spent_cents: 900, // in the last 15% zone
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -1826,6 +1887,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 1000,
                 spent_cents: 100,
                 cheap_fallback_model: Some("gpt-4o-mini".to_string()),
@@ -2768,6 +2830,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -2991,6 +3054,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3086,6 +3150,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3107,6 +3172,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     capture_payloads: true,
                     payload_retention_days: 30,
                     lint_enabled: true,
+            translate_surfaces: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3293,6 +3359,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
                 limit_cents: 0,
                 spent_cents: 0,
                 cheap_fallback_model: None,
@@ -3328,6 +3395,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                     capture_payloads: true,
                     payload_retention_days: 30,
                     lint_enabled: true,
+            translate_surfaces: true,
                     budget_limit_cents: 0,
                     cheap_fallback_model: None,
                     guard_enabled: true,
@@ -3390,6 +3458,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 capture_payloads: false,
                 payload_retention_days: 30,
                 lint_enabled: true,
+            translate_surfaces: true,
             },
         );
         let (response, mut rx) = traced_request_with_budget(
@@ -3446,6 +3515,166 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             lint["wasted_usd_est"].as_str().is_some_and(|usd| usd.parse::<f64>().unwrap() > 0.0),
             "the finding is priced: {lint}"
         );
+    }
+
+    #[tokio::test]
+    async fn an_anthropic_sdk_reaches_an_openai_provider_through_translation() {
+        // ITEM-094 AC1: /v1/messages against a DeepSeek-shaped provider.
+        let upstream = mock_upstream().await;
+        let base = upstream.trim_end_matches("/chat/completions").to_string();
+        let tenant = seeded_tenant();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::with_provider_kind(
+                    tenant.id,
+                    "deepseek",
+                    &base,
+                    "sk-deepseek",
+                ),
+            ),
+            telemetry_tx: tx,
+            ..base_state(&upstream)
+        });
+        let router = build_router(state);
+        let body = r#"{"model":"echo","max_tokens":16,"system":"be terse",
+            "messages":[{"role":"user","content":"what is 2+2?"}]}"#;
+        let response = router.oneshot(messages_request(body, Some(CLIENT_KEY))).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // The client asked in Anthropic shape and got Anthropic shape back...
+        assert_eq!(json["type"], "message", "{json}");
+        assert_eq!(json["stop_reason"], "end_turn");
+        assert_eq!(json["usage"]["input_tokens"], 1, "usage mapped from the provider");
+        // ...and the provider received a chat-completions body.
+        let echoed = json["content"][0]["text"].as_str().expect("echoed request");
+        let sent: serde_json::Value = serde_json::from_str(echoed).unwrap();
+        assert_eq!(sent["messages"][0]["role"], "system", "{sent}");
+        assert_eq!(sent["messages"][1]["content"], "what is 2+2?");
+        assert!(sent["tools"].is_null());
+        let msg = rx.recv().await.expect("trace");
+        assert_eq!(msg.request_model, "echo");
+    }
+
+    #[tokio::test]
+    async fn an_openai_sdk_reaches_an_anthropic_provider_through_translation() {
+        // ITEM-094 AC2: the inverse direction.
+        let upstream = mock_upstream().await;
+        let base = upstream.trim_end_matches("/chat/completions").to_string();
+        let tenant = seeded_tenant();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::with_provider_kind(
+                    tenant.id,
+                    "anthropic",
+                    &base,
+                    "sk-ant",
+                ),
+            ),
+            telemetry_tx: tx,
+            ..base_state(&upstream)
+        });
+        let router = build_router(state);
+        let body = r#"{"model":"echo","max_tokens":16,
+            "messages":[{"role":"system","content":"be terse"},{"role":"user","content":"hi"}]}"#;
+        let response = router.oneshot(chat_request_builder(body, Some(CLIENT_KEY))).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["object"], "chat.completion", "{json}");
+        assert_eq!(json["choices"][0]["finish_reason"], "stop");
+        let echoed = json["choices"][0]["message"]["content"].as_str().expect("echoed request");
+        let sent: serde_json::Value = serde_json::from_str(echoed).unwrap();
+        assert_eq!(sent["system"], "be terse", "the system turn is top-level");
+        assert_eq!(sent["messages"][0]["content"], "hi");
+        assert_eq!(sent["max_tokens"], 16);
+        let msg = rx.recv().await.expect("trace");
+        assert_eq!(msg.request_model, "echo");
+    }
+
+    #[tokio::test]
+    async fn a_translated_stream_arrives_in_the_client_surface() {
+        // ITEM-094 AC4: deltas, usage and the stop reason survive translation.
+        let upstream = mock_upstream().await;
+        let base = upstream.trim_end_matches("/chat/completions").to_string();
+        let tenant = seeded_tenant();
+        let (tx, mut rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::with_provider_kind(
+                    tenant.id,
+                    "deepseek",
+                    &base,
+                    "sk-deepseek",
+                ),
+            ),
+            telemetry_tx: tx,
+            ..base_state(&upstream)
+        });
+        let router = build_router(state);
+        let body = r#"{"model":"stream","max_tokens":16,"stream":true,
+            "messages":[{"role":"user","content":"hi"}]}"#;
+        let response = router.oneshot(messages_request(body, Some(CLIENT_KEY))).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let stream = String::from_utf8_lossy(&bytes);
+        assert!(stream.contains("event: message_start"), "{stream}");
+        assert!(stream.contains("\"text\":\"Hel\""), "{stream}");
+        assert!(stream.contains("\"text\":\"lo\""), "{stream}");
+        assert!(stream.contains("\"stop_reason\":\"end_turn\""), "{stream}");
+        assert!(stream.contains("event: message_stop"), "{stream}");
+        assert!(!stream.contains("[DONE]"), "OpenAI's sentinel never reaches an Anthropic SDK");
+        let msg = rx.recv().await.expect("trace");
+        assert_eq!(msg.prompt_tokens, 4, "usage parsed from the translated stream");
+        assert_eq!(msg.completion_tokens, 2);
+    }
+
+    #[tokio::test]
+    async fn without_translation_a_mismatched_provider_keeps_the_typed_error() {
+        // ITEM-094 AC3: the kill switch restores the ITEM-050 refusal.
+        let upstream = mock_upstream().await;
+        let base = upstream.trim_end_matches("/chat/completions").to_string();
+        let tenant = seeded_tenant();
+        let mut budgets = std::collections::HashMap::new();
+        budgets.insert(
+            tenant.id,
+            budget::TenantBudget {
+                capture_payloads: true,
+                payload_retention_days: 30,
+                lint_enabled: true,
+                translate_surfaces: false,
+                limit_cents: 0,
+                spent_cents: 0,
+                cheap_fallback_model: None,
+                guard_enabled: true,
+                router_enabled: true,
+                router_threshold: 0.35,
+                tier_pairs: Vec::new(),
+            },
+        );
+        let (tx, _rx) = mpsc::channel(64);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: std::sync::Arc::new(
+                crate::providers::InMemoryProviderStore::with_provider_kind(
+                    tenant.id,
+                    "deepseek",
+                    &base,
+                    "sk-deepseek",
+                ),
+            ),
+            budget_store: std::sync::Arc::new(budget::InMemoryBudgetStore::new(budgets)),
+            telemetry_tx: tx,
+            ..base_state(&upstream)
+        });
+        let router = build_router(state);
+        let body = r#"{"model":"echo","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}"#;
+        let response = router.oneshot(messages_request(body, Some(CLIENT_KEY))).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["error"]["type"], "no_provider", "{json}");
     }
 
     #[tokio::test]
@@ -3577,6 +3806,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 router_enabled: false,
                 router_threshold: 0.35,
                 tier_pairs: Vec::new(),
+                translate_surfaces: true,
             },
         );
         let store: std::sync::Arc<dyn budget::BudgetStore> =

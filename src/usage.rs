@@ -95,6 +95,11 @@ pub fn usage_from_anthropic_sse_bytes(bytes: &[u8]) -> Option<Usage> {
             }
             Some("message_delta") => {
                 let usage = &frame["usage"];
+                // A translated stream learns the input count only at the end
+                // (OpenAI reports usage in its final chunk, ITEM-094).
+                if let Some(v) = usage["input_tokens"].as_i64() {
+                    prompt = Some(v as i32);
+                }
                 if let Some(v) = usage["output_tokens"].as_i64() {
                     completion = Some(v as i32);
                 }
