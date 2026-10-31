@@ -443,20 +443,8 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
-    let config: Option<crate::budget::ConfigRow> = sqlx::query_as(
-        "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model, guard_enabled,
-                router_enabled, router_threshold, tier_pairs,
-                COALESCE(payload_capture, TRUE),
-                COALESCE(payload_retention_days, 30),
-                COALESCE(lint_enabled, TRUE),
-                COALESCE(translate_surfaces, TRUE),
-                COALESCE(rpm_limit, 0),
-                COALESCE(tpm_limit, 0),
-                COALESCE(pii_detection, TRUE),
-                COALESCE(pii_redact_storage, FALSE),
-                COALESCE(pii_redact_wire, FALSE)
-         FROM tenant_configurations WHERE tenant_id = $1",
-    )
+    // The same select the hot path uses: one definition, one set of aliases.
+    let config: Option<crate::budget::ConfigRow> = sqlx::query_as(crate::budget::CONFIG_SELECT)
     .bind(tenant_id)
     .fetch_optional(&state.db)
     .await
@@ -481,28 +469,24 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
         "fallbacks": fallbacks,
         "models": models,
         "policy": policy,
-        "budget": config.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit, pii_detection, pii_redact_storage, pii_redact_wire)| {
-                serde_json::json!({
-                    "limit_cents": limit_cents,
-                    "spent_cents": spent_cents,
-                    "cheap_fallback_model": cheap_fallback_model,
-                    "guard_enabled": guard_enabled,
-                    "router_enabled": router_enabled,
-                    "router_threshold": router_threshold,
-                    "tier_pairs": tier_pairs.0,
-                    "capture_payloads": capture_payloads,
-                    "payload_retention_days": payload_retention_days,
-                    "lint_enabled": lint_enabled,
-                    "translate_surfaces": translate_surfaces,
-                    "rpm_limit": rpm_limit,
-                    "tpm_limit": tpm_limit,
-                    "pii_detection": pii_detection,
-                    "pii_redact_storage": pii_redact_storage,
-                    "pii_redact_wire": pii_redact_wire,
-                })
-            },
-        ),
+        "budget": config.map(|row| serde_json::json!({
+            "limit_cents": row.limit_cents,
+            "spent_cents": row.spent_cents,
+            "cheap_fallback_model": row.cheap_fallback_model,
+            "guard_enabled": row.guard_enabled,
+            "router_enabled": row.router_enabled,
+            "router_threshold": row.router_threshold,
+            "tier_pairs": row.tier_pairs.0,
+            "capture_payloads": row.capture_payloads,
+            "payload_retention_days": row.payload_retention_days,
+            "lint_enabled": row.lint_enabled,
+            "translate_surfaces": row.translate_surfaces,
+            "rpm_limit": row.rpm_limit,
+            "tpm_limit": row.tpm_limit,
+            "pii_detection": row.pii_detection,
+            "pii_redact_storage": row.pii_redact_storage,
+            "pii_redact_wire": row.pii_redact_wire,
+        })),
     }))
 }
 

@@ -253,6 +253,44 @@ fn the_retention_window_is_as_wide_as_the_i64_it_decodes_into() {
 }
 
 #[test]
+fn the_config_select_covers_every_field_of_the_row() {
+    // The row used to be a 16-element tuple decoded by position; a miscount
+    // shifted every following field into the wrong type (and shipped twice).
+    // Now the query aliases each column and the decoder asks for it by name —
+    // this test keeps the two lists identical.
+    let expected = [
+        "limit_cents",
+        "spent_cents",
+        "cheap_fallback_model",
+        "guard_enabled",
+        "router_enabled",
+        "router_threshold",
+        "tier_pairs",
+        "capture_payloads",
+        "payload_retention_days",
+        "lint_enabled",
+        "translate_surfaces",
+        "rpm_limit",
+        "tpm_limit",
+        "pii_detection",
+        "pii_redact_storage",
+        "pii_redact_wire",
+    ];
+    let select = crate::budget::CONFIG_SELECT;
+    for field in expected {
+        assert!(
+            select.contains(&format!("AS {field}")),
+            "CONFIG_SELECT is missing an alias for {field}:\n{select}"
+        );
+    }
+    assert_eq!(
+        select.matches(" AS ").count(),
+        expected.len(),
+        "every column is aliased, and nothing else is"
+    );
+}
+
+#[test]
 fn no_config_query_has_a_trailing_comma_before_from() {
     // Two config SELECTs grew a column list; a trailing comma before FROM is a
     // syntax error that only Postgres could see (2026-10-31 deploy smoke caught

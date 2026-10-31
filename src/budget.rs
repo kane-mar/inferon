@@ -96,26 +96,98 @@ pub(crate) fn enforce_budget(budget: &TenantBudget) -> BudgetVerdict {
     BudgetVerdict::Allow
 }
 
-/// The `tenant_configurations` row as both the hot path and the edge config sync
-/// read it (ITEM-015/027/046/081).
-pub(crate) type ConfigRow = (
-    i64,
-    i64,
-    Option<String>,
-    bool,
-    bool,
-    f64,
-    sqlx::types::Json<Vec<crate::router::TierPair>>,
-    bool,
-    i64,
-    bool,
-    bool,
-    i64,
-    i64,
-    bool,
-    bool,
-    bool,
-);
+/// The `tenant_configurations` row, decoded **by column name**.
+///
+/// This used to be a 16-element tuple: every new tenant switch added a position,
+/// and a single miscount shifted every following field into the wrong type. It
+/// is now a struct with the column aliases spelled out, and `CONFIG_SELECT` is
+/// asserted against it (see `tests::the_config_select_covers_every_field`).
+pub(crate) struct ConfigRow {
+    pub limit_cents: i64,
+    pub spent_cents: i64,
+    pub cheap_fallback_model: Option<String>,
+    pub guard_enabled: bool,
+    pub router_enabled: bool,
+    pub router_threshold: f64,
+    pub tier_pairs: sqlx::types::Json<Vec<crate::router::TierPair>>,
+    pub capture_payloads: bool,
+    pub payload_retention_days: i64,
+    pub lint_enabled: bool,
+    pub translate_surfaces: bool,
+    pub rpm_limit: i64,
+    pub tpm_limit: i64,
+    pub pii_detection: bool,
+    pub pii_redact_storage: bool,
+    pub pii_redact_wire: bool,
+}
+
+/// Every column the row decoder expects, with its alias. One place, so the
+/// query and the struct cannot drift apart.
+pub(crate) const CONFIG_SELECT: &str = "SELECT budget_limit_cents AS limit_cents,
+                current_spend_cents AS spent_cents,
+                cheap_fallback_model AS cheap_fallback_model,
+                COALESCE(guard_enabled, TRUE) AS guard_enabled,
+                COALESCE(router_enabled, TRUE) AS router_enabled,
+                COALESCE(router_threshold, 0.35) AS router_threshold,
+                tier_pairs AS tier_pairs,
+                COALESCE(payload_capture, TRUE) AS capture_payloads,
+                COALESCE(payload_retention_days, 30) AS payload_retention_days,
+                COALESCE(lint_enabled, TRUE) AS lint_enabled,
+                COALESCE(translate_surfaces, TRUE) AS translate_surfaces,
+                COALESCE(rpm_limit, 0) AS rpm_limit,
+                COALESCE(tpm_limit, 0) AS tpm_limit,
+                COALESCE(pii_detection, TRUE) AS pii_detection,
+                COALESCE(pii_redact_storage, FALSE) AS pii_redact_storage,
+                COALESCE(pii_redact_wire, FALSE) AS pii_redact_wire
+         FROM tenant_configurations";
+
+// Decoded by column *name*, not position: the whole point of the struct.
+impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ConfigRow {
+    fn from_row(row: &sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(Self {
+            limit_cents: row.try_get("limit_cents")?,
+            spent_cents: row.try_get("spent_cents")?,
+            cheap_fallback_model: row.try_get("cheap_fallback_model")?,
+            guard_enabled: row.try_get("guard_enabled")?,
+            router_enabled: row.try_get("router_enabled")?,
+            router_threshold: row.try_get("router_threshold")?,
+            tier_pairs: row.try_get("tier_pairs")?,
+            capture_payloads: row.try_get("capture_payloads")?,
+            payload_retention_days: row.try_get("payload_retention_days")?,
+            lint_enabled: row.try_get("lint_enabled")?,
+            translate_surfaces: row.try_get("translate_surfaces")?,
+            rpm_limit: row.try_get("rpm_limit")?,
+            tpm_limit: row.try_get("tpm_limit")?,
+            pii_detection: row.try_get("pii_detection")?,
+            pii_redact_storage: row.try_get("pii_redact_storage")?,
+            pii_redact_wire: row.try_get("pii_redact_wire")?,
+        })
+    }
+}
+
+impl From<ConfigRow> for TenantBudget {
+    fn from(row: ConfigRow) -> Self {
+        Self {
+            limit_cents: row.limit_cents,
+            spent_cents: row.spent_cents,
+            cheap_fallback_model: row.cheap_fallback_model,
+            guard_enabled: row.guard_enabled,
+            router_enabled: row.router_enabled,
+            router_threshold: row.router_threshold,
+            tier_pairs: row.tier_pairs.0,
+            capture_payloads: row.capture_payloads,
+            payload_retention_days: row.payload_retention_days,
+            lint_enabled: row.lint_enabled,
+            translate_surfaces: row.translate_surfaces,
+            rpm_limit: row.rpm_limit,
+            tpm_limit: row.tpm_limit,
+            pii_detection: row.pii_detection,
+            pii_redact_storage: row.pii_redact_storage,
+            pii_redact_wire: row.pii_redact_wire,
+        }
+    }
+}
 
 /// Lookup seam: budget config per tenant. `None` = no config = unlimited.
 #[async_trait::async_trait]
@@ -271,46 +343,11 @@ impl BudgetStore for PostgresBudgetStore {
         &self,
         tenant_id: Uuid,
     ) -> Result<Option<TenantBudget>, Box<dyn std::error::Error + Send + Sync>> {
-        let row: Option<ConfigRow> = sqlx::query_as(
-            "SELECT budget_limit_cents, current_spend_cents, cheap_fallback_model,
-                    COALESCE(guard_enabled, TRUE), COALESCE(router_enabled, TRUE),
-                    COALESCE(router_threshold, 0.35), tier_pairs,
-                    COALESCE(payload_capture, TRUE),
-                    COALESCE(payload_retention_days, 30),
-                    COALESCE(lint_enabled, TRUE),
-                    COALESCE(translate_surfaces, TRUE),
-                    COALESCE(rpm_limit, 0),
-                    COALESCE(tpm_limit, 0),
-                    COALESCE(pii_detection, TRUE),
-                    COALESCE(pii_redact_storage, FALSE),
-                    COALESCE(pii_redact_wire, FALSE)
-             FROM tenant_configurations WHERE tenant_id = $1",
-        )
-        .bind(tenant_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(
-            |(limit_cents, spent_cents, cheap_fallback_model, guard_enabled, router_enabled, router_threshold, tier_pairs, capture_payloads, payload_retention_days, lint_enabled, translate_surfaces, rpm_limit, tpm_limit, pii_detection, pii_redact_storage, pii_redact_wire)| {
-                TenantBudget {
-                    limit_cents,
-                    spent_cents,
-                    cheap_fallback_model,
-                    guard_enabled,
-                    router_enabled,
-                    router_threshold,
-                    tier_pairs: tier_pairs.0,
-                    capture_payloads,
-                    payload_retention_days,
-                    lint_enabled,
-                    translate_surfaces,
-                    rpm_limit,
-                    tpm_limit,
-                    pii_detection,
-                    pii_redact_storage,
-                    pii_redact_wire,
-                }
-            },
-        ))
+        let row: Option<ConfigRow> = sqlx::query_as(CONFIG_SELECT)
+            .bind(tenant_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(TenantBudget::from))
     }
 
     async fn guard_enabled_for(
