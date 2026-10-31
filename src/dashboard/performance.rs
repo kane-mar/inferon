@@ -16,6 +16,9 @@ const P95_GUARD_US: i64 = 5_000;
 /// report says "not enough samples" rather than met/not-met.
 const MIN_SAMPLES: i64 = 20;
 
+/// ITEM-099: one model's bucket — `(model, bucket, requests, errors, p95_ms)`.
+type HeatCellRow = (String, String, i64, i64, Option<f64>);
+
 /// `(samples, under_1ms, p50, p95, p99)` of the proxy's own overhead.
 type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>);
 
@@ -36,11 +39,13 @@ type ModelRow = (String, i64, Option<i64>, Option<i64>, Option<f64>, Option<f64>
 pub async fn performance(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(window): Query<Window>,
+    Query(query): Query<super::HeatmapQuery>,
 ) -> Result<Response, Response> {
     let (tenant_id, _role) = session_membership(&state, &headers).await?;
-    let days = window.days();
-    let offset = window.offset();
+    let days = query.days();
+    let offset = query.offset();
+    // ITEM-099: day buckets by default; hour for a short window.
+    let step = query.step.clone().unwrap_or_else(|| "day".to_string());
 
     let (samples, under_1ms, p50_us, p95_us, p99_us): OverheadRow = stored(sqlx::query_as(
         "SELECT COUNT(*),
@@ -154,6 +159,61 @@ pub async fn performance(
     let (pruned, tokens_saved, usd_saved, pruned_ok, holdout, holdout_ok, pruned_and_holdout) = pruning;
     let rate = |ok: i64, total: i64| (total > 0).then(|| ok as f64 / total as f64);
 
+    // ITEM-099: one bounded aggregate for the matrix; the pivot is pure.
+    let heat: Vec<HeatCellRow> = stored(sqlx::query_as(&format!(
+        "SELECT request_model,
+                to_char(date_trunc('{step}', created_at), 'YYYY-MM-DD HH24'),
+                COUNT(*),
+                COUNT(*) FILTER (WHERE status_code >= 400),
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+         GROUP BY 1, 2 ORDER BY 1, 2",
+        step = crate::heatmap::bucket_expr(&step)
+    ))
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await)?;
+    let buckets: Vec<String> = heat
+        .iter()
+        .map(|(_, bucket, _, _, _)| bucket.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let cells: Vec<(String, String, crate::heatmap::Cell)> = heat
+        .into_iter()
+        .map(|(model, bucket, requests, errors, p95_ms)| {
+            (
+                model,
+                bucket,
+                crate::heatmap::Cell {
+                    requests,
+                    errors,
+                    p95_ms,
+                },
+            )
+        })
+        .collect();
+    let matrix: Vec<Value> = crate::heatmap::pivot(&buckets, &cells)
+        .into_iter()
+        .map(|(model, cells)| {
+            json!({
+                "model": model,
+                "cells": cells.into_iter().map(|cell| match cell {
+                    Some(cell) => json!({
+                        "requests": cell.requests,
+                        "errors": cell.errors,
+                        "error_rate": cell.error_rate(),
+                        "p95_ms": cell.p95_ms,
+                    }),
+                    None => Value::Null,
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
     // ITEM-096: PII counts by class, and how much of the traffic was redacted.
     // `by_class` is summed over traces, never over values.
     let (pii_scanned, pii_redacted, pii_wire, pii_total): (i64, i64, i64, i64) =
@@ -242,6 +302,11 @@ pub async fn performance(
                 (Some(pruned), Some(holdout)) => Some(pruned - holdout),
                 _ => None,
             },
+        },
+        "heatmap": {
+            "step": crate::heatmap::bucket_expr(&step),
+            "buckets": buckets,
+            "models": matrix,
         },
         "pii": {
             "scanned": pii_scanned,

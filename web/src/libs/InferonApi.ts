@@ -194,6 +194,20 @@ export type PerformanceReport = {
     ttft_p95_ms: number | null;
     proxy_share: number | null;
   };
+  /** ITEM-099: model × bucket matrix; a `null` cell is "no traffic". */
+  heatmap: {
+    step: 'day' | 'hour';
+    buckets: string[];
+    models: {
+      model: string;
+      cells: ({
+        requests: number;
+        errors: number;
+        error_rate: number | null;
+        p95_ms: number | null;
+      } | null)[];
+    }[];
+  };
   /** ITEM-096: PII shapes found (counts only — never a value). */
   pii: {
     scanned: number;
@@ -705,10 +719,11 @@ export class InferonApi {
     return this.request('POST', '/v1/dashboard/api/datasets/purge', {}, { cookie });
   }
 
-  performance(days: number, cookie?: string): Promise<PerformanceReport> {
+  performance(days: number, cookie?: string, step?: 'day' | 'hour'): Promise<PerformanceReport> {
+    const query = `${windowQuery(days)}${step ? `&step=${step}` : ''}`;
     return this.request<PerformanceReport>(
       'GET',
-      `/v1/dashboard/api/performance${windowQuery(days)}`,
+      `/v1/dashboard/api/performance${query}`,
       undefined,
       { cookie },
     );

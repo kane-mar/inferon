@@ -28,3 +28,22 @@ dashboard renders line charts and a provider table. No matrix view.
   become a one-off.
 
 **Ranking note.** Rank **16** of 22 · V1.5/E1 — cheap but the lowest value here: presentation over data that already exists.
+---
+
+**Delivered (2026-10-31).** `src/heatmap.rs`: `Cell` (requests, errors, p95) with
+`error_rate`, and `pivot` — every model gets one entry per bucket, a missing
+bucket is `None` (never `0`), and models are ordered busiest-first, then by name,
+so the table is stable between refreshes. `bucket_expr` whitelists `hour`/`day`
+(nothing from the query is interpolated).
+
+The report (`/api/performance?days=&step=`) makes **one** bounded aggregate over
+the window (`date_trunc` + `percentile_cont(0.95)` grouped by model and bucket)
+and pivots it in Rust. The page renders a matrix with the same window switcher;
+`?step=hour` / `?step=day` switch the resolution, a dot marks an empty bucket,
+and each cell prints `p95 · error%` with a low-contrast tint — values are
+readable without relying on colour (AC2). The empty tenant renders nothing
+rather than an empty table (AC4).
+
+**Verified**: 5 unit tests (missing ≠ zero, every model gets every bucket,
+busiest-first, per-bucket error rate, step whitelist) + the performance
+session-scope test updated for the new query shape.

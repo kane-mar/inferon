@@ -23,6 +23,20 @@ const integer = (value: number) => value.toLocaleString('en-US');
 // `formatUsd` expects a decimal string; sessions return them as strings already.
 const usd = (value: string | null) => (value == null ? '—' : formatUsd(value));
 
+/**
+ * ITEM-099: a heatmap cell's tint. Values are always printed, so colour is a
+ * hint, not the information (hence the deliberately low-contrast palette).
+ */
+const heatCellClass = (
+  cell: { error_rate: number | null; p95_ms: number | null } | null,
+): string => {
+  if (cell == null) return 'text-muted-foreground/40';
+  const error = cell.error_rate ?? 0;
+  if (error >= 0.2 || (cell.p95_ms ?? 0) >= 10_000) return 'bg-destructive/15';
+  if (error >= 0.05 || (cell.p95_ms ?? 0) >= 3_000) return 'bg-destructive/5';
+  return '';
+};
+
 /** A small met / not-met marker (null = no samples yet). */
 const Status = (props: { ok: boolean | null; met: string; missed: string }) => {
   if (props.ok == null) {
@@ -197,6 +211,80 @@ export default async function PerformancePage(props: {
           )}
         </Card>
       </div>
+
+      {/* Model × time matrix: degradation at a glance (ITEM-099). Empty cells
+          are "no traffic" — visually distinct from a fast/healthy day. */}
+      {data.heatmap.models.length > 0 && (
+        <div className="mt-4">
+          <Card
+            title={t('heatmap', { step: data.heatmap.step })}
+            action={(
+              <div className="flex gap-2 text-xs">
+                <a
+                  className="underline underline-offset-4"
+                  href={`?days=${data.window.days}&step=day`}
+                >
+                  {t('heatmap_day')}
+                </a>
+                <a
+                  className="underline underline-offset-4"
+                  href={`?days=${data.window.days}&step=hour`}
+                >
+                  {t('heatmap_hour')}
+                </a>
+              </div>
+            )}
+          >
+            <p className="mb-3 text-xs text-muted-foreground">{t('heatmap_help')}</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b text-muted-foreground">
+                    <th className="py-2 pr-3 font-mono uppercase">{t('heatmap_model')}</th>
+                    {data.heatmap.buckets.map(bucket => (
+                      <th key={bucket} className="px-2 py-2 text-right font-mono">
+                        {bucket.slice(5)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.heatmap.models.map(row => (
+                    <tr key={row.model} className="border-b last:border-0">
+                      <td className="py-2 pr-3 font-mono">{row.model}</td>
+                      {row.cells.map((cell, index) => (
+                        <td
+                          key={`${row.model}-${data.heatmap.buckets[index]}`}
+                          className={`
+                            px-2 py-2 text-right font-mono tabular-nums
+                            ${heatCellClass(cell)}
+                          `}
+                          title={cell
+                            ? `${cell.requests} request(s), ${cell.errors} error(s)`
+                            : t('heatmap_empty')}
+                        >
+                          {cell
+                            ? (
+                                <>
+                                  {cell.p95_ms == null ? '—' : `${Math.round(cell.p95_ms)}ms`}
+                                  <span className="ml-1 opacity-70">
+                                    {cell.error_rate == null
+                                      ? ''
+                                      : `${(cell.error_rate * 100).toFixed(0)}%`}
+                                  </span>
+                                </>
+                              )
+                            : '·'}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* PII: counts by class, never the values, plus what was redacted. */}
       {data.pii.scanned > 0 && (

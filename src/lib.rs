@@ -45,6 +45,7 @@ pub mod cost;
 pub mod datasets;
 pub mod evolution;
 pub mod guard;
+pub mod heatmap;
 pub mod hotpath;
 pub mod linter;
 pub mod loadbalance;

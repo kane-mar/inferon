@@ -267,6 +267,24 @@ pub struct KeyLabelBody {
     label: Option<String>,
 }
 
+/// ITEM-099: the performance report also takes a bucket step for the matrix.
+/// Flat on purpose — `serde_urlencoded` cannot flatten into a nested struct.
+#[derive(Debug, serde::Deserialize)]
+pub struct HeatmapQuery {
+    days: Option<i64>,
+    offset: Option<i64>,
+    step: Option<String>,
+}
+
+impl HeatmapQuery {
+    fn days(&self) -> i64 {
+        self.days.unwrap_or(7).clamp(1, 365)
+    }
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).clamp(0, 3650)
+    }
+}
+
 /// ITEM-097: name a content hash.
 #[derive(serde::Deserialize)]
 pub struct LabelBody {
