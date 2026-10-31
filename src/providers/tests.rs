@@ -329,6 +329,7 @@
         tokio::spawn(async move { axum::serve(listener, host).await.unwrap() });
 
         let provider = ResolvedProvider {
+            last_check_ok: None,
             id: Uuid::nil(),
             kind: "openai-compatible".to_string(),
             base_url: format!("http://{addr}/v1"),
@@ -340,6 +341,7 @@
 
         // A dead host is an error, not an empty list.
         let dead = ResolvedProvider {
+            last_check_ok: None,
             base_url: "http://127.0.0.1:1/v1".to_string(),
             ..provider
         };

@@ -108,6 +108,7 @@ pub(crate) async fn list_models(State(state): State<Arc<AppState>>, req: Request
             }
         } else if let Some(key) = tenant.upstream_openai_key.as_deref() {
             let shared = crate::providers::ResolvedProvider {
+            last_check_ok: None,
                 id: Uuid::nil(),
                 kind: "openai".to_string(),
                 base_url: dashboard::upstream_base_url(&state.upstream_url),
@@ -145,6 +146,8 @@ pub(crate) struct Route {
     /// ITEM-094: the surface the provider speaks when it is not the client's.
     /// The body and the response are translated across this seam.
     pub(crate) translate: Option<Surface>,
+    /// ITEM-100: why this provider was chosen (`only`, `weight`, `round_robin`).
+    pub(crate) selection: Option<&'static str>,
 }
 
 /// The ingress→upstream surface (ITEM-050): OpenAI is the chat-completions
@@ -209,27 +212,15 @@ pub(crate) async fn resolve_route(
     surface: Surface,
     weights: Option<&std::collections::BTreeMap<String, f64>>,
 ) -> Result<Route, Response> {
-    // ITEM-069: when several providers own the model, the adaptive policy's
-    // health weights pick the healthiest; otherwise the store's own ordering.
-    let preferred = match (model, weights) {
-        (Some(model), Some(weights)) if !weights.is_empty() => state
-            .provider_store
-            .providers_for_model(tenant.id, model)
-            .await
-            .ok()
-            .and_then(|ids| {
-                ids.into_iter().max_by(|a, b| {
-                    weight_of(weights, a)
-                        .partial_cmp(&weight_of(weights, b))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-            }),
-        _ => None,
-    };
-    let resolved = match preferred {
-        Some(id) => state.provider_store.resolve_provider(tenant.id, id).await,
-        None => state.provider_store.resolve_for(tenant.id, model).await,
-    };
+    // ITEM-100: when several healthy providers serve the model, spread the
+    // load across them, weighted by the adaptive policy's health weights
+    // (ITEM-069). A single-provider model is the old behaviour exactly.
+    if let Some(model) = model {
+        if let Some(route) = balance_across_providers(state, tenant, model, surface, weights).await {
+            return route;
+        }
+    }
+    let resolved = state.provider_store.resolve_for(tenant.id, model).await;
     match resolved {
         Ok(Some(provider)) => {
             // ITEM-094: a provider that speaks the other surface is reachable
@@ -252,6 +243,7 @@ pub(crate) async fn resolve_route(
                 provider_id: Some(provider.id),
                 kind: provider.kind,
                 translate,
+                selection: Some("only"),
             })
         }
         Ok(None) => {
@@ -267,6 +259,7 @@ pub(crate) async fn resolve_route(
                     kind: "openai".to_string(),
                     is_local: false,
                     translate: (surface == Surface::Anthropic).then_some(Surface::OpenAi),
+                    selection: Some("only"),
                 }),
                 None => Err(json_error(
                     StatusCode::BAD_REQUEST,
@@ -284,6 +277,72 @@ pub(crate) async fn resolve_route(
             ))
         }
     }
+}
+
+/// ITEM-100: distribute across the providers that serve `model`.
+///
+/// Returns `None` when there is nothing to balance (one provider, or none), so
+/// the caller keeps the single-provider path byte-for-byte. Unreachable
+/// providers (a failed reachability probe) and policy-zeroed ones are skipped;
+/// the seed is a per-(tenant, model) counter, so consecutive requests spread.
+async fn balance_across_providers(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    model: &str,
+    surface: Surface,
+    weights: Option<&std::collections::BTreeMap<String, f64>>,
+) -> Option<Result<Route, Response>> {
+    let ids = state.provider_store.providers_for_model(tenant.id, model).await.ok()?;
+    if ids.len() < 2 {
+        return None;
+    }
+    let empty = std::collections::BTreeMap::new();
+    let weights = weights.unwrap_or(&empty);
+    let mut eligible = Vec::new();
+    for id in ids {
+        if let Ok(Some(provider)) = state.provider_store.resolve_provider(tenant.id, id).await {
+            if provider.last_check_ok != Some(false) {
+                eligible.push(provider);
+            }
+        }
+    }
+    if eligible.len() < 2 {
+        return None;
+    }
+    let candidates: Vec<crate::loadbalance::Candidate> = eligible
+        .iter()
+        .enumerate()
+        .map(|(slot, provider)| crate::loadbalance::Candidate {
+            slot,
+            weight: weight_of(weights, &provider.id),
+        })
+        .collect();
+    let seed = state.hotpath.next_seed(tenant.id, model);
+    let choice = crate::loadbalance::choose(
+        &candidates,
+        seed,
+        crate::loadbalance::Strategy::Weighted,
+    )?;
+    let provider = &eligible[choice.slot];
+    let native = if providers::is_anthropic(&provider.kind) {
+        Surface::Anthropic
+    } else {
+        Surface::OpenAi
+    };
+    let translate = (native != surface).then_some(native);
+    if translate.is_some() && !state.hotpath.translation_enabled(state, tenant.id).await {
+        return Some(Err(surface_mismatch(surface)));
+    }
+    Some(Ok(Route {
+        url: native.endpoint(&provider.base_url),
+        is_local: providers::is_local(&provider.kind),
+        key: provider.api_key.clone(),
+        metadata: provider.metadata.clone(),
+        provider_id: Some(provider.id),
+        kind: provider.kind.clone(),
+        translate,
+        selection: Some(choice.reason.as_str()),
+    }))
 }
 
 /// A clear typed error when the resolved provider's kind does not match the
@@ -405,6 +464,7 @@ async fn plan_models(
     let route = decision.route;
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
+    meta.provider_selection = route.selection;
     crate::metrics::request_routed(route.provider_id);
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
@@ -568,6 +628,7 @@ pub(crate) async fn proxy_chat_completions(
         lint: None,
         prune_event: None,
         pii: PiiPlan::default(),
+        provider_selection: None,
         translate_to: None,
         rate_limit: None,
     };
@@ -630,10 +691,15 @@ pub(crate) async fn proxy_chat_completions(
             Err(resp) => return resp,
         };
         meta.wire_format = downgrade_schema.then_some("json_object");
-        let attempt = provider_request(&state.http_client, attempt_route)
-            .body(body)
-            .send()
-            .await;
+        // ITEM-100: count the dispatch, not the whole stream; the gauge is what
+        // the operator sees while the provider is working.
+        let attempt = {
+            let _in_flight = crate::metrics::provider_started(meta.provider_id);
+            provider_request(&state.http_client, attempt_route)
+                .body(body)
+                .send()
+                .await
+        };
         let is_last = index + 1 == allowed.len();
         match attempt {
             Ok(response) => {
@@ -788,6 +854,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         lint: None,
         prune_event: None,
         pii: PiiPlan::default(),
+        provider_selection: None,
         translate_to: None,
         rate_limit: None,
     };
@@ -813,6 +880,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     let route = decision.route;
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
+    meta.provider_selection = route.selection;
     crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
 
@@ -1036,6 +1104,8 @@ struct RequestMeta {
     rate_limit: Option<(crate::ratelimit::Limits, crate::ratelimit::Usage)>,
     /// ITEM-096: detection and the two redaction modes for this request.
     pii: PiiPlan,
+    /// ITEM-100: why the provider was chosen (`only`, `weight`, `round_robin`).
+    provider_selection: Option<&'static str>,
 }
 
 /// ITEM-096: what the trace path should do with this payload.
@@ -1192,6 +1262,7 @@ fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOutcome) -> Tr
         request_lint: meta.lint.clone(),
         prune_event: meta.prune_event.clone(),
         pii,
+        provider_selection: meta.provider_selection,
         is_local: meta.is_local,
     }
 }

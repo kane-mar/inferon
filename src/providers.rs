@@ -81,6 +81,8 @@ pub struct ResolvedProvider {
     pub base_url: String,
     pub api_key: String,
     pub metadata: ProviderMetadata,
+    /// ITEM-100: the last reachability probe's verdict (None = never probed).
+    pub last_check_ok: Option<bool>,
 }
 
 /// Supported provider kinds. `anthropic` is served on its own Messages surface
@@ -536,6 +538,7 @@ impl ProviderStore for PostgresProviderStore {
                         base_url,
                         api_key,
                         metadata: metadata.0,
+                        last_check_ok: None,
                     },
                 ))
             })
@@ -616,26 +619,32 @@ impl ProviderStore for PostgresProviderStore {
             Some(model) => self.provider_for_model(tenant_id, model).await?,
             None => None,
         };
-        let row: Option<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> =
-            if let Some(id) = chosen_id {
-                sqlx::query_as(
-                    "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
-                     WHERE id = $1 AND tenant_id = $2",
-                )
-                .bind(id)
-                .bind(tenant_id)
-                .fetch_optional(&self.pool)
-                .await?
-            } else {
-                sqlx::query_as(
-                    "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers
-                     WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
-                )
-                .bind(tenant_id)
-                .fetch_optional(&self.pool)
-                .await?
-            };
-        let Some((id, kind, base_url, ciphertext, metadata)) = row else {
+        let row: Option<(
+            Uuid,
+            String,
+            String,
+            String,
+            sqlx::types::Json<ProviderMetadata>,
+            Option<bool>,
+        )> = if let Some(id) = chosen_id {
+            sqlx::query_as(
+                "SELECT id, kind, base_url, key_ciphertext, metadata, last_check_ok FROM providers
+                 WHERE id = $1 AND tenant_id = $2",
+            )
+            .bind(id)
+            .bind(tenant_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as(
+                "SELECT id, kind, base_url, key_ciphertext, metadata, last_check_ok FROM providers
+                 WHERE tenant_id = $1 ORDER BY is_default DESC, created_at LIMIT 1",
+            )
+            .bind(tenant_id)
+            .fetch_optional(&self.pool)
+            .await?
+        };
+        let Some((id, kind, base_url, ciphertext, metadata, last_check_ok)) = row else {
             return Ok(None);
         };
         match secrets.decrypt(&ciphertext) {
@@ -645,6 +654,7 @@ impl ProviderStore for PostgresProviderStore {
                 base_url,
                 api_key,
                 metadata: metadata.0,
+                last_check_ok,
             })),
             None => {
                 tracing::error!(
@@ -663,14 +673,22 @@ impl ProviderStore for PostgresProviderStore {
         let Some(secrets) = self.secrets.as_deref() else {
             return Ok(None);
         };
-        let row: Option<(Uuid, String, String, String, sqlx::types::Json<ProviderMetadata>)> = sqlx::query_as(
-            "SELECT id, kind, base_url, key_ciphertext, metadata FROM providers WHERE id = $1 AND tenant_id = $2",
+        let row: Option<(
+            Uuid,
+            String,
+            String,
+            String,
+            sqlx::types::Json<ProviderMetadata>,
+            Option<bool>,
+        )> = sqlx::query_as(
+            "SELECT id, kind, base_url, key_ciphertext, metadata, last_check_ok FROM providers
+             WHERE id = $1 AND tenant_id = $2",
         )
         .bind(id)
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((id, kind, base_url, ciphertext, metadata)) = row else {
+        let Some((id, kind, base_url, ciphertext, metadata, last_check_ok)) = row else {
             return Ok(None);
         };
         Ok(secrets
@@ -681,6 +699,7 @@ impl ProviderStore for PostgresProviderStore {
                 base_url,
                 api_key,
                 metadata: metadata.0,
+                last_check_ok,
             }))
     }
 }
@@ -876,6 +895,7 @@ impl ProviderStore for InMemoryProviderStore {
                         base_url: row.provider.base_url.clone(),
                         api_key: row.api_key.clone(),
                         metadata: row.provider.metadata.clone(),
+                        last_check_ok: row.provider.last_check_ok,
                     },
                 )
             })
@@ -961,6 +981,7 @@ impl ProviderStore for InMemoryProviderStore {
             base_url: row.provider.base_url.clone(),
             api_key: row.api_key.clone(),
             metadata: row.provider.metadata.clone(),
+            last_check_ok: row.provider.last_check_ok,
         }))
     }
 
@@ -981,6 +1002,7 @@ impl ProviderStore for InMemoryProviderStore {
                 base_url: row.provider.base_url.clone(),
                 api_key: row.api_key.clone(),
                 metadata: row.provider.metadata.clone(),
+                last_check_ok: row.provider.last_check_ok,
             }))
     }
 }

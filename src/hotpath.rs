@@ -117,6 +117,8 @@ pub struct HotPath {
     auth_refreshing: Mutex<std::collections::HashSet<String>>,
     /// The last system-prompt hash per tenant, for the pre-flight repeat check.
     recent_prompts: Mutex<HashMap<Uuid, (String, Instant)>>,
+    /// ITEM-100: per (tenant, model) request counter used as the balance seed.
+    seeds: Mutex<HashMap<(Uuid, String), u64>>,
     counters: Counters,
 }
 
@@ -192,6 +194,7 @@ impl HotPath {
             auth: Mutex::new(HashMap::new()),
             auth_refreshing: Mutex::new(std::collections::HashSet::new()),
             recent_prompts: Mutex::new(HashMap::new()),
+            seeds: Mutex::new(HashMap::new()),
             counters: Counters::default(),
         }
     }
@@ -622,6 +625,20 @@ impl HotPath {
                 ..Default::default()
             },
         }
+    }
+
+    /// ITEM-100: the next seed for this (tenant, model) — consecutive requests
+    /// spread across providers instead of always landing on the same one.
+    pub fn next_seed(&self, tenant_id: Uuid, model: &str) -> u64 {
+        let mut seeds = self
+            .seeds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seed = seeds
+            .entry((tenant_id, model.to_string()))
+            .or_insert(0);
+        *seed = seed.wrapping_add(1);
+        crate::loadbalance::mix(*seed)
     }
 
     /// The guard switch, fail-open (a store error never removes the safety net).

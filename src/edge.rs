@@ -119,6 +119,7 @@ impl EdgeTrace {
                 request_lint: None,
                 prune_event: None,
                 pii: None,
+                provider_selection: None,
         }
     }
 }

@@ -46,6 +46,7 @@ pub mod evolution;
 pub mod guard;
 pub mod hotpath;
 pub mod linter;
+pub mod loadbalance;
 pub mod pii;
 pub mod policy;
 pub mod preflight;

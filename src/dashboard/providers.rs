@@ -268,6 +268,7 @@ pub async fn tenant_provider_probe(
         return crate::json_error(StatusCode::BAD_REQUEST, "invalid_key", "a provider key is required");
     }
     let resolved = crate::providers::ResolvedProvider {
+            last_check_ok: None,
         id: uuid::Uuid::nil(),
         kind,
         base_url,

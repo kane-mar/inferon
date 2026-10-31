@@ -407,6 +407,7 @@ async fn local_models(
     fallback: &[String],
 ) -> Vec<String> {
     let provider = crate::providers::ResolvedProvider {
+        last_check_ok: None,
         id: Uuid::nil(),
         kind: options.provider_kind.clone(),
         base_url: options.provider_url.clone(),

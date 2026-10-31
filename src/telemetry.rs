@@ -35,6 +35,8 @@ pub struct TraceMessage {
     pub prune_event: Option<serde_json::Value>,
     /// ITEM-096: PII counts by class and the modes in force (None = not scanned).
     pub pii: Option<serde_json::Value>,
+    /// ITEM-100: why this provider was chosen (`only`/`weight`/`round_robin`).
+    pub provider_selection: Option<&'static str>,
     pub waste_detected: Option<Value>,
     pub upstream_cost_usd: rust_decimal::Decimal,
     /// ITEM-053: estimated saving vs a no-cache call (the provider's prompt
@@ -145,8 +147,8 @@ const TRACE_INSERT: &str = r#"INSERT INTO traces (
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
                     proxy_ms, proxy_us,
                     example_state, example_reason, completion_hash, session_id,
-                    request_lint, prune_event, pii
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)"#;
+                    request_lint, prune_event, pii, provider_selection
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)"#;
 
 #[async_trait::async_trait]
 impl TraceSink for PostgresTraceSink {
@@ -200,6 +202,7 @@ impl TraceSink for PostgresTraceSink {
                 .bind(msg.request_lint.as_ref().map(Json))
                 .bind(msg.prune_event.as_ref().map(Json))
                 .bind(msg.pii.as_ref().map(Json))
+                .bind(msg.provider_selection)
                 .execute(&mut *tx)
                 .await;
             if let Err(e) = result {

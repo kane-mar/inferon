@@ -42,6 +42,7 @@ fn trace(completion: Option<Value>, outcome: Outcome) -> TraceMessage {
         request_lint: None,
         prune_event: None,
         pii: None,
+        provider_selection: None,
     }
 }
 

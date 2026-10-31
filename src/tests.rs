@@ -1113,29 +1113,58 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         store.record_models(b, &["shared-model".to_string()]).await.unwrap();
         let state = route_state(store.clone());
 
-        // Without weights, the default (first-inserted) provider wins.
-        let plain = resolve_route(&state, &tenant, Some("shared-model"), Surface::OpenAi, None)
-            .await
-            .unwrap();
-        assert_eq!(plain.provider_id, Some(a), "default ordering");
+        // ITEM-100: with two healthy providers the load is spread, not pinned
+        // to one. Equal weights mean both are used.
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..8 {
+            let route = resolve_route(&state, &tenant, Some("shared-model"), Surface::OpenAi, None)
+                .await
+                .unwrap();
+            assert_eq!(route.selection, Some("weight"));
+            seen.insert(route.provider_id);
+        }
+        assert_eq!(seen.len(), 2, "both providers serve some traffic");
 
-        // A weight that demotes `a` promotes `b`.
+        // A weight that demotes `a` makes `b` win most requests, not all of
+        // them — demotion, not elimination.
         let weights: std::collections::BTreeMap<String, f64> =
             [(a.to_string(), 0.1), (b.to_string(), 1.0)].into_iter().collect();
-        let weighted = resolve_route(
-            &state,
-            &tenant,
-            Some("shared-model"),
-            Surface::OpenAi,
-            Some(&weights),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            weighted.url, "https://b.test/v1/chat/completions",
-            "the healthier provider wins"
-        );
-        assert_eq!(weighted.provider_id, Some(b));
+        let mut b_count = 0;
+        let mut a_count = 0;
+        for _ in 0..100 {
+            let route = resolve_route(
+                &state,
+                &tenant,
+                Some("shared-model"),
+                Surface::OpenAi,
+                Some(&weights),
+            )
+            .await
+            .unwrap();
+            if route.provider_id == Some(b) {
+                b_count += 1;
+            } else {
+                a_count += 1;
+            }
+        }
+        assert!(b_count > 80, "the healthier provider gets most of the load: {b_count}/100");
+        assert!(a_count > 0, "a demoted provider still serves: {a_count}/100");
+
+        // A zeroed weight is skipped entirely (the policy's kill switch).
+        let zeroed: std::collections::BTreeMap<String, f64> =
+            [(a.to_string(), 0.0), (b.to_string(), 1.0)].into_iter().collect();
+        for _ in 0..10 {
+            let route = resolve_route(
+                &state,
+                &tenant,
+                Some("shared-model"),
+                Surface::OpenAi,
+                Some(&zeroed),
+            )
+            .await
+            .unwrap();
+            assert_eq!(route.provider_id, Some(b), "a zeroed provider is never chosen");
+        }
     }
 
     #[tokio::test]
@@ -1402,6 +1431,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 request_lint: None,
                 prune_event: None,
                 pii: None,
+                provider_selection: None,
         }
     }
 

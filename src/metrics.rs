@@ -42,6 +42,48 @@ pub fn request_routed(provider_id: Option<Uuid>) {
     *map.entry(provider_id).or_insert(0) += 1;
 }
 
+/// Outstanding dispatches per provider (ITEM-100 AC2).
+static IN_FLIGHT_BY_PROVIDER: OnceLock<Mutex<HashMap<Option<Uuid>, i64>>> = OnceLock::new();
+
+fn in_flight_by_provider() -> &'static Mutex<HashMap<Option<Uuid>, i64>> {
+    IN_FLIGHT_BY_PROVIDER.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A guard for one provider dispatch; dropping it decrements the gauge.
+pub struct ProviderGuard(Option<Uuid>);
+
+impl Drop for ProviderGuard {
+    fn drop(&mut self) {
+        let mut map = in_flight_by_provider()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(count) = map.get_mut(&self.0) {
+            *count = (*count - 1).max(0);
+        }
+    }
+}
+
+/// Record a dispatch to `provider_id`; hold the guard until it is answered.
+pub fn provider_started(provider_id: Option<Uuid>) -> ProviderGuard {
+    let mut map = in_flight_by_provider()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *map.entry(provider_id).or_insert(0) += 1;
+    ProviderGuard(provider_id)
+}
+
+fn in_flight_json() -> serde_json::Value {
+    let map = in_flight_by_provider()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut object = serde_json::Map::new();
+    for (provider, count) in map.iter() {
+        let key = provider.map(|id| id.to_string()).unwrap_or_else(|| "shared".to_string());
+        object.insert(key, serde_json::json!(count));
+    }
+    serde_json::Value::Object(object)
+}
+
 fn routed_json() -> serde_json::Value {
     let map = routed_by_provider()
         .lock()
@@ -150,6 +192,7 @@ pub fn snapshot() -> serde_json::Value {
         "requests_per_minute": requests_per_minute(now),
         "in_flight": IN_FLIGHT.load(Ordering::Relaxed),
         "requests_by_provider": routed_json(),
+        "in_flight_by_provider": in_flight_json(),
         "last_flush_age_ms": last_flush_age_ms,
     })
 }

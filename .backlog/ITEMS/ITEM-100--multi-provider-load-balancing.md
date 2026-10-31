@@ -32,3 +32,23 @@ not share load — the second is only used when the first fails.
   (ITEM-092).
 
 **Ranking note.** Rank **14** of 22 · V2/E2 — health weights already cover the failure case; distribution is convenience.
+---
+
+**Delivered (2026-10-31).** `src/loadbalance.rs`: `choose(candidates, seed,
+strategy)` — eligible candidates are those with a positive, finite weight (so a
+policy-zeroed provider is skipped and an unreachable one is filtered before the
+call), one candidate returns `Reason::Only` (the old behaviour), otherwise
+weighted or round-robin. Weights are expanded to thousandths so the choice is
+integer maths, and `mix` (splitmix64) spreads the per-request counter — a bare
+increment would sit inside the first weight bucket for a thousand requests.
+
+Wiring: `resolve_route` asks `balance_across_providers` first; it resolves each
+provider, drops the ones whose reachability probe failed, builds the weights
+from the active policy and picks. `Route.selection` is recorded on
+`traces.provider_selection`, and `metrics::provider_started` holds a per-provider
+in-flight gauge exposed on the operator metrics.
+
+**Verified**: 10 unit tests (single/zeroed/round-robin/weighted distribution,
+determinism, the mix, shares) + the updated route test: equal weights use both
+providers, a 0.1 vs 1.0 weight still serves both but the healthy one takes >80%,
+and a 0.0 weight is never chosen.
