@@ -55,5 +55,10 @@ the completion is added when the trace is written; a request is rejected on what
 the client can act on before spending anything.
 
 Verified: 7 unit tests (boundaries, axes, Retry-After, estimate) + a response
-test for the 429 headers. Live: `X-RateLimit-*` on a successful call, 429 with
-`Retry-After` past a configured cap.
+test for the 429 headers. **Live 2026-10-31 05:30Z** (rpm=3 on the real
+developer key): requests 2–4 carried `x-ratelimit-limit: 3` /
+`x-ratelimit-remaining: 0`; the next requests were `429` with
+`retry-after: 11`, `x-ratelimit-limit: 3`, `x-ratelimit-reset: 11` and body
+`{"error":{"type":"rate_limited","message":"requests per minute exceeded for this key"}}`;
+`api_key_usage` showed the atomic window (`requests=6` after 3 allowed + 3
+rejected). Limit reset to 0 → 200 again, no headers.

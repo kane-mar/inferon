@@ -56,7 +56,19 @@ ITEM-064 surface rather than a second config mechanism. The hot path reads it on
 with the rest of the policy, applies it after routing, and records the event on
 the trace; a rewrite failure or an already-minimal payload forwards the original.
 
-Verified: 12 unit tests (rules, protection, budget order, holdout distribution,
-event pricing, kill-switch decision) + 2 handler tests (rewritten trace vs
-held-out control). Not yet enabled for a tenant: the item's own gate was ITEM-090
-evidence, which only starts accumulating now.
+Verified: 13 unit tests (rules, protection, budget order, holdout distribution,
+event pricing, kill-switch decision, policy composition) + 4 handler tests
+(rewritten trace, held-out control, schema-contract request untouched,
+config-flag kill switch). Not yet enabled for a tenant: the item's own gate was
+ITEM-090 evidence, which only starts accumulating now.
+
+**Enablement (added 2026-10-31).** `POST /v1/dashboard/api/prune` (owner session)
+publishes `{enabled, drop_duplicate_turns, max_prompt_tokens, holdout_percent}` as
+a new `tenant_policies` version, preserving the router threshold/weights and
+recording the replaced version in the evidence; `GET /v1/dashboard/api/config`
+returns the active `prune`. Opting out publishes `enabled: false` (history kept),
+and the operator freeze/rollback endpoints work unchanged.
+
+**Two safety rules worth knowing when choosing a policy:** holdout is clamped at
+50%, and a request carrying a JSON-schema contract is never rewritten (the guard
+validates that answer, so its input is left as written).
