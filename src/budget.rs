@@ -283,7 +283,7 @@ impl BudgetStore for PostgresBudgetStore {
                     COALESCE(tpm_limit, 0),
                     COALESCE(pii_detection, TRUE),
                     COALESCE(pii_redact_storage, FALSE),
-                    COALESCE(pii_redact_wire, FALSE),
+                    COALESCE(pii_redact_wire, FALSE)
              FROM tenant_configurations WHERE tenant_id = $1",
         )
         .bind(tenant_id)

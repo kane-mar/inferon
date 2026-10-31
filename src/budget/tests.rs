@@ -251,3 +251,23 @@ fn the_retention_window_is_as_wide_as_the_i64_it_decodes_into() {
         "the column must be BIGINT to decode into i64"
     );
 }
+
+#[test]
+fn no_config_query_has_a_trailing_comma_before_from() {
+    // Two config SELECTs grew a column list; a trailing comma before FROM is a
+    // syntax error that only Postgres could see (2026-10-31 deploy smoke caught
+    // it after the fact — this catches it in the suite instead).
+    for (name, source) in [
+        ("budget.rs", include_str!("../budget.rs")),
+        ("edge.rs", include_str!("../edge.rs")),
+    ] {
+        let bad: Vec<&str> = source
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|pair| pair[0].trim_end().ends_with(',') && pair[1].trim_start().starts_with("FROM"))
+            .map(|pair| pair[0].trim())
+            .collect();
+        assert!(bad.is_empty(), "{name}: trailing comma before FROM in {bad:?}");
+    }
+}
