@@ -13,9 +13,9 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
 Single list, ordered by value then effort; a delivered row keeps the rank it
-held, so the five undelivered items (096, 098, 100, 097, 099) sit in place among
-them and the six **gated** items sit at the bottom of the list. Delivered history
-follows them.
+held. **Every pullable item is now delivered** (089–100, 101); what remains is
+the six **gated** items at the bottom of the list, each waiting on infrastructure
+or on traffic that does not exist yet. Delivered history follows them.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
@@ -83,11 +83,21 @@ follows them.
 | ITEM-101 | Trace insert regression + schema-width guard | bug | **done (2026-10-31)** — the ITEM-085 build listed `raw_completion_capped` twice in the trace INSERT (and had one placeholder short), so **every** trace insert failed and the batch rolled back; ITEM-088's `payload_retention_days` was `INTEGER` while the store decodes `i64`, so the hot path answered `500 budget_store_error` for every request from 2026-10-30 11:14Z. Fixed, plus unit guards that read the statement as data: no duplicate column, one placeholder per column, every column exists in `db/init`, and the retention column is `BIGINT`. Live: 200 + a persisted trace |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 
-_Last updated: 2026-10-31 (089, 090, 091, 094, 095 delivered; 101 fixed)_ — **next pull is ITEM-096** (PII
-detection), then 098 → 100 → 097 → 099. ITEM-092's remaining work (per-stage
-timing, cache kill switch) is small enough to pick up alongside any of them.
-ITEM-091 is implemented but **not enabled for any tenant**: its gate was
-ITEM-090 evidence, which started accumulating today.
+_Last updated: 2026-10-31 — the pullable backlog is empty._ 085–100 and 101 are
+delivered, live-verified where live was possible. What is left cannot be pulled:
+
+- **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.
+- **029** (task centroids) was gated on task traffic for centroid building, and
+  **ITEM-089 now supplies the vectors** — this is the one gate that moved today;
+  it is worth re-checking before the next planning pass.
+- **030 / 072** follow 029.
+- **084** (connector) stays conditional on a customer refusing both hosted
+  options.
+
+Small remainders worth folding into the next item: ITEM-092's per-stage timing
+breakdown and cache kill switch; ITEM-091 is implemented but **not enabled for
+any tenant** (its gate was ITEM-090 evidence, which only started accumulating
+today); the prompt registry and eval surfaces are API-only (no dashboard UI).
 
 Ordering rule for the undelivered items: **value first, effort as the
 tie-breaker**, dependencies overriding both (087 cannot precede 086/088; 090 needs
