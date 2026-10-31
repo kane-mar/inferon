@@ -137,8 +137,9 @@ pub async fn performance(
     let pruning: (i64, i64, Decimal, i64, i64, i64, i64) = stored(sqlx::query_as(
         "SELECT
            COUNT(*) FILTER (WHERE NOT held_out),
+           -- SUM(bigint) is numeric in Postgres; cast so it decodes as i64.
            COALESCE(SUM((prune_event->>'tokens_saved_est')::bigint)
-                    FILTER (WHERE NOT held_out), 0),
+                    FILTER (WHERE NOT held_out), 0)::bigint,
            COALESCE(SUM((prune_event->>'usd_saved_est')::numeric)
                     FILTER (WHERE NOT held_out), 0),
            COUNT(*) FILTER (WHERE NOT held_out AND outcome = 'ok'),
@@ -221,7 +222,8 @@ pub async fn performance(
             "SELECT COUNT(*) FILTER (WHERE pii IS NOT NULL),
                     COUNT(*) FILTER (WHERE pii->>'storage' = 'redacted'),
                     COUNT(*) FILTER (WHERE pii->>'wire' = 'redacted'),
-                    COALESCE(SUM((pii->>'total')::bigint) FILTER (WHERE pii IS NOT NULL), 0)
+                    COALESCE(SUM((pii->>'total')::bigint)
+                             FILTER (WHERE pii IS NOT NULL), 0)::bigint
              FROM traces
              WHERE tenant_id = $1
                AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
@@ -231,7 +233,7 @@ pub async fn performance(
         .fetch_one(&state.db)
         .await)?;
     let pii_by_class: Vec<(String, i64)> = stored(sqlx::query_as(
-        "SELECT class, SUM(count)
+        "SELECT class, SUM(found.count::bigint)::bigint
          FROM traces, jsonb_each_text(pii->'classes') AS found(class, count)
          WHERE tenant_id = $1
            AND created_at >= NOW() - ($2 * INTERVAL '1 day')
