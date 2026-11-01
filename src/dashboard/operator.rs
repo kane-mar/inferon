@@ -69,6 +69,8 @@ pub async fn operator_metrics(
         let depth = capacity.saturating_sub(state.telemetry_tx.capacity());
         object.insert("telemetry_queue_depth".to_string(), json!(depth));
         object.insert("telemetry_queue_capacity".to_string(), json!(capacity));
+        // ITEM-092 AC3: cache hits/misses and how stale a hit can be.
+        object.insert("hot_path_cache".to_string(), cache_json(state.hotpath.stats()));
     }
     json_ok(value)
 }

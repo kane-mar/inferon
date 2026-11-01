@@ -349,7 +349,7 @@ pub async fn performance(
     })))
 }
 
-fn cache_json(stats: crate::hotpath::CacheStats) -> Value {
+pub(crate) fn cache_json(stats: crate::hotpath::CacheStats) -> Value {
     let count = |count: crate::hotpath::CacheCount| {
         json!({
             "hits": count.hits,
