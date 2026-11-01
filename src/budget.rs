@@ -145,7 +145,8 @@ pub(crate) const CONFIG_SELECT: &str = "SELECT budget_limit_cents AS limit_cents
                 COALESCE(pii_detection, TRUE) AS pii_detection,
                 COALESCE(pii_redact_storage, FALSE) AS pii_redact_storage,
                 COALESCE(pii_redact_wire, FALSE) AS pii_redact_wire
-         FROM tenant_configurations";
+         FROM tenant_configurations
+         WHERE tenant_id = $1";
 
 // Decoded by column *name*, not position: the whole point of the struct.
 impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ConfigRow {

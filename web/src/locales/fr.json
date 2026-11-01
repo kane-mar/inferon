@@ -69,7 +69,6 @@
     "keys": "Clés API",
     "members": "Membres",
     "operator": "Opérateur",
-    "reports": "Rapports",
     "settings": "Paramètres",
     "spend": "Dépenses",
     "audit": "Audit de coûts",
@@ -388,20 +387,6 @@
     "retention_help": "Les charges utiles plus anciennes sont purgées périodiquement ; 0 les conserve indéfiniment.",
     "lint": "Analyse de la charge utile",
     "lint_help": "Contrôles indicatifs avant l’envoi : ils ne modifient jamais la requête, ils signalent seulement ce qui semble gaspiller des tokens et le chiffrent. Choisissez ceux que vous voulez."
-  },
-  "ReportsPage": {
-    "title_bar": "Rapports",
-    "title_bar_description": "Le détail derrière le tableau de bord : où va l'argent, ce qui fuit, et comment les réponses se comportent.",
-    "spend_title": "Dépenses",
-    "spend_body": "Chaque dollar par modèle, fournisseur, clé d'API et prompt système — avec les taux de cache.",
-    "quality_title": "Qualité",
-    "quality_body": "Résultats, classes d'erreur, troncatures et pouces : ce que vous avez payé sans résultat.",
-    "audit_title": "Audit de coûts",
-    "audit_body": "Les six constats de coût nommés, calculés à partir de votre trafic et actualisés en direct.",
-    "performance_title": "Performance",
-    "performance_body": "Ce que le proxy ajoute lui-même face à son contrat du sous-milliseconde, le cache derrière, et où passe le temps.",
-    "datasets_title": "Jeux de données",
-    "datasets_body": "Les exemples vérifiés produits par votre trafic, par prompt et par modèle — avec le téléchargement JSONL et les raisons des exclusions."
   },
   "SettingsPage": {
     "title_bar": "Paramètres",

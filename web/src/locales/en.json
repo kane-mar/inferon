@@ -69,7 +69,6 @@
     "keys": "API keys",
     "members": "Members",
     "operator": "Operator",
-    "reports": "Reports",
     "settings": "Settings",
     "spend": "Spend",
     "audit": "Cost audit",
@@ -388,20 +387,6 @@
     "retention_help": "Older payloads are purged by a periodic pass; 0 keeps them indefinitely.",
     "lint": "Payload lint",
     "lint_help": "Advisory checks before dispatch: they never change the request, they only record what looks wasteful and price it. Choose which ones you want."
-  },
-  "ReportsPage": {
-    "title_bar": "Reports",
-    "title_bar_description": "The detail behind the dashboard: where the money goes, what is leaking, and how the responses behave.",
-    "spend_title": "Spend",
-    "spend_body": "Every dollar by model, provider, API key and system prompt — with cache hit rates.",
-    "quality_title": "Quality",
-    "quality_body": "Outcomes, error classes, truncation and thumbs: what you paid for that did not work.",
-    "audit_title": "Cost audit",
-    "audit_body": "The six named cost findings computed from your traffic, refreshed live.",
-    "performance_title": "Performance",
-    "performance_body": "What the proxy itself adds against its sub-millisecond contract, the cache behind it, and where the time goes.",
-    "datasets_title": "Datasets",
-    "datasets_body": "The verified examples your traffic produced, per prompt and model — with the JSONL download and the reasons the rest did not qualify."
   },
   "SettingsPage": {
     "title_bar": "Settings",

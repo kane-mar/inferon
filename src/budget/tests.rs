@@ -315,3 +315,27 @@ fn no_config_query_has_a_trailing_comma_before_from() {
         assert!(bad.is_empty(), "{name}: trailing comma before FROM in {bad:?}");
     }
 }
+
+#[test]
+fn the_config_select_is_scoped_to_one_tenant() {
+    // The shared select had lost its WHERE during a refactor: every config read
+    // took the first row of the table, so the hot path served *another tenant's*
+    // switches (lint rules, guard, capture, limits). No type error, no test
+    // failure — only wrong behaviour. This is the guard.
+    let select = crate::budget::CONFIG_SELECT;
+    assert!(
+        select.contains("WHERE tenant_id = $1"),
+        "CONFIG_SELECT must filter by tenant:\n{select}"
+    );
+    assert_eq!(
+        select.matches("WHERE").count(),
+        1,
+        "one filter, or an OR/AND could widen it again"
+    );
+    // `budget_for` and the edge config sync each bind exactly one value.
+    assert_eq!(
+        select.matches("$").count(),
+        1,
+        "the query takes one parameter, which is what the callers bind"
+    );
+}
