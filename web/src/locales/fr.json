@@ -498,7 +498,7 @@
     "hits": "Succès",
     "misses": "Échecs",
     "hit_rate": "Taux de succès",
-    "cache_tail": "{invalidations} invalidations · {tenants} tenants en cache",
+    "cache_tail": "{invalidations} invalidation(s) · {tenants} locataire(s) en cache · instantané le plus ancien {age}",
     "by_model": "Par modèle",
     "model": "Modèle",
     "requests": "Requêtes",

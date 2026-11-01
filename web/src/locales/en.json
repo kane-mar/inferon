@@ -498,7 +498,7 @@
     "hits": "Hits",
     "misses": "Misses",
     "hit_rate": "Hit rate",
-    "cache_tail": "{invalidations} invalidations · {tenants} tenants cached",
+    "cache_tail": "{invalidations} invalidation(s) · {tenants} tenant(s) cached · oldest snapshot {age}",
     "by_model": "By model",
     "model": "Model",
     "requests": "Requests",

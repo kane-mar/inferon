@@ -348,6 +348,7 @@ fn cache_json(stats: crate::hotpath::CacheStats) -> Value {
         "spend": count(stats.spend),
         "invalidations": stats.invalidations,
         "tenants": stats.tenants,
+        "oldest_age_ms": stats.oldest_age_ms,
     })
 }
 

@@ -165,6 +165,10 @@ pub struct CacheStats {
     pub spend: CacheCount,
     pub invalidations: u64,
     pub tenants: usize,
+    /// Age of the oldest cached tenant snapshot, in ms — how stale the data a
+    /// warm request is served can be. `None` with nothing cached (or the cache
+    /// off), because there is no age to report.
+    pub oldest_age_ms: Option<u64>,
 }
 
 impl Default for HotPath {
@@ -220,6 +224,22 @@ impl HotPath {
             hits: hits.load(Ordering::Relaxed),
             misses: misses.load(Ordering::Relaxed),
         };
+        let tenants = self
+            .tenants
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // The oldest snapshot, not the newest: it bounds how stale the answer to
+        // a warm request can be.
+        let oldest_age_ms = tenants
+            .values()
+            .filter_map(|entry| {
+                entry
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .refreshed
+            })
+            .map(|refreshed| refreshed.elapsed().as_millis() as u64)
+            .max();
         CacheStats {
             auth: count(&self.counters.auth_hits, &self.counters.auth_misses),
             config: count(&self.counters.config_hits, &self.counters.config_misses),
@@ -227,11 +247,8 @@ impl HotPath {
             warm: count(&self.counters.warm_hits, &self.counters.warm_misses),
             spend: count(&self.counters.spend_hits, &self.counters.spend_misses),
             invalidations: self.counters.invalidations.load(Ordering::Relaxed),
-            tenants: self
-                .tenants
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .len(),
+            tenants: tenants.len(),
+            oldest_age_ms,
         }
     }
 

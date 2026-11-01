@@ -322,11 +322,13 @@ pub(super) async fn plan_models(
     tenant: &Tenant,
     meta: &mut RequestMeta,
     started: Instant,
+    stages: &mut crate::stages::Stages,
 ) -> Result<ModelPlan, Response> {
     let tenant_id = tenant.id;
     // ITEM-064/069: read the adaptive policy once — it supplies both the router
     // threshold and the provider health weights.
     let policy = state.hotpath.policy(state, tenant_id).await;
+    stages.mark("policy");
     meta.policy_version = policy.as_ref().map(|policy| policy.version);
     let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
     let decision = state
@@ -337,6 +339,7 @@ pub(super) async fn plan_models(
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
     meta.provider_selection = route.selection;
+    stages.mark("route");
     crate::metrics::request_routed(route.provider_id);
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
@@ -355,12 +358,14 @@ pub(super) async fn plan_models(
             return Err(resp);
         }
     };
+    stages.mark("budget");
     let primary = override_primary(state, route.provider_id, meta, chosen).await;
     // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
     let primary = prefer_warm(state, tenant_id, meta, primary).await;
     let fallbacks = state.hotpath.fallbacks(state, tenant_id).await;
     let chain =
         build_model_chain(state, tenant, &route, primary.clone(), fallbacks, policy_weights).await;
+    stages.mark("chain");
     Ok(ModelPlan {
         route,
         primary,

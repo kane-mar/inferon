@@ -75,6 +75,7 @@ pub mod metrics;
 pub mod secret;
 pub mod session;
 pub mod sse;
+pub mod stages;
 // Smoke-stack mocks (same binary).
 pub mod mock_github;
 pub mod mock_upstream;

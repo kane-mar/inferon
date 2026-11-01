@@ -157,6 +157,8 @@ export type PerformanceCache = {
   spend: PerformanceCacheCount;
   invalidations: number;
   tenants: number;
+  /** ITEM-092: age of the oldest cached snapshot — how stale a hit can be. */
+  oldest_age_ms: number | null;
 };
 
 export type PerformanceModelRow = {

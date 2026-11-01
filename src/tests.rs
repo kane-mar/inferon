@@ -4179,3 +4179,29 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         let msg = rx.recv().await.expect("trace");
         assert!(msg.request_lint.is_none(), "and records nothing");
     }
+
+    #[tokio::test]
+    async fn the_cache_reports_the_age_of_its_oldest_snapshot() {
+        // ITEM-092 AC3: hits/misses are not enough — an operator needs to see how
+        // old the data being served is, or a "cached" hit rate says nothing about
+        // staleness.
+        let state = hot_path_state(
+            std::sync::Arc::new(budget::InMemoryBudgetStore::default()),
+            crate::hotpath::HotPath::new(),
+        );
+        let tenant_id = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+
+        assert_eq!(
+            state.hotpath.stats().oldest_age_ms,
+            None,
+            "nothing cached yet: no age to report"
+        );
+
+        state.hotpath.budget(&state, tenant_id).await.unwrap();
+        let fresh = state.hotpath.stats().oldest_age_ms.expect("an age");
+        assert!(fresh < 1_000, "just cached, so it is young: {fresh} ms");
+
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        let aged = state.hotpath.stats().oldest_age_ms.expect("an age");
+        assert!(aged >= 100, "the snapshot aged: {aged} ms");
+    }

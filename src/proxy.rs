@@ -154,6 +154,7 @@ pub(crate) async fn proxy_chat_completions(
     // One clock for the whole request: `started` is both the trace's duration
     // basis and the split point for the proxy's own pre-upstream time.
     let started = Instant::now();
+    let mut stages = crate::stages::Stages::new();
     let tenant = match authenticate(&state, req.headers()).await {
         Ok(Some(tenant)) => tenant,
         Ok(None) => {
@@ -173,9 +174,9 @@ pub(crate) async fn proxy_chat_completions(
         }
     };
     let tenant_id = tenant.id;
-    // ITEM-092: stage timing at debug level — auth, then planning (config, route,
-    // budget/router), then the total pre-dispatch overhead set below.
-    let auth_us = started.elapsed().as_micros() as i64;
+    // ITEM-092: named stage timing, logged at debug level — a regression says
+    // which stage, not just "the proxy got slower".
+    stages.mark("auth");
     let session_id = crate::session::parse_id(
         req.headers()
             .get(crate::session::SESSION_ID_HEADER)
@@ -186,6 +187,7 @@ pub(crate) async fn proxy_chat_completions(
         Ok(parsed) => parsed,
         Err(resp) => return resp,
     };
+    stages.mark("body");
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     // The router/budget override is decided per request in `plan_models` below,
     // against the tenant's config (ITEM-045/046).
@@ -230,13 +232,12 @@ pub(crate) async fn proxy_chat_completions(
         );
         return resp;
     }
-    let plan_started = Instant::now();
     let ModelPlan {
         route,
         primary,
         chain: allowed,
         prune,
-    } = match plan_models(&state, &tenant, &mut meta, started).await {
+    } = match plan_models(&state, &tenant, &mut meta, started, &mut stages).await {
         Ok(plan) => plan,
         Err(resp) => return resp,
     };
@@ -251,11 +252,11 @@ pub(crate) async fn proxy_chat_completions(
     let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
     // dispatch (a subset of the trace's total duration).
+    stages.mark("prune");
     meta.proxy_ms = Some(started.elapsed().as_millis() as i64);
     meta.proxy_us = Some(started.elapsed().as_micros() as i64);
     tracing::debug!(
-        auth_us,
-        plan_us = plan_started.elapsed().as_micros() as i64,
+        stages = %stages.summary(),
         pre_dispatch_us = meta.proxy_us.unwrap_or_default(),
         "hot-path stages"
     );

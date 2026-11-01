@@ -136,3 +136,20 @@ stale snapshot and refresh it **off the request path** (stale-while-revalidate)
 for config and spend, keep routes until an explicit invalidation, and key routes
 by policy version. Then widen the TTLs — the invalidation, not the TTL, is what
 makes writes immediate.
+
+---
+
+## Closed (2026-11-01) — every acceptance criterion
+
+| AC | Where |
+|---|---|
+| 1 — one cached config snapshot, TTL ≤5 s, invalidated on write, spend fresh | `hotpath::TenantEntry` (`budget`, `policy`, `fallbacks`), `Ttls::config` 30 s with explicit `invalidate()` on every dashboard write; spend has its own 5 s entry and is filled into the snapshot at read time |
+| 2 — route cached per `(tenant, model)`, same invalidation | `TenantEntry::routes`, dropped on write and whenever the policy version changes |
+| 3 — config visible within the TTL (test); hits/misses **and age** on the operator metrics | `a_warm_request_does_not_read_tenant_config_per_request`, `the_cached_snapshot_is_served_stale_then_refreshed`, and the new `the_cache_reports_the_age_of_its_oldest_snapshot`; `CacheStats::oldest_age_ms` is on `/api/performance` → `cache.oldest_age_ms` and on the page's cache card |
+| 4 — a benchmark asserts the budget and prints the number, hardware documented | `proxy_overhead_is_sub_millisecond_for_small_requests` (60 warmed requests) and `scripts/perf-check.sh` on the deploy host (prints p50/p95; 1 vCPU, 1 GB Vultr instance) |
+| 5 — `proxy_ms` plus per-stage timing at debug | `proxy_us`/`proxy_ms` on the trace, plus `stages::Stages` — named marks (`auth`, `body`, `policy`, `route`, `budget`, `chain`, `prune`) summarised in one debug line; a source-scan test fails if a stage stops being marked |
+| 6 — unchanged when cold or disabled | `the_cache_kill_switch_bypasses_every_read` (`HOTPATH_CACHE=off` → every read hits the store); a cold cache is the first-request path, covered by the same tests |
+
+**Known, and stated rather than hidden:** the first request after an idle period
+pays the config load (~14 ms measured on the real tenant). The contract says
+"warm", and defines warm as within the TTLs.

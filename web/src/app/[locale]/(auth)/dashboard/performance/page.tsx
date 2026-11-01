@@ -462,6 +462,9 @@ export default async function PerformancePage(props: {
               {t('cache_tail', {
                 invalidations: integer(cache.invalidations),
                 tenants: integer(cache.tenants),
+                age: cache.oldest_age_ms == null
+                  ? '—'
+                  : `${integer(Math.round(cache.oldest_age_ms / 1000))}s`,
               })}
             </p>
           </Card>
