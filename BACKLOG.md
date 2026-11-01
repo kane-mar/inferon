@@ -13,9 +13,10 @@ Project decisions that shape this backlog (see `wiki/llm-inference/inferon-proje
 ## Backlog (single-ranked — small, fine-grained work at the top; larger, chunkier work below)
 
 Single list, ordered by value then effort; a delivered row keeps the rank it
-held. **Every pullable item is now delivered** (089–100, 101); what remains is
-the six **gated** items at the bottom of the list, each waiting on infrastructure
-or on traffic that does not exist yet. Delivered history follows them.
+held. 085–101 are delivered. **One pullable item remains (102** — the missing
+dashboard surfaces); the six **gated** items sit at the bottom, and ITEM-029's
+gate moved today because ITEM-089 builds the centroids it was waiting for.
+Delivered history follows them.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
@@ -23,7 +24,7 @@ or on traffic that does not exist yet. Delivered history follows them.
 | ITEM-086 | Verified-example curation and per-prompt counts | feature | **done (2026-10-30)** — claim: "we have captured 2,000 verified examples". No qualification, dedupe or count exists. Qualify on outcome ok + complete + not thumbed down + guard-valid where a schema applies; exact dedupe; counts/spend per `(prompt_hash, model)` with exclusion reasons |
 | ITEM-088 | Retention and consent for captured payloads | feature | **done (2026-10-30)** — the flywheel assumes "store everything"; today every trace keeps `raw_prompt` with no switch, window or purge. Per-tenant capture switch, 30d default retention, audited purge; gates 087 |
 | ITEM-087 | Dataset surface and JSONL export | feature | **done (2026-10-30)** — claim: "click here to download the JSONL". No export exists. Cluster list with spend/examples/savings, streamed audited OpenAI-shape JSONL with provenance, refuses without consent (088) |
-| ITEM-092 | Hot-path config cache and latency budget | improvement | **done — core (2026-10-30)** — claim: "sub-millisecond wire latency". Delivered: `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate and background refresh (sparse traffic no longer pays a cold TTL miss), a **warm p50 87 µs** deploy gate over 40 requests, cache counters, and `/dashboard/performance`. Remaining (small, tracked in the item file): per-stage timing breakdown and a cache kill switch |
+| ITEM-092 | Hot-path config cache and latency budget | improvement | **done (2026-10-30)** — claim: "sub-millisecond wire latency". `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate and background refresh, a **warm p50 87 µs** deploy gate over 40 requests, cache hit/miss/invalidation counters, per-stage timing at debug, the `HOTPATH_CACHE=off` kill switch, and `/dashboard/performance`. Live: p50 84–89 µs |
 | ITEM-093 | Conversation and transaction grouping | feature | **done (2026-10-30)** — claim: agentic loops are "10–20 calls per transaction". Traces are per request. `X-Inferon-Session-Id` + per-session cost/turns/savings read model; optional multi-turn dataset grouping |
 | ITEM-090 | In-flight payload lint (advisory) | feature | **done (2026-10-31)** — claim: "in-flight linting … redundant prompts, schema bloat, boilerplate". Pre-dispatch pass (`preflight`) flags a repeated system prompt (hot-path history, 10 min), an oversized tool schema, boilerplate and duplicate turns; the finding is priced by the cost engine, recorded on `traces.request_lint`, returned as `X-Inferon-Lint`, shown on `/dashboard/performance`, kill-switchable per tenant (`tenant_configurations.lint_enabled`) and dismissible as a false positive (`POST /v1/lint/dismiss`). Advisory: the payload is forwarded unchanged |
 | ITEM-089 | Semantic task signatures for grouping | feature | **done (2026-10-31)** — claim: "grouped by task signature". `signatures::run_pass` (every 5 min, 50 prompts/pass, off the hot path) embeds the system prompt — or the first user turn — with the same ONNX artifact the router uses, clusters at a documented cosine 0.92 and labels each prompt with its cluster representative's hash, so clusters keep their identity as traffic grows. Vectors are stored once per prompt in `task_signatures` (re-cluster never re-embeds; ITEM-029 can read the same pipeline); `traces.task_cluster`/`task_cluster_source` carry the label; datasets group by cluster or by exact hash and export by either; `NoEmbedder` and capture-off traffic degrade to the hash label with no empty page. 10 unit tests incl. a synthetic paraphrase corpus |
@@ -35,9 +36,10 @@ or on traffic that does not exist yet. Delivered history follows them.
 | ITEM-100 | Multi-provider load balancing | feature | **done (2026-10-31)** — LiteLLM parity. When several healthy providers serve a model, requests are spread across them, weighted by the adaptive policy's health weights: a demoted provider gets less (not nothing), a zeroed or unreachable one is skipped, and a single-provider model is the old behaviour exactly (`selection = only`). The pick is a pure seeded function (`loadbalance::choose` + a splitmix of the per-(tenant, model) counter, so consecutive requests land in unrelated buckets), `traces.provider_selection` records `only`/`weight`/`round_robin`, and `/operator/metrics` now reports per-provider in-flight dispatches alongside routed counts |
 | ITEM-097 | Prompt registry and versioning | feature | **done (2026-10-31)** — Langfuse parity. `POST /api/prompts/labels` names a content hash (retroactively, idempotently; one hash may carry several names), `GET /api/prompts` lists each name's versions ordered by first-seen with requests, spend, ok rate and thumbs, `GET /api/prompts/diff` returns an LCS line diff of two versions' captured content (owner-only, honours the capture switch), and datasets/export accept `prompt=<name>` to scope to its versions. Additive metadata on `(tenant, name, hash)` — unmanaged prompts keep working, deleting a label never deletes traces, no editing or deployment path |
 | ITEM-099 | Latency and quality heatmap | improvement | **done (2026-10-31)** — Langfuse parity. The performance report carries a model × bucket matrix (day, or hour for a short window) of p95 total latency and error rate, built by one bounded aggregate over the selected window and a pure pivot. An empty bucket is a dot, not a zero — "no traffic" and "fast/healthy" look different — and every cell prints its numbers, so the tint is a hint rather than the information |
+| ITEM-102 | Dashboard surfaces for pruning, evals and the prompt registry | feature | **new (2026-10-31)** — three delivered features are API-only, so a tenant cannot use them without curl: the pruning opt-in (`POST /api/prune`, per-tenant policy with a holdout), the eval harness (pin a gold set, run a model, compare two runs) and the prompt registry (name a prompt, list versions, diff). Owner-only controls on the existing pages — routing for pruning, a new Datasets/Quality tab for evals, Datasets for the registry — reusing the same read models. No new backend |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
-| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged** — the embedder gate is **cleared** (ITEM-079); remains gated on real task traffic for centroid building (see item file) |
+| ITEM-029 | OmniRouting: task-centroid matching | feature | **staged — gate moved (2026-10-31)** — was gated on task traffic for centroid building; **ITEM-089 now computes exactly that**: a versioned vector per distinct prompt (stored once, never re-embedded) plus cosine clusters at 0.92, over live traffic (5 clusters from 33 prompts). The routing use (map a request to a task centroid) has its input now, so this needs a re-decision, not more traffic |
 | ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **staged** — gated on ITEM-029: map task clusters to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
@@ -83,21 +85,26 @@ or on traffic that does not exist yet. Delivered history follows them.
 | ITEM-101 | Trace insert regression + schema-width guard | bug | **done (2026-10-31)** — the ITEM-085 build listed `raw_completion_capped` twice in the trace INSERT (and had one placeholder short), so **every** trace insert failed and the batch rolled back; ITEM-088's `payload_retention_days` was `INTEGER` while the store decodes `i64`, so the hot path answered `500 budget_store_error` for every request from 2026-10-30 11:14Z. Fixed, plus unit guards that read the statement as data: no duplicate column, one placeholder per column, every column exists in `db/init`, and the retention column is `BIGINT`. Live: 200 + a persisted trace |
 | ITEM-018 | First real developer onboarding | improvement | **done + archived (2026-10-12)** — real SDK traffic verified by dogfooding (1,226 traces, 2 tenants, streaming 200, operator isolation holds); findings captured as ITEM-053/054 |
 
-_Last updated: 2026-10-31 — the pullable backlog is empty._ 085–100 and 101 are
-delivered, live-verified where live was possible. What is left cannot be pulled:
+_Last updated: 2026-10-31 (after the code review)._
 
+**Pullable now:** ITEM-102 — the dashboard surfaces for pruning, evals and the
+prompt registry. Those three features work and are tested, but a tenant can only
+drive them with curl, which makes them features for us and not for a customer.
+
+**Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.
-- **029** (task centroids) was gated on task traffic for centroid building, and
-  **ITEM-089 now supplies the vectors** — this is the one gate that moved today;
-  it is worth re-checking before the next planning pass.
+- **029** — its gate was "real task traffic for centroid building". ITEM-089 now
+  builds exactly that (versioned per-prompt vectors, cosine clusters, live:
+  5 clusters from 33 prompts). This is a **decision**, not a build: unpark it if
+  centroid routing is worth the risk now that the input exists.
 - **030 / 072** follow 029.
 - **084** (connector) stays conditional on a customer refusing both hosted
   options.
 
-Small remainders worth folding into the next item: ITEM-092's per-stage timing
-breakdown and cache kill switch; ITEM-091 is implemented but **not enabled for
-any tenant** (its gate was ITEM-090 evidence, which only started accumulating
-today); the prompt registry and eval surfaces are API-only (no dashboard UI).
+**Not in the backlog, but outstanding as policy:** ITEM-091 (pruning) is
+delivered and off by design — no tenant has enabled it, because the evidence gate
+(ITEM-090 findings) only started accumulating on 2026-10-31. Enabling it is a
+tenant decision, not a build.
 
 Ordering rule for the undelivered items: **value first, effort as the
 tie-breaker**, dependencies overriding both (087 cannot precede 086/088; 090 needs

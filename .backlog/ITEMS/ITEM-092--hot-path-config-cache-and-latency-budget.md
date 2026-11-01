@@ -96,10 +96,12 @@ measured **~14 ms** (`proxy_us`) on the real tenant — because the snapshot is
 cold. A tenant at one request a minute sees that, not the warm number. The
 contract says "warm request" and defines warm as within the TTLs.
 
-**Still open against the original ACs:** cache hit/miss/age counters on the
-operator metrics endpoint, a per-stage timing breakdown at debug level, and the
-kill switch (the cache is always on today). None of them affect the claim, which
-is now enforced.
+**Closed (2026-10-30):** the three ACs that were listed here as open are built —
+cache hit/miss/invalidation counters (`HotPath::stats()` on the operator metrics
+and the performance page), per-stage timing at debug
+(`tracing::debug!("hot-path stages", auth_us, plan_us, pre_dispatch_us)`), and the
+`HOTPATH_CACHE=off` kill switch (every read goes to the store, behaviour
+unchanged). Nothing here is outstanding.
 
 ## The performance page (2026-10-30)
 
