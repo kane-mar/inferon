@@ -8,13 +8,7 @@
 
 use super::*;
 
-/// The contract, in microseconds: the claim is p50, the tail is a guard against
-/// a broken cache (which measured 6–28 ms) rather than a scheduling bound.
-const P50_BUDGET_US: i64 = 1_000;
-const P95_GUARD_US: i64 = 5_000;
-/// A percentile over a handful of samples is not a verdict. Below this the
-/// report says "not enough samples" rather than met/not-met.
-const MIN_SAMPLES: i64 = 20;
+use crate::latency::{CONTRACT_WINDOW_HOURS, MIN_SAMPLES, P50_BUDGET_US, P95_GUARD_US};
 
 /// ITEM-099: one model's bucket — `(model, bucket, requests, errors, p95_ms)`.
 type HeatCellRow = (String, String, i64, i64, Option<f64>);
@@ -64,6 +58,25 @@ pub async fn performance(
     .bind(offset)
     .fetch_one(&state.db)
     .await)?;
+
+    // The verdict is about the build that is running now: it reads a fixed
+    // recent window, so pre-deploy history cannot fail today's claim.
+    let (recent_samples, recent_p50, recent_p95): (i64, Option<i64>, Option<i64>) = stored(
+        sqlx::query_as(
+            "SELECT COUNT(*),
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                    round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint
+             FROM traces
+             WHERE tenant_id = $1
+               AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
+               AND proxy_us IS NOT NULL",
+        )
+        .bind(tenant_id)
+        .bind(CONTRACT_WINDOW_HOURS)
+        .fetch_one(&state.db)
+        .await,
+    )?;
+    let contract = crate::latency::verdict(recent_samples, recent_p50, recent_p95);
 
     let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95): LatencyRow = stored(sqlx::query_as(
         "SELECT round(percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
@@ -252,7 +265,7 @@ pub async fn performance(
     };
 
     let under_1ms_rate = (samples > 0).then(|| under_1ms as f64 / samples as f64);
-    let sufficient = samples >= MIN_SAMPLES;
+    // `overhead` describes the window; the verdict (`contract`) is the recent one.
     let proxy_share = match (p50_us, total_p50) {
         (Some(proxy), Some(total)) if total > 0.0 => Some(proxy as f64 / (total * 1000.0)),
         _ => None,
@@ -264,8 +277,12 @@ pub async fn performance(
             "p50_us": P50_BUDGET_US,
             "p95_us": P95_GUARD_US,
             "min_samples": MIN_SAMPLES,
-            "p50_met": sufficient.then(|| p50_us.is_some_and(|p50| p50 < P50_BUDGET_US)),
-            "p95_met": sufficient.then(|| p95_us.is_some_and(|p95| p95 < P95_GUARD_US)),
+            "window_hours": CONTRACT_WINDOW_HOURS,
+            "samples": contract.samples,
+            "observed_p50_us": contract.p50_us,
+            "observed_p95_us": contract.p95_us,
+            "p50_met": contract.p50_met,
+            "p95_met": contract.p95_met,
         },
         "overhead": {
             "samples": samples,

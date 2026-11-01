@@ -177,6 +177,11 @@ export type PerformanceReport = {
     p95_us: number;
     /** Below this many samples the report withholds a verdict. */
     min_samples: number;
+    /** ITEM-092: the verdict covers the running build, over this fixed window. */
+    window_hours: number;
+    samples: number;
+    observed_p50_us: number | null;
+    observed_p95_us: number | null;
     p50_met: boolean | null;
     p95_met: boolean | null;
   };

@@ -536,7 +536,8 @@
     "findings_none": "No findings in this window.",
     "findings_count": "{count} request(s) with findings",
     "findings_waste": "≈{usd} USD of avoidable input",
-    "findings_dismissed": "{count} dismissed"
+    "findings_dismissed": "{count} dismissed",
+    "claim_window": "Evaluated on this build: the last {hours} h ({samples} sample(s), observed p50 {observed}). The cards above describe the window you selected."
   },
   "DatasetsPage": {
     "title_bar": "Datasets",

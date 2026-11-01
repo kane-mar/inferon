@@ -47,6 +47,7 @@ pub mod evolution;
 pub mod guard;
 pub mod heatmap;
 pub mod hotpath;
+pub mod latency;
 pub mod linter;
 pub mod loadbalance;
 pub mod pii;

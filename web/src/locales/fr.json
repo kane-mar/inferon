@@ -536,7 +536,8 @@
     "findings_none": "Aucun constat sur cette période.",
     "findings_count": "{count} requête(s) avec constats",
     "findings_waste": "≈{usd} USD d’entrée évitable",
-    "findings_dismissed": "{count} écarté(s)"
+    "findings_dismissed": "{count} écarté(s)",
+    "claim_window": "Évalué sur cette version : les {hours} dernières heures ({samples} échantillon(s), p50 observé {observed}). Les cartes ci-dessus décrivent la période sélectionnée."
   },
   "DatasetsPage": {
     "title_bar": "Jeux de données",

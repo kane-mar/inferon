@@ -87,7 +87,9 @@ export default async function PerformancePage(props: {
     api.sessions(DAYS, session.cookie),
   ]);
   const { overhead, contract, latency, cache } = data;
-  const hasSamples = overhead.samples > 0;
+  // The verdict covers the running build over the contract's own window; the
+  // overhead KPIs describe the window the reader selected.
+  const hasSamples = contract.samples >= contract.min_samples;
 
   return (
     <>
@@ -132,6 +134,13 @@ export default async function PerformancePage(props: {
                 missed={t('not_met')}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              {t('claim_window', {
+                hours: contract.window_hours,
+                samples: integer(contract.samples),
+                observed: us(contract.observed_p50_us),
+              })}
+            </p>
             <p className="text-xs text-muted-foreground">{t('claim_note')}</p>
           </div>
         </Card>
