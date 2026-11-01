@@ -4,6 +4,7 @@ import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
@@ -108,14 +109,23 @@ export default async function PerformancePage(props: {
         <KpiCard
           label={t('overhead_p50')}
           value={us(overhead.p50_us)}
+          tone={metricTone(overhead.p50_us, THRESHOLDS.proxyP50Us)}
           hint={contract.p50_met == null
             ? t('not_enough_samples', { count: contract.min_samples })
             : contract.p50_met
               ? t('within_contract')
               : t('over_contract')}
         />
-        <KpiCard label={t('overhead_p95')} value={us(overhead.p95_us)} />
-        <KpiCard label={t('under_1ms')} value={rate(overhead.under_1ms_rate)} />
+        <KpiCard
+          label={t('overhead_p95')}
+          value={us(overhead.p95_us)}
+          tone={metricTone(overhead.p95_us, THRESHOLDS.proxyP95Us)}
+        />
+        <KpiCard
+          label={t('under_1ms')}
+          value={rate(overhead.under_1ms_rate)}
+          tone={metricTone(overhead.under_1ms_rate, THRESHOLDS.under1msRate)}
+        />
         <KpiCard label={t('samples')} value={integer(overhead.samples)} />
       </div>
 
@@ -159,10 +169,18 @@ export default async function PerformancePage(props: {
           "
           >
             <KpiCard label={t('total_p50')} value={ms(latency.total_p50_ms)} />
-            <KpiCard label={t('total_p95')} value={ms(latency.total_p95_ms)} />
+            <KpiCard
+              label={t('total_p95')}
+              value={ms(latency.total_p95_ms)}
+              tone={metricTone(latency.total_p95_ms, THRESHOLDS.totalP95Ms)}
+            />
             <KpiCard label={t('total_p99')} value={ms(latency.total_p99_ms)} />
             <KpiCard label={t('ttft_p50')} value={ms(latency.ttft_p50_ms)} />
-            <KpiCard label={t('ttft_p95')} value={ms(latency.ttft_p95_ms)} />
+            <KpiCard
+              label={t('ttft_p95')}
+              value={ms(latency.ttft_p95_ms)}
+              tone={metricTone(latency.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
+            />
             <KpiCard
               label={t('proxy_share')}
               value={rate(latency.proxy_share)}

@@ -9,6 +9,13 @@ const within = (pathname: string, href: string): boolean =>
   pathname.endsWith(href) || pathname.includes(`${href}/`);
 
 /**
+ * The section's overview tab points at the section root, which every tab is
+ * "within" — so it is marked `exact` and only lights up on that page.
+ */
+const isCurrent = (pathname: string, item: { href: string; exact?: boolean }): boolean =>
+  item.exact ? pathname.endsWith(item.href) : within(pathname, item.href);
+
+/**
  * The second-level menu for the active section. Renders nothing outside a
  * section that has details, so most pages get no extra chrome.
  */
@@ -36,7 +43,7 @@ export const SectionNav = (props: { menu: DashboardNavEntry[] }) => {
                 className={cn(
                   'rounded-md px-2.5 py-1 text-muted-foreground',
                   'hover:bg-background hover:text-foreground',
-                  within(pathname, child.href) && `
+                  isCurrent(pathname, child) && `
                     bg-background font-medium text-foreground shadow-sm
                   `,
                 )}

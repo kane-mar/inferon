@@ -4,6 +4,7 @@ import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
+import { metricTone, THRESHOLDS, TONE_CLASS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
@@ -11,6 +12,10 @@ const CELL = 'px-3 py-2 text-sm tabular-nums';
 
 const pct = (value: number | null): string =>
   (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
+
+/** The per-model success cell, coloured by the same thresholds as the KPI. */
+const successClass = (rate: number | null): string =>
+  TONE_CLASS[metricTone(rate, THRESHOLDS.okRate)];
 
 /**
  * Quality view (ITEM-055): how often responses were usable, derived from the
@@ -41,11 +46,25 @@ export default async function QualityPage(props: {
         xl:grid-cols-6
       "
       >
-        <KpiCard label={t('success_rate')} value={pct(overall.success_rate)} />
+        <KpiCard
+          label={t('success_rate')}
+          value={pct(overall.success_rate)}
+          tone={metricTone(overall.success_rate, THRESHOLDS.okRate)}
+        />
         <KpiCard label={t('empty_rate')} value={pct(overall.empty_rate)} goodWhen="down" />
         <KpiCard label={t('refusal_rate')} value={pct(overall.refusal_rate)} goodWhen="down" />
-        <KpiCard label={t('error_rate')} value={pct(overall.error_rate)} goodWhen="down" />
-        <KpiCard label={t('truncated_rate')} value={pct(overall.truncated_rate)} goodWhen="down" />
+        <KpiCard
+          label={t('error_rate')}
+          value={pct(overall.error_rate)}
+          goodWhen="down"
+          tone={metricTone(overall.error_rate, THRESHOLDS.errorRate)}
+        />
+        <KpiCard
+          label={t('truncated_rate')}
+          value={pct(overall.truncated_rate)}
+          goodWhen="down"
+          tone={metricTone(overall.truncated_rate, THRESHOLDS.truncatedRate)}
+        />
         <KpiCard
           label={t('guard_fallback_rate')}
           value={pct(overall.guard_fallback_rate)}
@@ -124,7 +143,9 @@ export default async function QualityPage(props: {
                     <td className={CELL}>{model.ok}</td>
                     <td className={CELL}>{model.empty}</td>
                     <td className={CELL}>{model.errors}</td>
-                    <td className={CELL}>{pct(model.success_rate)}</td>
+                    <td className={successClass(model.success_rate)}>
+                      {pct(model.success_rate)}
+                    </td>
                     <td className={CELL}>{model.thumbs_up}</td>
                     <td className={CELL}>{model.thumbs_down}</td>
                   </tr>

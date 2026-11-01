@@ -1,4 +1,6 @@
+import type { Tone } from '@/libs/reportTone';
 import { trend } from '@/libs/dashboardMetrics';
+import { toneClass } from '@/libs/reportTone';
 
 const GOOD = 'text-emerald-600 dark:text-emerald-400';
 const BAD = 'text-destructive';
@@ -6,6 +8,9 @@ const BAD = 'text-destructive';
 /**
  * Headline metric with an optional period-over-period delta. `goodWhen` marks
  * which direction is an improvement (spend/down, requests/up).
+ *
+ * `tone` colours the value itself: a report says whether the number is healthy,
+ * not just what it is (`metricTone` in `reportTone`).
  */
 export const KpiCard = (props: {
   label: string;
@@ -13,6 +18,7 @@ export const KpiCard = (props: {
   delta?: number | null;
   goodWhen?: 'up' | 'down';
   hint?: string;
+  tone?: Tone;
 }) => {
   const delta = props.delta ?? null;
   const direction = trend(delta);
@@ -34,7 +40,7 @@ export const KpiCard = (props: {
         {props.label}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-2xl font-semibold tabular-nums">{props.value}</span>
+        <span className={toneClass(props.tone)}>{props.value}</span>
         {delta != null && direction !== 'flat' && (
           <span
             className={`

@@ -53,3 +53,8 @@ pub(crate) fn default_true() -> bool {
 pub(crate) fn default_retention() -> i64 {
     30
 }
+
+/// Every pre-flight rule, for a client that does not send the list.
+pub(crate) fn all_lint_rules() -> Vec<String> {
+    crate::preflight::Rules::default().names()
+}

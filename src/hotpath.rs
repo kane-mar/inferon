@@ -658,6 +658,25 @@ impl HotPath {
         crate::loadbalance::mix(*seed)
     }
 
+    /// ITEM-090: which pre-flight rules this tenant selected. Falls back to all
+    /// of them, so a config that predates the column keeps scanning.
+    pub async fn lint_rules(
+        &self,
+        state: &Arc<AppState>,
+        tenant_id: Uuid,
+    ) -> crate::preflight::Rules {
+        match self.refresh(state, tenant_id).await {
+            Ok(entry) => {
+                let entry = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                match entry.budget.as_ref() {
+                    Some(budget) => crate::preflight::Rules::from_names(&budget.lint_rules),
+                    None => crate::preflight::Rules::default(),
+                }
+            }
+            Err(_) => crate::preflight::Rules::default(),
+        }
+    }
+
     /// The guard switch, fail-open (a store error never removes the safety net).
     pub async fn guard_enabled(&self, state: &Arc<AppState>, tenant_id: Uuid) -> bool {
         match self.budget(state, tenant_id).await {

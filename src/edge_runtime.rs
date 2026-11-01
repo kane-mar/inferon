@@ -179,6 +179,7 @@ impl BudgetStore for EdgeState {
             payload_retention_days: budget.payload_retention_days,
             // The edge runs the same advisory pass (ITEM-090).
             lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,

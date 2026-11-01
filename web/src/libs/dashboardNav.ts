@@ -3,7 +3,12 @@ import type messages from '@/locales/en.json';
 /** Keys under the `DashboardNav` message namespace. */
 export type DashboardNavKey = keyof typeof messages.DashboardNav & string;
 
-export type DashboardNavItem = { href: string; labelKey: DashboardNavKey };
+export type DashboardNavItem = {
+  href: string;
+  labelKey: DashboardNavKey;
+  /** Only this exact page is "current" (the section's own overview tab). */
+  exact?: boolean;
+};
 
 /** A top-level section; `children` render as a second-level submenu. */
 export type DashboardNavSection = DashboardNavItem & { children?: DashboardNavItem[] };
@@ -12,28 +17,30 @@ export type DashboardNavSection = DashboardNavItem & { children?: DashboardNavIt
 export type DashboardNavEntry = {
   href: string;
   label: string;
-  children?: { href: string; label: string }[];
+  children?: { href: string; label: string; exact?: boolean }[];
 };
 
 /**
- * The dashboard menu: five sections (plus the operator console), each with its
- * details in a submenu rather than as top-level tabs.
+ * The dashboard menu: four sections (plus the operator console).
+ *
+ * The reports are **tabs under Dashboard**, not their own section — the
+ * dashboard is the one surface, and its tabs are the detail views.
  */
 export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
-  { href: '/dashboard', labelKey: 'home' },
-  { href: '/dashboard/providers', labelKey: 'providers' },
-  { href: '/dashboard/routing', labelKey: 'routing' },
   {
-    href: '/dashboard/reports',
-    labelKey: 'reports',
+    href: '/dashboard',
+    labelKey: 'home',
     children: [
-      { href: '/dashboard/reports/spend', labelKey: 'spend' },
+      { href: '/dashboard', labelKey: 'overview', exact: true },
+      { href: '/dashboard/spend', labelKey: 'spend' },
       { href: '/dashboard/audit', labelKey: 'audit' },
       { href: '/dashboard/quality', labelKey: 'quality' },
       { href: '/dashboard/performance', labelKey: 'performance' },
       { href: '/dashboard/datasets', labelKey: 'datasets' },
     ],
   },
+  { href: '/dashboard/providers', labelKey: 'providers' },
+  { href: '/dashboard/routing', labelKey: 'routing' },
   {
     href: '/dashboard/settings',
     labelKey: 'settings',

@@ -225,6 +225,9 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         .as_ref()
         .map_or((0, 0), |budget| (budget.rpm_limit, budget.tpm_limit));
     // ITEM-096: detection is on by default; redaction is opt-in per mode.
+    let lint_rules = config
+        .as_ref()
+        .map_or_else(|| crate::preflight::Rules::default().names(), |budget| budget.lint_rules.clone());
     let pii = config.as_ref().map_or((true, false, false), |budget| {
         (
             budget.pii_detection,
@@ -261,6 +264,7 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         "capture_payloads": capture,
         "payload_retention_days": retention,
         "lint_enabled": lint,
+        "lint_rules": lint_rules,
         "translate_surfaces": translate,
         "rpm_limit": rate_limits.0,
         "tpm_limit": rate_limits.1,
@@ -335,6 +339,8 @@ pub async fn tenant_config_set(
         capture_payloads: body.capture_payloads,
         payload_retention_days: body.payload_retention_days.clamp(0, 3650),
         lint_enabled: body.lint_enabled,
+        // Unknown names are dropped, and an empty list is a real choice.
+        lint_rules: crate::preflight::Rules::from_names(&body.lint_rules).names(),
         translate_surfaces: body.translate_surfaces,
         rpm_limit: body.rpm_limit.max(0),
         tpm_limit: body.tpm_limit.max(0),
@@ -376,6 +382,9 @@ pub struct ConfigBody {
     /// ITEM-090. Defaults keep an older client from switching the lint off.
     #[serde(default = "default_true")]
     lint_enabled: bool,
+    /// ITEM-090: which pre-flight rules to run (absent = all of them).
+    #[serde(default = "all_lint_rules")]
+    lint_rules: Vec<String>,
     /// ITEM-094. Defaults keep an older client from disabling translation.
     #[serde(default = "default_true")]
     translate_surfaces: bool,

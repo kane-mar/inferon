@@ -35,6 +35,8 @@ pub struct TenantBudget {
     pub payload_retention_days: i64,
     /// ITEM-090: run the pre-dispatch lint pass (kill switch).
     pub lint_enabled: bool,
+    /// ITEM-090: which rules run (all of them when NULL, i.e. unset).
+    pub lint_rules: Vec<String>,
     /// ITEM-094: translate across surfaces when the provider speaks the other one.
     pub translate_surfaces: bool,
     /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
@@ -60,6 +62,8 @@ pub struct ConfigUpdate {
     pub payload_retention_days: i64,
     /// ITEM-090: the pre-flight lint kill switch.
     pub lint_enabled: bool,
+    /// ITEM-090: the rules to run (names from `preflight::ALL_RULES`).
+    pub lint_rules: Vec<String>,
     /// ITEM-094: cross-surface translation.
     pub translate_surfaces: bool,
     /// ITEM-095: the tenant's default velocity limits (0 = unlimited).
@@ -113,6 +117,7 @@ pub(crate) struct ConfigRow {
     pub capture_payloads: bool,
     pub payload_retention_days: i64,
     pub lint_enabled: bool,
+    pub lint_rules: Option<Vec<String>>,
     pub translate_surfaces: bool,
     pub rpm_limit: i64,
     pub tpm_limit: i64,
@@ -133,6 +138,7 @@ pub(crate) const CONFIG_SELECT: &str = "SELECT budget_limit_cents AS limit_cents
                 COALESCE(payload_capture, TRUE) AS capture_payloads,
                 COALESCE(payload_retention_days, 30) AS payload_retention_days,
                 COALESCE(lint_enabled, TRUE) AS lint_enabled,
+                lint_rules AS lint_rules,
                 COALESCE(translate_surfaces, TRUE) AS translate_surfaces,
                 COALESCE(rpm_limit, 0) AS rpm_limit,
                 COALESCE(tpm_limit, 0) AS tpm_limit,
@@ -156,6 +162,7 @@ impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for ConfigRow {
             capture_payloads: row.try_get("capture_payloads")?,
             payload_retention_days: row.try_get("payload_retention_days")?,
             lint_enabled: row.try_get("lint_enabled")?,
+            lint_rules: row.try_get("lint_rules")?,
             translate_surfaces: row.try_get("translate_surfaces")?,
             rpm_limit: row.try_get("rpm_limit")?,
             tpm_limit: row.try_get("tpm_limit")?,
@@ -179,6 +186,8 @@ impl From<ConfigRow> for TenantBudget {
             capture_payloads: row.capture_payloads,
             payload_retention_days: row.payload_retention_days,
             lint_enabled: row.lint_enabled,
+            // NULL = every rule (pre-052 rows read this way).
+            lint_rules: row.lint_rules.unwrap_or_else(|| crate::preflight::Rules::default().names()),
             translate_surfaces: row.translate_surfaces,
             rpm_limit: row.rpm_limit,
             tpm_limit: row.tpm_limit,
@@ -279,6 +288,7 @@ impl BudgetStore for InMemoryBudgetStore {
                 capture_payloads: update.capture_payloads,
                 payload_retention_days: update.payload_retention_days,
                 lint_enabled: update.lint_enabled,
+                lint_rules: update.lint_rules.clone(),
                 translate_surfaces: update.translate_surfaces,
                 rpm_limit: update.rpm_limit,
                 tpm_limit: update.tpm_limit,
@@ -314,6 +324,7 @@ impl BudgetStore for InMemoryBudgetStore {
             capture_payloads: true,
             payload_retention_days: 30,
             lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -389,17 +400,17 @@ impl BudgetStore for PostgresBudgetStore {
             "INSERT INTO tenant_configurations
                 (tenant_id, budget_limit_cents, cheap_fallback_model,
                  guard_enabled, router_enabled, router_threshold,
-                 payload_capture, payload_retention_days, lint_enabled, translate_surfaces,
-                 rpm_limit, tpm_limit,
+                 payload_capture, payload_retention_days, lint_enabled, lint_rules,
+                 translate_surfaces, rpm_limit, tpm_limit,
                  pii_detection, pii_redact_storage, pii_redact_wire)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              ON CONFLICT (tenant_id) DO UPDATE SET
                 budget_limit_cents = $2, cheap_fallback_model = $3,
                 guard_enabled = $4, router_enabled = $5, router_threshold = $6,
                 payload_capture = $7, payload_retention_days = $8, lint_enabled = $9,
-                translate_surfaces = $10, rpm_limit = $11, tpm_limit = $12,
-                pii_detection = $13, pii_redact_storage = $14,
-                pii_redact_wire = $15",
+                lint_rules = $10, translate_surfaces = $11, rpm_limit = $12,
+                tpm_limit = $13, pii_detection = $14, pii_redact_storage = $15,
+                pii_redact_wire = $16",
         )
         .bind(tenant_id)
         .bind(update.budget_limit_cents)
@@ -410,6 +421,7 @@ impl BudgetStore for PostgresBudgetStore {
         .bind(update.capture_payloads)
         .bind(update.payload_retention_days)
         .bind(update.lint_enabled)
+        .bind(&update.lint_rules)
         .bind(update.translate_surfaces)
         .bind(update.rpm_limit)
         .bind(update.tpm_limit)

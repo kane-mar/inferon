@@ -39,6 +39,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
   });
   const labels = {
     home: t('home'),
+    overview: t('overview'),
     providers: t('providers'),
     routing: t('routing'),
     reports: t('reports'),
@@ -61,6 +62,7 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
           children: item.children.map(child => ({
             href: child.href,
             label: labels[child.labelKey],
+            ...(child.exact ? { exact: true } : {}),
           })),
         }
       : {}),

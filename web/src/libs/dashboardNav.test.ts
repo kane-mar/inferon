@@ -3,22 +3,26 @@ import { dashboardNav } from './dashboardNav';
 
 const hrefs = (items: { href: string }[]): string[] => items.map(item => item.href);
 
-describe('dashboardNav — five sections, details in submenus', () => {
-  it('keeps the top level to five sections for tenants', () => {
+describe('dashboardNav — four sections, reports as dashboard tabs', () => {
+  it('keeps the top level to four sections for tenants', () => {
     expect(hrefs(dashboardNav(false))).toEqual([
       '/dashboard',
       '/dashboard/providers',
       '/dashboard/routing',
-      '/dashboard/reports',
       '/dashboard/settings',
     ]);
   });
 
-  it('puts the spend, leak, quality and performance reports under Reports', () => {
-    const reports = dashboardNav(false).find(item => item.href === '/dashboard/reports');
+  it('has no separate Reports section — the reports are dashboard tabs', () => {
+    expect(dashboardNav(false).some(item => item.href === '/dashboard/reports')).toBe(false);
+  });
 
-    expect(hrefs(reports?.children ?? [])).toEqual([
-      '/dashboard/reports/spend',
+  it('puts the report tabs under Dashboard, overview first', () => {
+    const dashboard = dashboardNav(false).find(item => item.href === '/dashboard');
+
+    expect(hrefs(dashboard?.children ?? [])).toEqual([
+      '/dashboard',
+      '/dashboard/spend',
       '/dashboard/audit',
       '/dashboard/quality',
       '/dashboard/performance',
@@ -49,7 +53,6 @@ describe('dashboardNav — five sections, details in submenus', () => {
       '/dashboard',
       '/dashboard/providers',
       '/dashboard/routing',
-      '/dashboard/reports',
       '/dashboard/settings',
       '/dashboard/operator',
     ]);

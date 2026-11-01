@@ -74,7 +74,8 @@
     "spend": "Dépenses",
     "audit": "Audit de coûts",
     "performance": "Performance",
-    "datasets": "Jeux de données"
+    "datasets": "Jeux de données",
+    "overview": "Vue d’ensemble"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -384,7 +385,9 @@
     "capture": "Stocker les prompts et complétions bruts (paires de jeu de données)",
     "capture_help": "Désactivé = les coûts, résultats et agrégats restent enregistrés, mais aucune charge utile n'est stockée et rien ne qualifie pour un jeu de données.",
     "retention": "Conservation des charges utiles (jours)",
-    "retention_help": "Les charges utiles plus anciennes sont purgées périodiquement ; 0 les conserve indéfiniment."
+    "retention_help": "Les charges utiles plus anciennes sont purgées périodiquement ; 0 les conserve indéfiniment.",
+    "lint": "Analyse de la charge utile",
+    "lint_help": "Contrôles indicatifs avant l’envoi : ils ne modifient jamais la requête, ils signalent seulement ce qui semble gaspiller des tokens et le chiffrent. Choisissez ceux que vous voulez."
   },
   "ReportsPage": {
     "title_bar": "Rapports",

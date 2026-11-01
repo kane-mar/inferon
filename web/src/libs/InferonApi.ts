@@ -568,8 +568,15 @@ export type TenantConfig = {
   capture_payloads: boolean;
   /** ITEM-088: days raw payloads live (0 = keep forever). */
   payload_retention_days: number;
+  /** ITEM-090: the master switch for the pre-flight lint. */
+  lint_enabled: boolean;
+  /** ITEM-090: which pre-flight rules run. */
+  lint_rules: LintRule[];
   role: Role;
 };
+
+/** ITEM-090: the pre-flight rules a tenant can choose. */
+export type LintRule = 'repeated_system_prompt' | 'oversized_schema' | 'boilerplate' | 'duplicate_turns';
 
 export type ConfigUpdate = {
   budget_limit_cents: number;
@@ -579,6 +586,9 @@ export type ConfigUpdate = {
   router_threshold: number;
   capture_payloads: boolean;
   payload_retention_days: number;
+  /** ITEM-090: the pre-flight lint switch and its rules. */
+  lint_enabled?: boolean;
+  lint_rules?: LintRule[];
 };
 
 export type CreatedKey = {

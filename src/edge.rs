@@ -480,6 +480,7 @@ async fn build_config(state: &AppState, tenant_id: Uuid) -> Result<Value, String
             "capture_payloads": row.capture_payloads,
             "payload_retention_days": row.payload_retention_days,
             "lint_enabled": row.lint_enabled,
+            "lint_rules": row.lint_rules,
             "translate_surfaces": row.translate_surfaces,
             "rpm_limit": row.rpm_limit,
             "tpm_limit": row.tpm_limit,

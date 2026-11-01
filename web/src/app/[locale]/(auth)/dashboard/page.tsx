@@ -26,6 +26,7 @@ import {
 import { collectOverview } from '@/libs/dashboardOverview';
 import { Link } from '@/libs/I18nNavigation';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const RANGES = [7, 30, 90] as const;
@@ -37,7 +38,7 @@ const MetricRow = (props: { label: string; value: string }) => (
     <dd className="tabular-nums">{props.value}</dd>
   </div>
 );
-const METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
+const CHART_METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
 
 const VALUE_FORMAT: Record<ChartMetric, ValueFormat> = {
   requests: 'int',
@@ -54,7 +55,7 @@ const parseView = (params: SearchParams): DashboardView => {
   return {
     days: (RANGES as readonly number[]).includes(days) ? days : 30,
     compare: params.compare === '1',
-    metric: METRICS.includes(params.metric as ChartMetric)
+    metric: CHART_METRICS.includes(params.metric as ChartMetric)
       ? (params.metric as ChartMetric)
       : 'requests',
     hideZero: params.hide_zero === '1',
@@ -227,6 +228,10 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={errorRate == null ? '—' : `${errorRate.toFixed(1)}%`}
           delta={errorRateDelta}
           goodWhen="down"
+          tone={metricTone(
+            errorRate == null ? null : errorRate / 100,
+            THRESHOLDS.errorRate,
+          )}
         />
         <KpiCard
           label={t('tokens')}
@@ -244,6 +249,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           delta={ttftDelta}
           goodWhen="down"
           hint={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
+          tone={metricTone(summary.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
         />
       </div>
 
@@ -269,7 +275,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           title={t('top_spend')}
           action={(
             <Link
-              href="/dashboard/reports/spend"
+              href="/dashboard/spend"
               className="text-sm text-primary"
             >
               {t('view_spend')}

@@ -5,6 +5,7 @@
             capture_payloads: true,
             payload_retention_days: 30,
             lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -56,6 +57,7 @@
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+                lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -92,6 +94,7 @@
                     capture_payloads: true,
                     payload_retention_days: 30,
             lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -123,6 +126,7 @@
                     capture_payloads: true,
                     payload_retention_days: 30,
             lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -183,6 +187,7 @@ async fn tier_pairs_survive_a_controls_update_and_work_for_a_fresh_tenant() {
                 capture_payloads: true,
                 payload_retention_days: 30,
                 lint_enabled: true,
+                lint_rules: crate::preflight::Rules::default().names(),
             translate_surfaces: true,
             rpm_limit: 0,
             tpm_limit: 0,
@@ -269,6 +274,7 @@ fn the_config_select_covers_every_field_of_the_row() {
         "capture_payloads",
         "payload_retention_days",
         "lint_enabled",
+        "lint_rules",
         "translate_surfaces",
         "rpm_limit",
         "tpm_limit",
@@ -279,14 +285,14 @@ fn the_config_select_covers_every_field_of_the_row() {
     let select = crate::budget::CONFIG_SELECT;
     for field in expected {
         assert!(
-            select.contains(&format!("AS {field}")),
-            "CONFIG_SELECT is missing an alias for {field}:\n{select}"
+            select.contains(&format!("AS {field}")) || select.contains(&format!(" {field} AS {field}")),
+            "CONFIG_SELECT is missing {field} (aliased):\n{select}"
         );
     }
     assert_eq!(
         select.matches(" AS ").count(),
         expected.len(),
-        "every column is aliased, and nothing else is"
+        "every column carries an alias, and nothing else is aliased"
     );
 }
 

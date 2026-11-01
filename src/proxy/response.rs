@@ -272,6 +272,7 @@ pub(super) async fn preflight(state: &Arc<AppState>, tenant_id: Uuid, meta: &mut
     if !state.hotpath.lint_enabled(state, tenant_id).await {
         return;
     }
+    let rules = state.hotpath.lint_rules(state, tenant_id).await;
     // The repeat check compares this turn's system prompt with the tenant's
     // previous one; the rest of the pass is pure.
     let repeated = meta.system_prompt_hash.as_ref().is_some_and(|hash| {
@@ -284,6 +285,7 @@ pub(super) async fn preflight(state: &Arc<AppState>, tenant_id: Uuid, meta: &mut
         &meta.raw_prompt,
         repeated,
         &meta.model,
+        &rules,
     ));
 }
 

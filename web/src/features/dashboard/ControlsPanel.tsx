@@ -1,6 +1,6 @@
 'use client';
 
-import type { TenantConfig } from '@/libs/InferonApi';
+import type { LintRule, TenantConfig } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -9,6 +9,30 @@ import { centsToUsd } from '@/libs/dashboardMetrics';
 import { errorMessage } from '@/libs/errors';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
+
+/** ITEM-090: the pre-flight rules, in reporting order. */
+const LINT_RULES: { rule: LintRule; label: string; help: string }[] = [
+  {
+    rule: 'repeated_system_prompt',
+    label: 'Repeated system prompt',
+    help: 'The same system prompt again within 10 minutes.',
+  },
+  {
+    rule: 'oversized_schema',
+    label: 'Oversized tool schema',
+    help: 'Tool/function definitions beyond 8 KB.',
+  },
+  {
+    rule: 'boilerplate',
+    label: 'Boilerplate block',
+    help: 'A system prompt beyond 8,000 characters.',
+  },
+  {
+    rule: 'duplicate_turns',
+    label: 'Duplicate turns',
+    help: 'A message that repeats an earlier (role, content) pair exactly.',
+  },
+];
 
 export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] }) => {
   const t = useTranslations('ControlsPage');
@@ -21,6 +45,13 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
   const [threshold, setThreshold] = useState(String(data.router_threshold));
   const [capture, setCapture] = useState(data.capture_payloads);
   const [retention, setRetention] = useState(String(data.payload_retention_days));
+  // ITEM-090: the lint is optional per rule, not just on/off.
+  const [lintOn, setLintOn] = useState(data.lint_enabled);
+  const [lintRules, setLintRules] = useState<LintRule[]>(data.lint_rules);
+  const toggleRule = (rule: LintRule) =>
+    setLintRules(rules =>
+      rules.includes(rule) ? rules.filter(known => known !== rule) : [...rules, rule],
+    );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -41,6 +72,8 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
         router_threshold: Math.min(1, Math.max(0, Number(threshold) || 0)),
         capture_payloads: capture,
         payload_retention_days: Math.max(0, Math.round(Number(retention) || 0)),
+        lint_enabled: lintOn,
+        lint_rules: lintRules,
       });
       setSaved(true);
       router.refresh();
@@ -149,6 +182,39 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
           <span className="mt-1 block text-xs text-muted-foreground">{t('threshold_help')}</span>
         </label>
       </div>
+
+      {/* ITEM-090: which pre-flight checks run. Advisory only — the payload is
+          forwarded unchanged — so switching one off costs nothing but the signal. */}
+      <fieldset className="space-y-2 border-t pt-4">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={lintOn}
+            disabled={!canEdit}
+            onChange={event => setLintOn(event.target.checked)}
+          />
+          {t('lint')}
+        </label>
+        <p className="text-xs text-muted-foreground">{t('lint_help')}</p>
+        <div className="space-y-1.5 pl-6">
+          {LINT_RULES.map(entry => (
+            <label key={entry.rule} className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 accent-primary"
+                checked={lintRules.includes(entry.rule)}
+                disabled={!canEdit || !lintOn}
+                onChange={() => toggleRule(entry.rule)}
+              />
+              <span>
+                {entry.label}
+                <span className="block text-xs text-muted-foreground">{entry.help}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       {canEdit
         ? (

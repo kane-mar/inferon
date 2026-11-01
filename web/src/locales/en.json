@@ -74,7 +74,8 @@
     "spend": "Spend",
     "audit": "Cost audit",
     "performance": "Performance",
-    "datasets": "Datasets"
+    "datasets": "Datasets",
+    "overview": "Overview"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -384,7 +385,9 @@
     "capture": "Store raw prompts and completions (dataset pairs)",
     "capture_help": "Off = costs, outcomes and aggregates are still recorded, but no payload is stored and nothing qualifies for a dataset.",
     "retention": "Payload retention (days)",
-    "retention_help": "Older payloads are purged by a periodic pass; 0 keeps them indefinitely."
+    "retention_help": "Older payloads are purged by a periodic pass; 0 keeps them indefinitely.",
+    "lint": "Payload lint",
+    "lint_help": "Advisory checks before dispatch: they never change the request, they only record what looks wasteful and price it. Choose which ones you want."
   },
   "ReportsPage": {
     "title_bar": "Reports",
