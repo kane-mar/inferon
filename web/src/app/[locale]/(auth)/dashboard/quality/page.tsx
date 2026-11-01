@@ -4,7 +4,7 @@ import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
-import { metricTone, THRESHOLDS, TONE_CLASS } from '@/libs/reportTone';
+import { metricTone, THRESHOLDS, TONE_CELL } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
@@ -13,9 +13,9 @@ const CELL = 'px-3 py-2 text-sm tabular-nums';
 const pct = (value: number | null): string =>
   (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
-/** The per-model success cell, coloured by the same thresholds as the KPI. */
+/** The per-model success cell, tinted by the same thresholds as the KPI. */
 const successClass = (rate: number | null): string =>
-  TONE_CLASS[metricTone(rate, THRESHOLDS.okRate)];
+  TONE_CELL[metricTone(rate, THRESHOLDS.okRate)];
 
 /**
  * Quality view (ITEM-055): how often responses were usable, derived from the

@@ -1,16 +1,14 @@
 import type { Tone } from '@/libs/reportTone';
 import { trend } from '@/libs/dashboardMetrics';
-import { toneClass } from '@/libs/reportTone';
-
-const GOOD = 'text-emerald-600 dark:text-emerald-400';
-const BAD = 'text-destructive';
+import { kpiCardClass, kpiDeltaClass, kpiSubtleClass } from '@/libs/reportTone';
+import { cn } from '@/utils/Helpers';
 
 /**
  * Headline metric with an optional period-over-period delta. `goodWhen` marks
  * which direction is an improvement (spend/down, requests/up).
  *
- * `tone` colours the value itself: a report says whether the number is healthy,
- * not just what it is (`metricTone` in `reportTone`).
+ * `tone` tints the whole box (background, border, contrasting text): a report
+ * says whether the number is healthy, not just what it is (`metricTone`).
  */
 export const KpiCard = (props: {
   label: string;
@@ -28,25 +26,20 @@ export const KpiCard = (props: {
       : ((props.goodWhen ?? 'up') === 'up') === (direction === 'up');
 
   return (
-    <div className="
-      rounded-lg border bg-card p-4 text-card-foreground shadow-sm
-    "
-    >
-      <div className="
-        font-mono text-xs font-medium tracking-wide text-muted-foreground
-        uppercase
-      "
+    <div className={kpiCardClass(props.tone)}>
+      <div
+        className={cn(
+          'font-mono text-xs font-medium tracking-wide uppercase',
+          kpiSubtleClass(props.tone),
+        )}
       >
         {props.label}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className={toneClass(props.tone)}>{props.value}</span>
+        <span className="text-2xl font-semibold tabular-nums">{props.value}</span>
         {delta != null && direction !== 'flat' && (
           <span
-            className={`
-              text-xs font-medium
-              ${improved ? GOOD : BAD}
-            `}
+            className={kpiDeltaClass(props.tone, improved === true)}
             title={props.goodWhen === 'down' ? 'lower is better' : 'higher is better'}
           >
             <span aria-hidden>{direction === 'up' ? '▲' : '▼'}</span>
@@ -55,7 +48,7 @@ export const KpiCard = (props: {
         )}
       </div>
       {props.hint && (
-        <div className="mt-1 text-xs text-muted-foreground">{props.hint}</div>
+        <div className={cn('mt-1 text-xs', kpiSubtleClass(props.tone))}>{props.hint}</div>
       )}
     </div>
   );

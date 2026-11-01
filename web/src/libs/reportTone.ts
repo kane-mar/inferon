@@ -16,29 +16,54 @@ export type MetricSpec = {
   direction: 'lower' | 'higher';
 };
 
-/** Tailwind classes per tone; `neutral` adds nothing, so the value keeps its colour. */
-export const TONE_CLASS: Record<Tone, string> = {
-  good: 'text-emerald-600 dark:text-emerald-400',
-  warn: 'text-amber-600 dark:text-amber-400',
-  bad: 'text-destructive',
-  neutral: '',
+/**
+ * A whole KPI box, tinted by its verdict: background, border and a contrasting
+ * foreground, so the number is readable *because* of the colour rather than
+ * despite it. Whole strings — never concatenated in a `className` — so
+ * Tailwind's scanner keeps every one.
+ */
+export const kpiCardClass = (tone: Tone | undefined): string => {
+  switch (tone) {
+    case 'good':
+      return `rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 shadow-sm
+        dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50`;
+    case 'warn':
+      return `rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm
+        dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-50`;
+    case 'bad':
+      return `rounded-lg border border-red-200 bg-red-50 p-4 text-red-900 shadow-sm
+        dark:border-red-900 dark:bg-red-950/40 dark:text-red-50`;
+    default:
+      return 'rounded-lg border bg-card p-4 text-card-foreground shadow-sm';
+  }
 };
 
 /**
- * The class for a headline value. Whole strings, chosen by tone — never
- * concatenated, so Tailwind's scanner keeps every one of them.
+ * The label and hint inside a box. On a tinted box they inherit the foreground
+ * and only soften; on a plain box they stay muted, as everywhere else.
  */
-export const toneClass = (tone: Tone | undefined): string => {
-  switch (tone) {
-    case 'good':
-      return 'text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400';
-    case 'warn':
-      return 'text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400';
-    case 'bad':
-      return 'text-2xl font-semibold tabular-nums text-destructive';
-    default:
-      return 'text-2xl font-semibold tabular-nums';
+export const kpiSubtleClass = (tone: Tone | undefined): string =>
+  tone == null || tone === 'neutral' ? 'text-muted-foreground' : 'opacity-75';
+
+/**
+ * The delta beside the value: green/red where colour is free (a plain box), and
+ * plain but softened on a tinted one, where the box already carries the verdict.
+ */
+export const kpiDeltaClass = (tone: Tone | undefined, improved: boolean): string => {
+  if (tone != null && tone !== 'neutral') {
+    return 'text-xs font-medium opacity-75';
   }
+  return improved
+    ? 'text-xs font-medium text-emerald-600 dark:text-emerald-400'
+    : 'text-xs font-medium text-destructive';
+};
+
+/** Table cells coloured the same way: tinted background, contrasting text. */
+export const TONE_CELL: Record<Tone, string> = {
+  good: 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50',
+  warn: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-50',
+  bad: 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-50',
+  neutral: '',
 };
 
 /** The tone of a measured value, or `neutral` when there is no measurement. */
