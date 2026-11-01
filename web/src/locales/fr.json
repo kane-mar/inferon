@@ -532,12 +532,17 @@
     "pruning_holdout": "{count} en témoin (sans élagage)",
     "pruning_delta": "taux de succès élagué moins témoin : {delta} pts",
     "findings": "Constats en vol",
-    "findings_help": "Contrôles indicatifs sur la charge utile avant l'envoi : prompts système répétés, schémas surdimensionnés, texte générique, tours dupliqués. La requête est transmise inchangée.",
+    "findings_help": "Deux passes sur chaque requête. La passe en vol inspecte la charge utile avant l’envoi (prompts système répétés, schémas surdimensionnés, texte générique, tours dupliqués) et chiffre le gaspillage ; la passe par lot applique les règles de coût après l’écriture de la trace. Individuel : la charge utile est transmise inchangée.",
     "findings_none": "Aucun constat sur cette période.",
     "findings_count": "{count} requête(s) avec constats",
     "findings_waste": "≈{usd} USD d’entrée évitable",
     "findings_dismissed": "{count} écarté(s)",
-    "claim_window": "Évalué sur cette version : les {hours} dernières heures ({samples} échantillon(s), p50 observé {observed}). Les cartes ci-dessus décrivent la période sélectionnée."
+    "claim_window": "Évalué sur cette version : les {hours} dernières heures ({samples} échantillon(s), p50 observé {observed}). Les cartes ci-dessus décrivent la période sélectionnée.",
+    "lint_coverage": "En vol : {scanned} sur {total} requête(s) analysée(s) ({percent})",
+    "lint_findings": "{count} avec constats",
+    "lint_batch": "Règles par lot : {checked} vérifiées · {flagged} signalées",
+    "lint_disabled": "La passe en vol est désactivée pour ce locataire (lint_enabled = false).",
+    "findings_no_traffic": "Aucune requête sur cette période : rien à analyser."
   },
   "DatasetsPage": {
     "title_bar": "Jeux de données",

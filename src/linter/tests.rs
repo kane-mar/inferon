@@ -162,3 +162,14 @@
         assert!(lint(&trace("deepseek-flash", 80, 20), 1).is_none());
         assert!(lint(&trace("qwen/qwen3.8-27b", 80, 20), 1).is_none());
     }
+
+#[test]
+fn a_clean_trace_still_records_that_it_was_checked() {
+    // The worker stores `record`, not `lint`: a non-NULL value means "checked".
+    // Without this, `waste_detected IS NULL` meant both "clean" and "never ran",
+    // so the dashboard could not show that the linter was working at all.
+    let mut msg = trace("deepseek-flash", 12, 4);
+    msg.raw_prompt = Some(serde_json::json!({"tools": [{"a": 1}], "messages": []}));
+    assert!(lint(&msg, 0).is_none(), "nothing fires for a cheap model");
+    assert_eq!(record(&msg, 0), serde_json::json!({}), "but the scan is recorded");
+}

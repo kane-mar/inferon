@@ -279,7 +279,12 @@ pub(super) async fn preflight(state: &Arc<AppState>, tenant_id: Uuid, meta: &mut
             .hotpath
             .note_prompt(tenant_id, hash, crate::preflight::REPEAT_WINDOW)
     });
-    meta.lint = crate::preflight::inspect(&meta.raw_prompt, repeated, &meta.model);
+    // Every scanned request records a result, so "nothing found" is visible.
+    meta.lint = Some(crate::preflight::inspect(
+        &meta.raw_prompt,
+        repeated,
+        &meta.model,
+    ));
 }
 
 /// ITEM-091: apply the tenant's pruning policy, holding out a deterministic
@@ -333,6 +338,10 @@ pub(super) fn with_lint(mut response: Response, lint: Option<&Value>) -> Respons
         .filter_map(|kind| kind.as_str())
         .collect::<Vec<_>>()
         .join(",");
+    // A clean scan records an empty list; that is not a finding, so no header.
+    if joined.is_empty() {
+        return response;
+    }
     if let Ok(value) = HeaderValue::from_str(&joined) {
         response.headers_mut().insert("x-inferon-lint", value);
     }

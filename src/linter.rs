@@ -80,5 +80,15 @@ pub fn lint(msg: &TraceMessage, repeat_count: u32) -> Option<Value> {
     fired.then_some(waste)
 }
 
+/// The value stored on the trace for one scan.
+///
+/// `lint` returns `None` when nothing fired; the trace stores `{}` instead, so a
+/// non-NULL `waste_detected` means "checked" rather than "found something".
+/// Every existing query filters on a specific flag being `true`, and the alert
+/// query already excludes `'{}'`, so this changes no finding.
+pub fn record(msg: &TraceMessage, repeat_count: u32) -> Value {
+    lint(msg, repeat_count).unwrap_or_else(|| json!({}))
+}
+
 #[cfg(test)]
 mod tests;

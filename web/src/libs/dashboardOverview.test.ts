@@ -102,7 +102,15 @@ const performance = (
       proxy_share: 0.1,
       ...latency,
     },
-    lint: { requests: 0, dismissed: 0, wasted_usd: '0', by_kind: {} },
+    lint: {
+      enabled: true,
+      requests: 0,
+      preflight: { scanned: 0, findings: 0, dismissed: 0, wasted_usd: '0' },
+      batch: { checked: 0, flagged: 0, by_rule: {} },
+      by_kind: {},
+      dismissed: 0,
+      wasted_usd: '0',
+    },
     pruning: {
       enabled: false,
       rewritten: 0,

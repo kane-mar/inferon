@@ -3605,7 +3605,12 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .await
             .unwrap();
         assert!(first.headers().get("x-inferon-lint").is_none(), "first turn is clean");
-        let _ = rx.recv().await.expect("trace");
+        let clean = rx.recv().await.expect("trace");
+        assert_eq!(
+            clean.request_lint.expect("the scan is recorded")["kinds"],
+            serde_json::json!([]),
+            "a clean scan records an empty finding list, so coverage is visible"
+        );
 
         let second = router
             .clone()

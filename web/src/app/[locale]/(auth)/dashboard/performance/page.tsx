@@ -20,6 +20,10 @@ const rate = (value: number | null) =>
   value == null ? '—' : `${(value * 100).toFixed(1)}%`;
 
 const integer = (value: number) => value.toLocaleString('en-US');
+
+/** Scanned share of the window's traffic, or "—" with no traffic. */
+const coverage = (scanned: number, total: number): string =>
+  total === 0 ? '—' : `${Math.round((scanned / total) * 100)}%`;
 // `formatUsd` expects a decimal string; sessions return them as strings already.
 const usd = (value: string | null) => (value == null ? '—' : formatUsd(value));
 
@@ -378,37 +382,86 @@ export default async function PerformancePage(props: {
         </div>
       )}
 
-      {/* Advisory findings: waste the proxy can see before the call leaves. */}
+      {/* The lint, as coverage and outcome: a scan that found nothing is still
+          evidence that the pass ran. */}
       <div className="mt-4">
         <Card title={t('findings')}>
           <p className="mb-3 text-xs text-muted-foreground">{t('findings_help')}</p>
+
+          {!data.lint.enabled && (
+            <p className="mb-3 text-sm text-destructive">{t('lint_disabled')}</p>
+          )}
+
           {data.lint.requests === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('findings_none')}</p>
+                <p className="text-sm text-muted-foreground">{t('findings_no_traffic')}</p>
               )
             : (
-                <div className="flex flex-wrap items-center gap-4">
-                  <span className="text-sm">
-                    {t('findings_count', { count: data.lint.requests })}
-                  </span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {t('findings_waste', { usd: data.lint.wasted_usd })}
-                  </span>
-                  {data.lint.dismissed > 0 && (
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {t('findings_dismissed', { count: data.lint.dismissed })}
+                <div className="space-y-3">
+                  <div className="
+                    flex flex-wrap items-baseline gap-x-6 gap-y-2 text-sm
+                  "
+                  >
+                    <span className="text-muted-foreground">
+                      {t('lint_coverage', {
+                        scanned: integer(data.lint.preflight.scanned),
+                        total: integer(data.lint.requests),
+                        percent: coverage(data.lint.preflight.scanned, data.lint.requests),
+                      })}
                     </span>
+                    <span>
+                      {t('lint_findings', {
+                        count: integer(data.lint.preflight.findings),
+                      })}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {t('findings_waste', { usd: data.lint.preflight.wasted_usd })}
+                    </span>
+                    {data.lint.preflight.dismissed > 0 && (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {t('findings_dismissed', {
+                          count: integer(data.lint.preflight.dismissed),
+                        })}
+                      </span>
+                    )}
+                  </div>
+
+                  {Object.keys(data.lint.by_kind).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(data.lint.by_kind).map(([kind, count]) => (
+                        <span
+                          key={kind}
+                          className="
+                            rounded-md border px-2 py-1 font-mono text-xs
+                            text-muted-foreground
+                          "
+                        >
+                          {kind}
+                          {' '}
+                          ·
+                          {integer(count)}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(data.lint.by_kind).map(([kind, count]) => (
+
+                  <div className="
+                    flex flex-wrap items-baseline gap-x-6 gap-y-2 border-t pt-3
+                    text-sm
+                  "
+                  >
+                    <span className="text-muted-foreground">
+                      {t('lint_batch', {
+                        checked: integer(data.lint.batch.checked),
+                        flagged: integer(data.lint.batch.flagged),
+                      })}
+                    </span>
+                    {Object.entries(data.lint.batch.by_rule).map(([rule, count]) => (
                       <span
-                        key={kind}
-                        className="
-                          rounded-md border px-2 py-1 font-mono text-xs
-                          text-muted-foreground
-                        "
+                        key={rule}
+                        className="font-mono text-xs text-muted-foreground"
                       >
-                        {kind}
+                        {rule}
                         {' '}
                         ·
                         {integer(count)}

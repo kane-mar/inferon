@@ -301,7 +301,7 @@ pub async fn telemetry_worker(
                     if !msg.is_local {
                         cost::warn_if_unpriced(&msg.request_model);
                     }
-                    msg.waste_detected = linter::lint(&msg, repeat_count);
+                    msg.waste_detected = Some(linter::record(&msg, repeat_count));
                     // ITEM-086: qualify the captured pair for the dataset surface.
                     if let Some(classification) = crate::datasets::classify(&msg) {
                         msg.example_state = Some(classification.state);

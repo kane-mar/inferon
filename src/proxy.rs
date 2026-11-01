@@ -687,7 +687,8 @@ pub(crate) async fn dismiss_lint(
     };
     let updated = sqlx::query(
         "UPDATE traces SET lint_dismissed_at = NOW()
-         WHERE id = $1 AND tenant_id = $2 AND request_lint IS NOT NULL",
+         WHERE id = $1 AND tenant_id = $2
+           AND jsonb_array_length(request_lint->'kinds') > 0",
     )
     .bind(body.trace_id)
     .bind(tenant.id)

@@ -114,18 +114,22 @@ pub async fn performance(
     .fetch_all(&state.db)
     .await)?;
 
-    // A dismissed finding is a false positive the tenant told us about: it keeps
-    // its trace, but stops counting as actionable (ITEM-090 AC5).
-    let (linted, dismissed, wasted): (i64, i64, Decimal) = stored(sqlx::query_as(
+    // ITEM-090/092: linting has to be *observable* — coverage and outcome, not
+    // just findings. Every scanned request records `request_lint` (empty kinds
+    // when clean) and every checked trace records `waste_detected` (`{}` when
+    // clean), so "ran and found nothing" is distinguishable from "never ran".
+    let found = "jsonb_array_length(request_lint->'kinds') > 0";
+    let (linted, scanned, dismissed, wasted): (i64, i64, i64, Decimal) = stored(sqlx::query_as(&format!(
         "SELECT
-           COUNT(*) FILTER (WHERE request_lint IS NOT NULL AND lint_dismissed_at IS NULL),
-           COUNT(*) FILTER (WHERE lint_dismissed_at IS NOT NULL),
+           COUNT(*) FILTER (WHERE {found} AND lint_dismissed_at IS NULL),
+           COUNT(*) FILTER (WHERE request_lint IS NOT NULL),
+           COUNT(*) FILTER (WHERE {found} AND lint_dismissed_at IS NOT NULL),
            COALESCE(SUM((request_lint->>'wasted_usd_est')::numeric)
-                    FILTER (WHERE request_lint IS NOT NULL AND lint_dismissed_at IS NULL), 0)
+                    FILTER (WHERE {found} AND lint_dismissed_at IS NULL), 0)
          FROM traces
          WHERE tenant_id = $1
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
-    )
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')"
+    ))
     .bind(tenant_id)
     .bind(days)
     .fetch_one(&state.db)
@@ -258,6 +262,46 @@ pub async fn performance(
     .fetch_all(&state.db)
     .await)?;
 
+    // The batch linter (rules A/B/C) records `{}` when it finds nothing, so a
+    // non-NULL value is "checked". Coverage and hit rate in one query.
+    let (batch_checked, batch_flagged): (i64, i64) = stored(sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE waste_detected IS NOT NULL),
+                COUNT(*) FILTER (WHERE waste_detected IS NOT NULL
+                                   AND waste_detected <> '{}'::jsonb)
+         FROM traces
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await)?;
+    let batch_by_rule: Vec<(String, i64)> = stored(sqlx::query_as(
+        "SELECT flag, COUNT(*)
+         FROM traces
+         CROSS JOIN LATERAL (VALUES
+            ('over_provisioned', waste_detected->>'over_provisioned'),
+            ('cache_miss', waste_detected->>'cache_miss_system_prompt'),
+            ('model_misuse', waste_detected->>'model_misuse')) AS f(flag, fired)
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+           AND f.fired = 'true'
+         GROUP BY flag ORDER BY 2 DESC",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await)?;
+    let requests_in_window: i64 = stored(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM traces
+         WHERE tenant_id = $1 AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+    )
+    .bind(tenant_id)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await)?;
+    let preflight_enabled = state.hotpath.lint_enabled(&state, tenant_id).await;
+
     // Process-wide counters are operator information, not a tenant's.
     let cache = match super::operator_or(&state, &headers).await {
         Ok(()) => Some(cache_json(state.hotpath.stats())),
@@ -301,7 +345,22 @@ pub async fn performance(
             "proxy_share": proxy_share,
         },
         "lint": {
-            "requests": linted,
+            "enabled": preflight_enabled,
+            "requests": requests_in_window,
+            "preflight": {
+                "scanned": scanned,
+                "findings": linted,
+                "dismissed": dismissed,
+                "wasted_usd": wasted.to_string(),
+            },
+            "batch": {
+                "checked": batch_checked,
+                "flagged": batch_flagged,
+                "by_rule": batch_by_rule
+                    .into_iter()
+                    .map(|(rule, count)| (rule, json!(count)))
+                    .collect::<serde_json::Map<String, Value>>(),
+            },
             "dismissed": dismissed,
             "wasted_usd": wasted.to_string(),
             "by_kind": by_kind

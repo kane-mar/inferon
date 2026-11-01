@@ -532,12 +532,17 @@
     "pruning_holdout": "{count} held out (unpruned control)",
     "pruning_delta": "pruned minus held-out ok rate: {delta} pts",
     "findings": "In-flight findings",
-    "findings_help": "Advisory checks on the payload before dispatch: repeated system prompts, oversized schemas, boilerplate, duplicate turns. The request is forwarded unchanged.",
+    "findings_help": "Two passes on every request. The pre-flight pass inspects the payload before dispatch (repeated system prompts, oversized schemas, boilerplate, duplicate turns) and prices the waste; the batch pass runs the cost rules after the trace lands. Advisory only: the payload is forwarded unchanged.",
     "findings_none": "No findings in this window.",
     "findings_count": "{count} request(s) with findings",
     "findings_waste": "≈{usd} USD of avoidable input",
     "findings_dismissed": "{count} dismissed",
-    "claim_window": "Evaluated on this build: the last {hours} h ({samples} sample(s), observed p50 {observed}). The cards above describe the window you selected."
+    "claim_window": "Evaluated on this build: the last {hours} h ({samples} sample(s), observed p50 {observed}). The cards above describe the window you selected.",
+    "lint_coverage": "Pre-flight: {scanned} of {total} request(s) scanned ({percent})",
+    "lint_findings": "{count} with findings",
+    "lint_batch": "Batch rules: {checked} checked · {flagged} flagged",
+    "lint_disabled": "The pre-flight pass is switched off for this tenant (lint_enabled = false).",
+    "findings_no_traffic": "No requests in this window yet, so there is nothing to scan."
   },
   "DatasetsPage": {
     "title_bar": "Datasets",

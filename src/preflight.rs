@@ -15,10 +15,20 @@ pub const PROMPT_BUDGET_CHARS: usize = 8_000;
 /// How long a system prompt counts as "the same one again".
 pub const REPEAT_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Inspect a parsed request. `repeated_system_prompt` comes from the hot-path
-/// history (the module is pure, so the state lives with the caller). The wasted
-/// amount is priced with the same engine as the trace, at the request's model.
-pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str) -> Option<Value> {
+/// Version of the rule set. Stored with every scan so counts from different rule
+/// sets are never compared as if they were the same measurement.
+pub const VERSION: &str = "preflight/1";
+
+/// Inspect a parsed request and record **every** scan.
+///
+/// `repeated_system_prompt` comes from the hot-path history (the module is pure,
+/// so the state lives with the caller). The wasted amount is priced with the
+/// same engine as the trace, at the request's model.
+///
+/// A clean payload returns a record with an empty `kinds` list, not `None`: a
+/// NULL used to mean both "clean" and "never scanned", which made coverage
+/// unmeasurable. `kinds` empty == scanned, nothing found.
+pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str) -> Value {
     let mut kinds: Vec<&'static str> = Vec::new();
     let mut wasted_tokens = 0i64;
 
@@ -42,9 +52,6 @@ pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str) -> Op
         wasted_tokens += (duplicate_chars / 4) as i64;
     }
 
-    if kinds.is_empty() {
-        return None;
-    }
     // Input-only: the finding is about the payload the model is asked to read.
     let wasted_usd = crate::cost::calculate_cost(
         model,
@@ -53,11 +60,12 @@ pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str) -> Op
         0,
     );
     // Money is a string, as everywhere else: no float ever touches a cost.
-    Some(json!({
+    json!({
+        "version": VERSION,
         "kinds": kinds,
         "wasted_tokens_est": wasted_tokens,
         "wasted_usd_est": wasted_usd.round_dp(10).to_string(),
-    }))
+    })
 }
 
 /// Characters in the first `system` message.

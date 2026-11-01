@@ -234,14 +234,33 @@ export type PerformanceReport = {
     holdout_ok_rate: number | null;
     delta: number | null;
   };
-  /** ITEM-090: pre-flight findings (advisory). */
+  /**
+   * ITEM-090: the payload lint, reported as coverage and outcome — a scan that
+   * finds nothing must still be visible, or "is it running?" is unanswerable.
+   */
   lint: {
+    /** The per-tenant kill switch. */
+    enabled: boolean;
+    /** Requests in the window (the coverage denominator). */
     requests: number;
+    preflight: {
+      /** Requests scanned before dispatch (kind list empty = nothing found). */
+      scanned: number;
+      findings: number;
+      dismissed: number;
+      wasted_usd: string;
+    };
+    /** The post-hoc rules A/B/C, from the batch worker. */
+    batch: {
+      checked: number;
+      flagged: number;
+      by_rule: Record<string, number>;
+    };
+    by_kind: Record<string, number>;
     /** Findings the tenant dismissed as false positives. */
     dismissed: number;
     /** Estimated waste of the actionable findings, in USD. */
     wasted_usd: string;
-    by_kind: Record<string, number>;
   };
   /** Process-wide, operator-only; `null` for a tenant reader. */
   cache: PerformanceCache | null;
