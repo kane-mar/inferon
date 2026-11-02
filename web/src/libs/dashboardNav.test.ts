@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardNav } from './dashboardNav';
+import { activeSection, dashboardNav, matchDepth } from './dashboardNav';
 
 const hrefs = (items: { href: string }[]): string[] => items.map(item => item.href);
 
@@ -57,5 +57,68 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
       '/dashboard/operator',
     ]);
     expect(nav.at(-1)?.labelKey).toBe('operator');
+  });
+});
+
+describe('activeSection — a page belongs to its deepest menu entry', () => {
+  const labels = (pathname: string): string[] => {
+    const menu = dashboardNav(true).map(section => ({
+      href: section.href,
+      label: section.href,
+      ...(section.children
+        ? {
+            children: section.children.map(child => ({
+              href: child.href,
+              label: child.href,
+              ...(child.exact ? { exact: true } : {}),
+            })),
+          }
+        : {}),
+    }));
+    return (activeSection(menu, pathname)?.children ?? []).map(child => child.href);
+  };
+
+  it('shows the report tabs on the dashboard pages', () => {
+    expect(labels('/dashboard')).toContain('/dashboard/performance');
+    expect(labels('/dashboard/spend')).toContain('/dashboard/performance');
+    expect(labels('/dashboard/performance')).toContain('/dashboard/performance');
+  });
+
+  it('shows no tabs on providers, routing or the operator console', () => {
+    // These live under /dashboard too, which is exactly why the depth matters.
+    expect(labels('/dashboard/providers')).toEqual([]);
+    expect(labels('/dashboard/routing')).toEqual([]);
+    expect(labels('/dashboard/operator')).toEqual([]);
+  });
+
+  it('shows the settings tabs on the settings pages', () => {
+    expect(labels('/dashboard/settings')).toEqual([
+      '/dashboard/onboarding',
+      '/dashboard/keys',
+      '/dashboard/members',
+    ]);
+    expect(labels('/dashboard/keys')).toEqual([
+      '/dashboard/onboarding',
+      '/dashboard/keys',
+      '/dashboard/members',
+    ]);
+  });
+
+  it('scopes a nested path to its own section, not the dashboard', () => {
+    const menu = dashboardNav(false).map(section => ({
+      href: section.href,
+      label: section.href,
+      ...(section.children
+        ? { children: section.children.map(child => ({ href: child.href, label: child.href })) }
+        : {}),
+    }));
+    const dashboard = menu.find(section => section.href === '/dashboard')!;
+    const providers = menu.find(section => section.href === '/dashboard/providers')!;
+
+    expect(matchDepth(dashboard, '/dashboard/providers')).toBe('/dashboard'.length);
+    expect(matchDepth(providers, '/dashboard/providers')).toBe(
+      '/dashboard/providers'.length,
+    );
+    expect(activeSection(menu, '/dashboard/providers')?.href).toBe('/dashboard/providers');
   });
 });

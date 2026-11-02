@@ -1,32 +1,19 @@
 'use client';
 
 import type { DashboardNavEntry } from '@/libs/dashboardNav';
+import { activeSection, isCurrent } from '@/libs/dashboardNav';
 import { Link, usePathname } from '@/libs/I18nNavigation';
 import { cn } from '@/utils/Helpers';
 
-/** True when `href` is the current page or an ancestor of it. */
-const within = (pathname: string, href: string): boolean =>
-  pathname.endsWith(href) || pathname.includes(`${href}/`);
-
 /**
- * The section's overview tab points at the section root, which every tab is
- * "within" — so it is marked `exact` and only lights up on that page.
- */
-const isCurrent = (pathname: string, item: { href: string; exact?: boolean }): boolean =>
-  item.exact ? pathname.endsWith(item.href) : within(pathname, item.href);
-
-/**
- * The second-level menu for the active section. Renders nothing outside a
- * section that has details, so most pages get no extra chrome.
+ * The second-level menu for the section the page actually belongs to. Renders
+ * nothing outside a section that has details, so most pages get no extra chrome
+ * — and Providers never shows the dashboard's report tabs just because both
+ * live under `/dashboard`.
  */
 export const SectionNav = (props: { menu: DashboardNavEntry[] }) => {
   const pathname = usePathname();
-  const section = props.menu.find(
-    item =>
-      item.children
-      && (within(pathname, item.href)
-        || item.children.some(child => within(pathname, child.href))),
-  );
+  const section = activeSection(props.menu, pathname);
 
   if (!section?.children) {
     return null;
