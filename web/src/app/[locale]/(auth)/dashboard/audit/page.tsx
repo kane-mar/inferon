@@ -115,7 +115,7 @@ export default async function AuditPage(props: {
           <Card title={t('no_traffic_title')}>
             <p className="text-sm text-muted-foreground">{t('no_traffic_body')}</p>
             <Link
-              href="/dashboard/onboarding"
+              href="/dashboard/settings"
               className="
                 mt-3 inline-block text-sm font-medium text-primary underline
                 underline-offset-4

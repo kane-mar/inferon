@@ -180,7 +180,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           <Card title={t('empty_title')}>
             <p className="text-sm text-muted-foreground">{t('empty_body')}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Link href="/dashboard/onboarding" className={buttonVariants()}>
+              <Link href="/dashboard/settings" className={buttonVariants()}>
                 {t('empty_connect')}
               </Link>
               <Link

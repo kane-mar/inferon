@@ -36,14 +36,11 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
     expect(providers?.children).toBeUndefined();
   });
 
-  it('puts access and setup under Settings', () => {
+  it('keeps Settings a single page, with no submenu', () => {
+    // Connect, keys and members are sections of the page now, not tabs.
     const settings = dashboardNav(false).find(item => item.href === '/dashboard/settings');
 
-    expect(hrefs(settings?.children ?? [])).toEqual([
-      '/dashboard/onboarding',
-      '/dashboard/keys',
-      '/dashboard/members',
-    ]);
+    expect(settings?.children).toBeUndefined();
   });
 
   it('adds the operator console last for operators', () => {
@@ -91,17 +88,8 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
     expect(labels('/dashboard/operator')).toEqual([]);
   });
 
-  it('shows the settings tabs on the settings pages', () => {
-    expect(labels('/dashboard/settings')).toEqual([
-      '/dashboard/onboarding',
-      '/dashboard/keys',
-      '/dashboard/members',
-    ]);
-    expect(labels('/dashboard/keys')).toEqual([
-      '/dashboard/onboarding',
-      '/dashboard/keys',
-      '/dashboard/members',
-    ]);
+  it('shows no tabs on Settings — it is one page', () => {
+    expect(labels('/dashboard/settings')).toEqual([]);
   });
 
   it('scopes a nested path to its own section, not the dashboard', () => {

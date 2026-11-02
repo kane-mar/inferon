@@ -41,15 +41,8 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
   },
   { href: '/dashboard/providers', labelKey: 'providers' },
   { href: '/dashboard/routing', labelKey: 'routing' },
-  {
-    href: '/dashboard/settings',
-    labelKey: 'settings',
-    children: [
-      { href: '/dashboard/onboarding', labelKey: 'connect' },
-      { href: '/dashboard/keys', labelKey: 'keys' },
-      { href: '/dashboard/members', labelKey: 'members' },
-    ],
-  },
+  // Settings is one page: connect, keys, members and the workspace summary.
+  { href: '/dashboard/settings', labelKey: 'settings' },
   ...(isOperator
     ? [{ href: '/dashboard/operator', labelKey: 'operator' } satisfies DashboardNavSection]
     : []),
