@@ -35,6 +35,7 @@ retired items last.
 ### Delivered
 
 Newest first. This is history, not a ranking: nothing here is waiting to be pulled.
+
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-092 | Hot-path config cache and latency budget | improvement | **done + closed (2026-11-01)** — claim: "sub-millisecond wire latency". `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate, the `HOTPATH_CACHE=off` kill switch, cache hit/miss/invalidation/**age** counters on both `/operator/metrics` and `/dashboard/performance`, and named per-stage debug timings (`auth`, `body`, `policy`, `route`, `budget`, `chain`, `prune`). The deploy gate and the report's verdict both evaluate the **running build** (fixed 24 h window, sample floor, pure `latency::verdict`). Live: `41 requests · p50 111 µs · p95 221 µs`; 42-sample window p50 448 µs → claim met |
