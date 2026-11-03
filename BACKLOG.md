@@ -20,10 +20,10 @@ retired items last.
 
 ### Undelivered (rank order)
 
+Nothing is pullable: every remaining item is gated, below the line.
+
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-102 | Dashboard surfaces for pruning, evals and the prompt registry | feature | **new (2026-10-31)** — three delivered features are API-only, so a tenant cannot use them without curl: the pruning opt-in (`POST /api/prune`, per-tenant policy with a holdout), the eval harness (pin a gold set, run a model, compare two runs) and the prompt registry (name a prompt, list versions, diff). Owner-only controls on the existing pages — routing for pruning, a new Datasets/Quality tab for evals, Datasets for the registry — reusing the same read models. No new backend |
-
 | **— gated below this line —** | | | |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
@@ -38,6 +38,7 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-102 | Dashboard surfaces for pruning, evals and the prompt registry | feature | **done + archived (2026-11-03)** — pruning is configurable on Routing; Evals and Prompts are tabs under Dashboard. Found and fixed a real gap: `POST /api/prune` had never been added to the router (404 in production). Live: gold set pinned, run scored 1/1, prompt labelled and rendered, prune round-trip v40/v41 left off |
 | ITEM-092 | Hot-path config cache and latency budget | improvement | **done + closed (2026-11-01)** — claim: "sub-millisecond wire latency". `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate, the `HOTPATH_CACHE=off` kill switch, cache hit/miss/invalidation/**age** counters on both `/operator/metrics` and `/dashboard/performance`, and named per-stage debug timings (`auth`, `body`, `policy`, `route`, `budget`, `chain`, `prune`). The deploy gate and the report's verdict both evaluate the **running build** (fixed 24 h window, sample floor, pure `latency::verdict`). Live: `41 requests · p50 111 µs · p95 221 µs`; 42-sample window p50 448 µs → claim met |
 | ITEM-101 | Trace insert regression + schema-width guard | bug | **done (2026-10-31)** — the ITEM-085 build listed `raw_completion_capped` twice in the trace INSERT (and had one placeholder short), so **every** trace insert failed and the batch rolled back; ITEM-088's `payload_retention_days` was `INTEGER` while the store decodes `i64`, so the hot path answered `500 budget_store_error` for every request from 2026-10-30 11:14Z. Fixed, plus unit guards that read the statement as data: no duplicate column, one placeholder per column, every column exists in `db/init`, and the retention column is `BIGINT`. Live: 200 + a persisted trace |
 | ITEM-100 | Multi-provider load balancing | feature | **done (2026-10-31)** — LiteLLM parity. When several healthy providers serve a model, requests are spread across them, weighted by the adaptive policy's health weights: a demoted provider gets less (not nothing), a zeroed or unreachable one is skipped, and a single-provider model is the old behaviour exactly (`selection = only`). The pick is a pure seeded function (`loadbalance::choose` + a splitmix of the per-(tenant, model) counter, so consecutive requests land in unrelated buckets), `traces.provider_selection` records `only`/`weight`/`round_robin`, and `/operator/metrics` now reports per-provider in-flight dispatches alongside routed counts |
@@ -103,13 +104,15 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-01 — restored to the strict single-ranked form: undelivered
-items ranked top to bottom with the gated block at the bottom of the same list,
+_Last updated: 2026-11-03 — ITEM-102 delivered; the undelivered list is now
+gated-only (nothing pullable). Same form: one ranked list, gated at its bottom,
 then delivered history, then retired items._
 
-**Pullable now:** ITEM-102 — the dashboard surfaces for pruning, evals and the
-prompt registry. Those three features work and are tested, but a tenant can only
-drive them with curl, which makes them features for us and not for a customer.
+**Nothing is pullable.** Every live surface is now reachable from the dashboard:
+pruning is configured on Routing, and Evals and Prompts are tabs. What remains is
+the gated block, and each of those needs a decision before it can be built — GPU
+infra for 076/032, a call on centroid routing for 029 (its data gate is met), and
+a customer refusing both hosted options for 084.
 
 **Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.
