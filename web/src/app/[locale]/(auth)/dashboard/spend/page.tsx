@@ -6,23 +6,15 @@ import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
+import { money } from '@/features/dashboard/money';
 import { CELL, integer, HEAD as REPORT_HEAD, usd } from '@/features/dashboard/reportFormat';
+import { reportDays } from '@/features/dashboard/reportWindow';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatCompact, formatInt, spendRows } from '@/libs/dashboardMetrics';
-import { Link } from '@/libs/I18nNavigation';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
-
-const WINDOWS = [7, 30, 90] as const;
-
-const pill = (active: boolean): string =>
-  active
-    ? 'rounded-[5px] bg-primary px-2.5 py-1 font-medium text-primary-foreground'
-    : `
-      rounded-[5px] px-2.5 py-1 text-muted-foreground
-      hover:bg-muted hover:text-foreground
-    `;
 
 const HEAD = 'py-2 font-mono text-xs font-medium tracking-wide uppercase';
 const RIGHT = `${HEAD} text-right`;
@@ -41,8 +33,7 @@ export default async function SpendReportPage(props: {
   }
 
   const params = await props.searchParams;
-  const requested = Number(params.days);
-  const days = (WINDOWS as readonly number[]).includes(requested) ? requested : 30;
+  const days = reportDays(params);
   const hideZero = params.hide_zero === '1';
   const t = await getTranslations({ locale, namespace: 'DashboardIndexPage' });
   const heading = await getTranslations({ locale, namespace: 'SpendReportPage' });
@@ -91,47 +82,30 @@ export default async function SpendReportPage(props: {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeader
-          title={heading('title_bar')}
-          description={heading('title_bar_description', { days })}
-        />
-        <div className="flex items-center gap-3">
-          <Suspense fallback={null}>
-            <HideZeroCheckbox checked={hideZero} label={t('hide_zero')} />
-          </Suspense>
-          <div className="
-            inline-flex items-center gap-0.5 rounded-md border bg-card p-0.5
-            text-sm shadow-sm
-          "
-          >
-            {WINDOWS.map(window => (
-              <Link
-                key={window}
-                href={{
-                  pathname: '/dashboard/spend',
-                  query: { days: window, ...(hideZero ? { hide_zero: 1 } : {}) },
-                }}
-                className={pill(window === days)}
-              >
-                {`${window}d`}
-              </Link>
-            ))}
+      <PageHeader
+        title={heading('title_bar')}
+        description={heading('title_bar_description', { days })}
+        action={(
+          <div className="flex items-center gap-3">
+            <Suspense fallback={null}>
+              <HideZeroCheckbox checked={hideZero} label={t('hide_zero')} />
+            </Suspense>
+            <WindowChip days={days} />
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="
         mt-6 grid grid-cols-1 gap-4
         lg:grid-cols-2
       "
       >
-        <Card title={t('by_model')}>
+        <Card title={t('by_model')} icon="cost">
           <BarChart
             rows={models.map(model => ({
               label: model.model,
               value: Number(model.cost_usd),
-              display: formatUsd(model.cost_usd),
+              display: money(model.cost_usd),
             }))}
             empty={t('no_data')}
           />
@@ -168,7 +142,7 @@ export default async function SpendReportPage(props: {
                         ? `${Math.round((model.cached_prompt_tokens / model.prompt_tokens) * 100)}%`
                         : '—'}
                     </td>
-                    <td className="py-2 text-right tabular-nums">{formatUsd(model.cost_usd)}</td>
+                    <td className="py-2 text-right tabular-nums">{money(model.cost_usd)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -176,12 +150,12 @@ export default async function SpendReportPage(props: {
           )}
         </Card>
 
-        <Card title={t('by_provider')}>
+        <Card title={t('by_provider')} icon="store">
           <BarChart
             rows={providers.map(provider => ({
               label: provider.name,
               value: Number(provider.cost_usd),
-              display: formatUsd(provider.cost_usd),
+              display: money(provider.cost_usd),
             }))}
             empty={t('no_data')}
           />
@@ -197,12 +171,12 @@ export default async function SpendReportPage(props: {
           )}
         </Card>
 
-        <Card title={t('by_key')}>
+        <Card title={t('by_key')} icon="lock">
           <BarChart
             rows={keySource.map(key => ({
               label: key.label,
               value: Number(key.cost_usd),
-              display: formatUsd(key.cost_usd),
+              display: money(key.cost_usd),
             }))}
             empty={t('no_data')}
           />
@@ -218,7 +192,7 @@ export default async function SpendReportPage(props: {
           )}
         </Card>
 
-        <Card title={t('by_prompt')}>
+        <Card title={t('by_prompt')} icon="layers">
           {byPrompt.prompts.length === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
@@ -261,7 +235,7 @@ export default async function SpendReportPage(props: {
                             : '—'}
                         </td>
                         <td className="py-2 text-right tabular-nums">
-                          {formatUsd(prompt.cost_usd)}
+                          {money(prompt.cost_usd)}
                         </td>
                       </tr>
                     ))}
@@ -273,19 +247,28 @@ export default async function SpendReportPage(props: {
 
       {/* The unit of work: what one client transaction actually costs. */}
       <div className="mt-4">
-        <Card title={heading('transactions')}>
+        <Card title={heading('transactions')} icon="activity">
           <div className="grid grid-cols-3 gap-3">
             <KpiCard
               label={heading('transactions_p50')}
+              icon="latency"
               value={usd(sessions.distribution.p50_cost_usd)}
+              window={days}
+              definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_p95')}
+              icon="latency"
               value={usd(sessions.distribution.p95_cost_usd)}
+              window={days}
+              definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_count')}
+              icon="activity"
               value={integer(sessions.distribution.sessions)}
+              window={days}
+              definition={heading('transactions_help')}
             />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">{heading('transactions_help')}</p>
@@ -319,7 +302,7 @@ export default async function SpendReportPage(props: {
                       </td>
                       <td className={CELL}>{integer(row.turns)}</td>
                       <td className={CELL}>{integer(row.models)}</td>
-                      <td className={CELL}>{formatUsd(row.cost_usd)}</td>
+                      <td className={CELL}>{money(row.cost_usd)}</td>
                       <td className={CELL}>{integer(row.errors)}</td>
                     </tr>
                   ))}

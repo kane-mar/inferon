@@ -1,4 +1,4 @@
-import { formatUsd } from '@/libs/InferonApi';
+import { money } from './money';
 
 /**
  * Shared presentation atoms for the report pages, so they read the same way.
@@ -19,8 +19,8 @@ export const rate = (value: number | null): string =>
 
 export const integer = (value: number): string => value.toLocaleString('en-US');
 
-/** `formatUsd` takes a decimal string: costs never pass through a float. */
-export const usd = (value: string | null): string => (value == null ? '—' : formatUsd(value));
+/** A cost, at the precision that matters (ITEM-106). */
+export const usd = (value: string | null): string => money(value);
 
 /** Scanned share of the window's traffic, or "—" with no traffic. */
 export const coverage = (scanned: number, total: number): string =>

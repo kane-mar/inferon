@@ -4,21 +4,13 @@ import { redirect } from 'next/navigation';
 import { AuditCards } from '@/features/dashboard/AuditCards';
 import { AutoRefresh } from '@/features/dashboard/AutoRefresh';
 import { Card } from '@/features/dashboard/Card';
+import { reportDays } from '@/features/dashboard/reportWindow';
 import { ShareAuditPanel } from '@/features/dashboard/ShareAuditPanel';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
-
-const WINDOWS = [7, 30, 90] as const;
-
-const pill = (active: boolean): string =>
-  active
-    ? 'rounded-[5px] bg-primary px-2.5 py-1 font-medium text-primary-foreground'
-    : `
-      rounded-[5px] px-2.5 py-1 text-muted-foreground
-      hover:bg-muted hover:text-foreground
-    `;
 
 /**
  * The cost audit: six named findings computed from the tenant's own telemetry
@@ -36,8 +28,7 @@ export default async function AuditPage(props: {
     redirect('/auth/login');
   }
 
-  const requested = Number((await props.searchParams).days);
-  const days = (WINDOWS as readonly number[]).includes(requested) ? requested : 30;
+  const days = reportDays(await props.searchParams);
   const t = await getTranslations({ locale, namespace: 'AuditPage' });
   const api = InferonApi.fromEnv();
 
@@ -85,34 +76,20 @@ export default async function AuditPage(props: {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeader
-          title={t('title_bar')}
-          description={t('title_bar_description', { days })}
-        />
-        <div className="flex items-center gap-3">
-          <AutoRefresh label={t('live')} />
-          <div className="
-            inline-flex items-center gap-0.5 rounded-md border bg-card p-0.5
-            text-sm shadow-sm
-          "
-          >
-            {WINDOWS.map(window => (
-              <Link
-                key={window}
-                href={{ pathname: '/dashboard/audit', query: { days: window } }}
-                className={pill(window === days)}
-              >
-                {`${window}d`}
-              </Link>
-            ))}
+      <PageHeader
+        title={t('title_bar')}
+        description={t('title_bar_description', { days })}
+        action={(
+          <div className="flex items-center gap-3">
+            <AutoRefresh label={t('live')} />
+            <WindowChip days={days} />
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       {summary.requests === 0 && (
         <div className="mb-4">
-          <Card title={t('no_traffic_title')}>
+          <Card title={t('no_traffic_title')} icon="warning">
             <p className="text-sm text-muted-foreground">{t('no_traffic_body')}</p>
             <Link
               href="/dashboard/settings"
@@ -131,7 +108,7 @@ export default async function AuditPage(props: {
 
       {keys.role === 'owner' && (
         <div className="mt-4">
-          <Card title={t('share_title')}>
+          <Card title={t('share_title')} icon="lock">
             <p className="mb-3 text-sm text-muted-foreground">{t('share_body')}</p>
             <ShareAuditPanel data={shares} />
           </Card>

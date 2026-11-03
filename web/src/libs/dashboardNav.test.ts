@@ -77,9 +77,9 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
   };
 
   it('shows the report tabs on the dashboard pages', () => {
-    expect(labels('/dashboard')).toContain('/dashboard/performance');
-    expect(labels('/dashboard/spend')).toContain('/dashboard/performance');
-    expect(labels('/dashboard/performance')).toContain('/dashboard/performance');
+    expect(labels('/dashboard')).toContain('/dashboard/runtime');
+    expect(labels('/dashboard/spend')).toContain('/dashboard/payloads');
+    expect(labels('/dashboard/runtime')).toContain('/dashboard/payloads');
   });
 
   it('shows no tabs on providers, routing or the operator console', () => {

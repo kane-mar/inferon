@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
+import { money } from './money';
 
 const pct = (value: number | null) => (value == null ? '—' : `${(value * 100).toFixed(0)}%`);
 const short = (hash: string) => hash.slice(0, 10);
@@ -151,13 +152,15 @@ export const PromptsPanel = (props: {
                           last:border-0
                         "
                       >
-                        <td className="py-2 font-mono text-xs">{short(version.prompt_hash)}</td>
+                        <td className="py-2 font-mono text-xs">
+                          <span title={version.prompt_hash}>{short(version.prompt_hash)}</span>
+                        </td>
                         <td className="py-2 tabular-nums">{version.requests}</td>
                         <td className="py-2 tabular-nums">{pct(version.ok_rate)}</td>
                         <td className="py-2 tabular-nums">{version.thumbs_down}</td>
-                        <td className="py-2 font-mono text-xs">{version.spend_usd}</td>
+                        <td className="py-2 font-mono text-xs">{money(version.spend_usd)}</td>
                         <td className="py-2 text-xs text-muted-foreground">
-                          {version.first_seen.slice(0, 10)}
+                          <span title={version.first_seen}>{version.first_seen.slice(0, 10)}</span>
                         </td>
                       </tr>
                     ))}

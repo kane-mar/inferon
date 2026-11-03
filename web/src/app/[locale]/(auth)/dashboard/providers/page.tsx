@@ -34,7 +34,7 @@ export default async function ProvidersPage(props: ProvidersPageProps) {
         title={t('title_bar')}
         description={t('title_bar_description')}
       />
-      <Card title={t('providers')}>
+      <Card title={t('providers')} icon="store">
         <ProvidersPanel data={data} role={data.role} />
       </Card>
     </>

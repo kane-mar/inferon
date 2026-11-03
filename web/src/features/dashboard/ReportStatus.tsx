@@ -7,7 +7,7 @@ export const Status = (props: { ok: boolean | null; met: string; missed: string 
     <span
       className={props.ok
         ? `
-          text-sm font-medium text-emerald-600
+          text-sm font-medium text-emerald-700
           dark:text-emerald-400
         `
         : 'text-sm font-medium text-destructive'}

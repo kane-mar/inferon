@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/libs/errors';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
+import { money } from './money';
 
 /**
  * ITEM-044 (live): the models a provider's host advertises, discovered from
@@ -116,7 +117,7 @@ export const ProviderModels = (props: { providerId: string; canEdit: boolean }) 
               {model.price.local
                 ? t('local_free')
                 : model.price.priced
-                  ? `${formatUsd(model.price.input_usd_per_million)} in · ${formatUsd(model.price.output_usd_per_million)} out / 1M`
+                  ? `${money(model.price.input_usd_per_million)} in · ${money(model.price.output_usd_per_million)} out / 1M`
                   : t('unpriced')}
             </div>
 

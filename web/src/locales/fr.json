@@ -158,11 +158,16 @@
     "datasets_excluded": "Paires exclues",
     "thumbs": "Pouces haut / bas",
     "attention": "À examiner",
-    "attention_errors": "Les requêtes échouent plus souvent que le seuil d’attention",
-    "attention_latency": "Le p95 du premier token dépasse largement le seuil d’attention",
-    "attention_waste": "Dépense récupérable selon l’audit",
-    "attention_lint": "Gaspillage de charge utile chiffré par l’analyse",
-    "attention_now": "maintenant"
+    "attention_errors": "Le taux d’erreur dépasse la ligne — vérifiez la chaîne de repli et le garde",
+    "attention_latency": "Le p95 du premier jeton dépasse largement la ligne — choisissez un modèle plus rapide",
+    "attention_waste": "Dépense récupérable par l’audit — plafonnez-la ou re-routez-la",
+    "attention_lint": "Gaspillage de charge tarifé par le lint — activez l’élagage",
+    "attention_now": "maintenant",
+    "requests_help": "Toutes les requêtes servies par le proxy sur cette période.",
+    "total_cost_help": "Ce que ces requêtes ont coûté aux tarifs des fournisseurs, après routage, repli et cache.",
+    "total_savings_help": "Ce que le routeur, la chaîne de repli et le cache du fournisseur ont évité, par rapport au modèle de pointe systématique.",
+    "p95_ttft_help": "Temps jusqu’au premier jeton, 95e centile : 95 % des réponses ont démarré plus vite.",
+    "error_rate_help": "Requêtes en échec sur cette fenêtre, en part de toutes les requêtes ; le rapport qualité les ventile par classe."
   },
   "KeysPage": {
     "label_field": "Libellé",
@@ -222,7 +227,11 @@
     "state": "État",
     "fallback_rate": "Taux de repli",
     "detected_at": "Détecté",
-    "no_data": "Aucune donnée pour cette fenêtre."
+    "no_data": "Aucune donnée pour cette fenêtre.",
+    "requests_unit": "requêtes",
+    "requests_help": "Toutes les requêtes routées par le proxy sur cette fenêtre, tous locataires confondus.",
+    "errors_help": "Requêtes en échec sur cette fenêtre, toutes causes confondues (amont, délai, garde ou proxy).",
+    "total_cost_help": "Dépense amont de tous les locataires sur cette fenêtre."
   },
   "ProvidersPage": {
     "title_bar": "Fournisseurs",
@@ -302,7 +311,13 @@
     "errors": "Erreurs",
     "success": "Réussite",
     "thumbs_up": "Positif",
-    "thumbs_down": "Négatif"
+    "thumbs_down": "Négatif",
+    "success_rate_help": "Réponses non vides qui n’ont ni échoué, ni refusé, ni été tronquées.",
+    "empty_rate_help": "Une réponse 200 sans contenu — souvent un budget de jetons consommé par le raisonnement.",
+    "refusal_rate_help": "Le modèle a refusé la requête.",
+    "error_rate_help": "Échecs du fournisseur, délais dépassés et erreurs du proxy.",
+    "truncated_rate_help": "La complétion a atteint max_tokens avant la fin.",
+    "guard_fallback_rate_help": "Sortie structurée invalide au regard du schéma, rejouée sur le modèle de pointe."
   },
   "RoutingPage": {
     "title_bar": "Routage",
@@ -487,7 +502,9 @@
     "purged": "{count} ligne(s) purgée(s).",
     "purge_error": "Impossible de purger — veuillez réessayer.",
     "purge_yes": "Supprimer",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "clusters_help": "Groupes de prompts par empreinte ou par sens, selon le regroupement.",
+    "excluded_help": "Trafic non qualifié : complétion absente, pouce vers le bas ou requête en échec."
   },
   "PruningPanel": {
     "help": "Sur activation. Les tours exactement dupliqués sont retirés avant l’envoi et, avec un budget, les plus anciens au-delà. Les définitions d’outils, le prompt système et le dernier tour ne sont jamais touchés. Une requête avec contrat de schéma n’est jamais réécrite. Une part témoin est envoyée sans élagage pour mesurer l’effet, et une régression de qualité désactive la politique automatiquement.",
@@ -594,7 +611,16 @@
     "by_model": "Par modèle",
     "model": "Modèle",
     "requests": "Requêtes",
-    "no_samples": "Aucune requête mesurée sur cette période."
+    "no_samples": "Aucune requête mesurée sur cette période.",
+    "overhead_help": "proxy_us : du début de la requête jusqu’avant le premier envoi au fournisseur. Hors fournisseur et hors corps de réponse.",
+    "under_1ms_help": "Part des requêtes mesurées dont la surcharge est restée sous la promesse de 1 ms.",
+    "samples_help": "Requêtes dont la surcharge a été mesurée sur cette période — le dénominateur de chaque chiffre ici.",
+    "total_help": "De bout en bout, du début de la requête au dernier octet de la réponse.",
+    "ttft_help": "Du début de la requête au premier jeton de la réponse.",
+    "legend_healthy": "Sans teinte : moins de 5 % d’erreurs et p95 sous 3 s",
+    "legend_degraded": "Teinte claire : 5 % d’erreurs ou plus, ou p95 au-delà de 3 s",
+    "legend_failing": "Teinte foncée : 20 % d’erreurs ou plus, ou p95 au-delà de 10 s",
+    "legend_empty": "point : aucun trafic dans la tranche"
   },
   "PayloadsPage": {
     "title_bar": "Charges utiles",
@@ -641,6 +667,13 @@
     "redact_storage": "Masquer au stockage",
     "redact_wire": "Masquer sur le fil",
     "matches": "Correspondances",
-    "matches_value": "{matches} sur {scanned} analysées"
+    "matches_value": "{matches} sur {scanned} analysées",
+    "lint_coverage_help": "Requêtes réellement inspectées par le lint avant envoi, sur tout le trafic de la période.",
+    "lint_findings_help": "Constats du lint avant envoi sur cette période, et le coût du gaspillage chiffré.",
+    "prune_removed_help": "Requêtes dont le contexte a été réécrit par la politique d’élagage."
+  },
+  "WindowChip": {
+    "label": "Derniers",
+    "days": "{days} jours"
   }
 }

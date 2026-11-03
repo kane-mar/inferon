@@ -7,8 +7,9 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { centsToUsd } from '@/libs/dashboardMetrics';
 import { errorMessage } from '@/libs/errors';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
+import { money } from './money';
 
 /** ITEM-090: the pre-flight rules, in reporting order. */
 const LINT_RULES: { rule: LintRule; label: string; help: string }[] = [
@@ -102,10 +103,10 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
         <p className="text-xs text-muted-foreground">
           {data.budget_limit_cents > 0
             ? t('spent_of', {
-                spent: formatUsd(centsToUsd(data.current_spend_cents)),
-                limit: formatUsd(centsToUsd(data.budget_limit_cents)),
+                spent: money(centsToUsd(data.current_spend_cents)),
+                limit: money(centsToUsd(data.budget_limit_cents)),
               })
-            : t('spent_unlimited', { spent: formatUsd(centsToUsd(data.current_spend_cents)) })}
+            : t('spent_unlimited', { spent: money(centsToUsd(data.current_spend_cents)) })}
         </p>
       </div>
 

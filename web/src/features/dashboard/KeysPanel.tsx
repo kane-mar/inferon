@@ -116,8 +116,12 @@ export const KeysPanel = (props: { data: KeysResponse }) => {
                       "
                     >
                       <td className="py-2">{key.label}</td>
-                      <td className="py-2">{date(key.created_at)}</td>
-                      <td className="py-2">{date(key.last_used_at)}</td>
+                      <td className="py-2">
+                        <span title={key.created_at ?? undefined}>{date(key.created_at)}</span>
+                      </td>
+                      <td className="py-2">
+                        <span title={key.last_used_at ?? undefined}>{date(key.last_used_at)}</span>
+                      </td>
                       <td className="py-2">
                         {key.revoked ? t('revoked') : t('active')}
                       </td>

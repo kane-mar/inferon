@@ -9,8 +9,6 @@ export type DashboardView = {
   hideZero: boolean;
 };
 
-const RANGES = [7, 30, 90] as const;
-
 /** Serialize the view into the dashboard URL (omitting defaults keeps it short). */
 const href = (view: DashboardView) => ({
   pathname: '/dashboard',
@@ -29,24 +27,6 @@ const pill = (active: boolean): string =>
       rounded-[5px] px-2.5 py-1 text-muted-foreground
       hover:bg-muted hover:text-foreground
     `;
-
-export const RangeSwitcher = (props: DashboardView) => (
-  <div className="
-    inline-flex items-center gap-0.5 rounded-md border bg-card p-0.5 text-sm
-    shadow-sm
-  "
-  >
-    {RANGES.map(days => (
-      <Link
-        key={days}
-        href={href({ ...props, days })}
-        className={pill(days === props.days)}
-      >
-        {`${days}d`}
-      </Link>
-    ))}
-  </div>
-);
 
 export const CompareToggle = (props: DashboardView & { label: string }) => (
   <Link

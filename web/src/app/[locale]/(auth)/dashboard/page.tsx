@@ -8,28 +8,29 @@ import { Card } from '@/features/dashboard/Card';
 import {
   CompareToggle,
   MetricTabs,
-  RangeSwitcher,
 } from '@/features/dashboard/DashboardToolbar';
 import { Icon } from '@/features/dashboard/Icon';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { LineChart } from '@/features/dashboard/LineChart';
+import { money } from '@/features/dashboard/money';
+import { WINDOWS } from '@/features/dashboard/reportWindow';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import {
   chartSeries,
   deltaPct,
+  errorRatePct,
   formatInt,
   formatMs,
   moneyDeltaPct,
 } from '@/libs/dashboardMetrics';
 import { attention } from '@/libs/dashboardOverview';
 import { Link } from '@/libs/I18nNavigation';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
-const RANGES = [7, 30, 90] as const;
-
 const SEVERE = 'text-destructive';
-const WARNING = 'text-amber-600 dark:text-amber-400';
+const WARNING = 'text-amber-700 dark:text-amber-400';
 
 const CHART_METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
 
@@ -46,7 +47,7 @@ type SearchParams = { days?: string; compare?: string; metric?: string; hide_zer
 const parseView = (params: SearchParams): DashboardView => {
   const days = Number(params.days) as DashboardView['days'];
   return {
-    days: (RANGES as readonly number[]).includes(days) ? days : 30,
+    days: (WINDOWS as readonly number[]).includes(days) ? days : 30,
     compare: params.compare === '1',
     metric: CHART_METRICS.includes(params.metric as ChartMetric)
       ? (params.metric as ChartMetric)
@@ -92,6 +93,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     ? moneyDeltaPct(summary.total_cost_usd, previous.total_cost_usd)
     : null;
   const ttftDelta = previous ? deltaPct(summary.ttft_p95_ms, previous.ttft_p95_ms) : null;
+  const errorRate = errorRatePct(summary.requests, summary.errors);
 
   const chartSeriesList: LineSeries[] = [
     {
@@ -127,7 +129,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         </p>
       </div>
       <div className="flex items-center gap-2">
-        <RangeSwitcher {...view} />
+        <WindowChip days={view.days} />
         <CompareToggle {...view} label={t('compare')} />
       </div>
     </div>
@@ -138,7 +140,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       <>
         {header}
         <div className="mt-6">
-          <Card title={t('empty_title')}>
+          <Card title={t('empty_title')} icon="activity">
             <p className="text-sm text-muted-foreground">{t('empty_body')}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Link href="/dashboard/settings" className={buttonVariants()}>
@@ -168,27 +170,47 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       >
         <KpiCard
           label={t('requests')}
+          icon="activity"
           value={formatInt(summary.requests)}
+          window={view.days}
           delta={requestsDelta}
+          definition={t('requests_help')}
         />
         <KpiCard
           label={t('total_cost')}
-          value={formatUsd(summary.total_cost_usd)}
+          icon="cost"
+          value={money(summary.total_cost_usd)}
+          window={view.days}
           delta={costDelta}
           goodWhen="down"
+          definition={t('total_cost_help')}
         />
         <KpiCard
-          label={t('total_savings')}
-          value={formatUsd(summary.total_savings_usd)}
-          hint={`${t('cache_savings')} ${formatUsd(summary.cache_savings_usd)}`}
+          label={t('error_rate')}
+          icon="warning"
+          value={errorRate == null ? '—' : `${errorRate.toFixed(1)}%`}
+          window={view.days}
+          tone={metricTone(errorRate == null ? null : errorRate / 100, THRESHOLDS.errorRate)}
+          definition={t('error_rate_help')}
         />
         <KpiCard
           label={t('p95_ttft')}
+          icon="latency"
           value={formatMs(summary.ttft_p95_ms)}
+          window={view.days}
           delta={ttftDelta}
+          definition={t('p95_ttft_help')}
           goodWhen="down"
           hint={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
           tone={metricTone(summary.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
+        />
+        <KpiCard
+          label={t('total_savings')}
+          icon="down"
+          value={money(summary.total_savings_usd)}
+          window={view.days}
+          hint={`${t('cache_savings')} ${money(summary.cache_savings_usd)}`}
+          definition={t('total_savings_help')}
         />
       </div>
 
@@ -216,7 +238,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                       {t(`attention_${finding.kind}`)}
                     </span>
                     <span className="font-mono text-xs text-muted-foreground">
-                      {finding.amount > 0 ? formatUsd(String(finding.amount)) : t('attention_now')}
+                      {finding.amount > 0 ? money(finding.amount) : t('attention_now')}
                     </span>
                   </Link>
                 </li>
@@ -229,6 +251,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       <div className="mt-4">
         <Card
           title={t('usage_over_time')}
+          icon="activity"
           action={<MetricTabs {...view} labels={metricLabels} />}
         >
           <LineChart

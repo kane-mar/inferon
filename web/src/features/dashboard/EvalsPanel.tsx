@@ -177,7 +177,9 @@ export const EvalsPanel = (props: {
                         </td>
                         <td className="py-2 tabular-nums">{pct(run.pass_rate)}</td>
                         <td className="py-2 font-mono text-xs">{run.cost_usd}</td>
-                        <td className="py-2 text-xs text-muted-foreground">{when(run.created_at)}</td>
+                        <td className="py-2 text-xs text-muted-foreground">
+                          <span title={run.created_at}>{when(run.created_at)}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

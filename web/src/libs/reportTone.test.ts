@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kpiCardClass, kpiSubtleClass, metricTone, TONE_CELL } from './reportTone';
+import { kpiCardClass, kpiSubtleClass, metricTone, toneText } from './reportTone';
 
 describe('metricTone — a value is green when it is good, red when it is not', () => {
   it('treats a lower number as better when the metric is latency', () => {
@@ -29,37 +29,25 @@ describe('metricTone — a value is green when it is good, red when it is not', 
     expect(metricTone(undefined, p50)).toBe('neutral');
   });
 
-  it('tints the whole box, not just the number', () => {
-    // A tinted box carries its own background, border and contrasting text, so
-    // the number is readable because of the colour rather than despite it.
-    for (const [tone, colour] of [
-      ['good', 'emerald'],
-      ['warn', 'amber'],
-      ['bad', 'red'],
-    ] as const) {
-      const classes = kpiCardClass(tone);
-
-      expect(classes).toContain(`bg-${colour}-50`);
-      expect(classes).toContain(`border-${colour}-200`);
-      expect(classes).toContain(`text-${colour}-900`);
+  it('leaves the box neutral and lets the value carry the verdict', () => {
+    // ITEM-107: colour is a highlight on the number, never a filled card — five
+    // tinted boxes is decoration and the eye stops seeing "notable".
+    for (const tone of ['good', 'warn', 'bad', 'neutral', undefined] as const) {
+      expect(kpiCardClass(tone)).toContain('bg-card');
+      expect(kpiCardClass(tone)).not.toMatch(/bg-(emerald|amber|red)-/);
     }
-    // The plain box is unchanged: the app's card surface and foreground.
-
-    expect(kpiCardClass(undefined)).toContain('bg-card');
-    expect(kpiCardClass('neutral')).toContain('text-card-foreground');
   });
 
-  it('softens the label on a tinted box instead of greying it out', () => {
-    expect(kpiSubtleClass('good')).toBe('opacity-75');
-    expect(kpiSubtleClass('bad')).toBe('opacity-75');
-    expect(kpiSubtleClass('neutral')).toBe('text-muted-foreground');
-    expect(kpiSubtleClass(undefined)).toBe('text-muted-foreground');
+  it('always greys the label, on every tone', () => {
+    for (const tone of ['good', 'warn', 'bad', 'neutral', undefined] as const) {
+      expect(kpiSubtleClass(tone)).toBe('text-muted-foreground');
+    }
   });
 
-  it('tints table cells the same way, leaving neutral alone', () => {
-    expect(TONE_CELL.good).toContain('bg-emerald-50');
-    expect(TONE_CELL.bad).toContain('bg-red-50');
-    expect(TONE_CELL.warn).toContain('bg-amber-50');
-    expect(TONE_CELL.neutral).toBe('');
+  it('colours only the text of a table cell, never its surface', () => {
+    expect(toneText('good')).toBe('');
+    expect(toneText('bad')).toContain('text-destructive');
+    expect(toneText('warn')).toContain('text-amber-700');
+    expect(toneText('neutral')).toBe('');
   });
 });

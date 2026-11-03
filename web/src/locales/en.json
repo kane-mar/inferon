@@ -158,11 +158,16 @@
     "datasets_excluded": "Excluded pairs",
     "thumbs": "Thumbs up / down",
     "attention": "Needs attention",
-    "attention_errors": "Requests are failing more often than the attention line allows",
-    "attention_latency": "The p95 time to first token is far above the attention line",
-    "attention_waste": "Spend the audit can recover",
-    "attention_lint": "Payload waste the lint has priced",
-    "attention_now": "now"
+    "attention_errors": "Error rate is above the line — check the fallback chain and guard",
+    "attention_latency": "p95 time to first token is far above the line — pick a faster model",
+    "attention_waste": "Spend the audit can recover — cap or re-route it",
+    "attention_lint": "Payload waste the lint has priced — enable pruning",
+    "attention_now": "now",
+    "requests_help": "Every request the proxy served in this window.",
+    "total_cost_help": "What those requests cost at the upstream providers' prices, after routing, fallback and caching.",
+    "total_savings_help": "What the router, the fallback chain and the provider cache avoided, priced against running the frontier model every time.",
+    "p95_ttft_help": "Time to the first token, 95th percentile: 95% of responses started faster than this.",
+    "error_rate_help": "Failed requests in this window, as a share of all requests; the quality report breaks it down by class."
   },
   "KeysPage": {
     "label_field": "Label",
@@ -222,7 +227,11 @@
     "state": "State",
     "fallback_rate": "Fallback rate",
     "detected_at": "Detected",
-    "no_data": "No data for this window yet."
+    "no_data": "No data for this window yet.",
+    "requests_unit": "requests",
+    "requests_help": "Every request routed through the proxy in this window, across all tenants.",
+    "errors_help": "Requests that failed in this window, from any cause (upstream, timeout, guard or proxy).",
+    "total_cost_help": "Upstream spend across all tenants in this window."
   },
   "ProvidersPage": {
     "title_bar": "Providers",
@@ -302,7 +311,13 @@
     "errors": "Errors",
     "success": "Success",
     "thumbs_up": "Up",
-    "thumbs_down": "Down"
+    "thumbs_down": "Down",
+    "success_rate_help": "Responses that were non-empty and did not fail, refuse or truncate.",
+    "empty_rate_help": "A 200 response with no content — usually a token budget spent on reasoning.",
+    "refusal_rate_help": "The model declined the request.",
+    "error_rate_help": "Upstream, timeout and proxy failures.",
+    "truncated_rate_help": "The completion hit its max_tokens before it finished.",
+    "guard_fallback_rate_help": "Structured output that failed its schema contract and was replayed on the frontier model."
   },
   "RoutingPage": {
     "title_bar": "Routing",
@@ -487,7 +502,9 @@
     "purged": "{count} row(s) purged.",
     "purge_error": "Could not purge — please retry.",
     "purge_yes": "Delete payloads",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "clusters_help": "Groups of prompts by hash or by meaning, depending on the grouping.",
+    "excluded_help": "Traffic that did not qualify: a missing completion, a thumbs-down or a failed request."
   },
   "PruningPanel": {
     "help": "Opt-in. Exact duplicate turns are removed before dispatch, and (with a budget) the oldest turns beyond it. Tool definitions, the system prompt and the last turn are never touched. A schema-contract request is never rewritten. A holdout is sent unpruned so the effect is measurable, and a quality regression turns the policy off automatically.",
@@ -594,7 +611,16 @@
     "by_model": "By model",
     "model": "Model",
     "requests": "Requests",
-    "no_samples": "No measured requests in this window."
+    "no_samples": "No measured requests in this window.",
+    "overhead_help": "proxy_us: request start to just before the first upstream dispatch. Excludes the upstream and the response body.",
+    "under_1ms_help": "Share of measured requests whose own overhead stayed under the 1 ms claim.",
+    "samples_help": "Requests with a measured overhead in this window — the denominator for every number on this page.",
+    "total_help": "End to end, from request start to the last byte of the response.",
+    "ttft_help": "Request start to the first token of the response.",
+    "legend_healthy": "No tint: under 5% errors and p95 under 3 s",
+    "legend_degraded": "Light tint: 5%+ errors or p95 over 3 s",
+    "legend_failing": "Dark tint: 20%+ errors or p95 over 10 s",
+    "legend_empty": "dot: no traffic in the bucket"
   },
   "PayloadsPage": {
     "title_bar": "Payloads",
@@ -641,6 +667,13 @@
     "redact_storage": "Redact in storage",
     "redact_wire": "Redact on the wire",
     "matches": "Matches",
-    "matches_value": "{matches} across {scanned} scanned"
+    "matches_value": "{matches} across {scanned} scanned",
+    "lint_coverage_help": "Requests the pre-flight lint actually inspected, out of all traffic in the window.",
+    "lint_findings_help": "Pre-flight findings in this window, and the spend their waste was priced at.",
+    "prune_removed_help": "Requests whose context was rewritten by the pruning policy."
+  },
+  "WindowChip": {
+    "label": "Last",
+    "days": "{days} days"
   }
 }

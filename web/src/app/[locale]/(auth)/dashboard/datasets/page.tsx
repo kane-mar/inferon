@@ -3,24 +3,31 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { DatasetPurge } from '@/features/dashboard/DatasetPurge';
 import { KpiCard } from '@/features/dashboard/KpiCard';
+import { money } from '@/features/dashboard/money';
 import { PromptsPanel } from '@/features/dashboard/PromptsPanel';
+import { reportDays } from '@/features/dashboard/reportWindow';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
 const CELL = 'px-3 py-2 text-sm tabular-nums';
-const DAYS = 30;
 
 const integer = (value: number) => value.toLocaleString('en-US');
 const short = (hash: string) => hash.slice(0, 10);
 
 /** The per-cluster JSONL download (owner-only, session cookie). */
-const exportHref = (selector: string, model: string, grouping: 'hash' | 'cluster'): string =>
+const exportHref = (
+  selector: string,
+  model: string,
+  grouping: 'hash' | 'cluster',
+  days: number,
+): string =>
   `/v1/dashboard/api/datasets/export?${new URLSearchParams({
     [grouping === 'cluster' ? 'cluster' : 'prompt_hash']: selector,
     model,
-    days: String(DAYS),
+    days: String(days),
   })}`;
 
 /**
@@ -30,10 +37,12 @@ const exportHref = (selector: string, model: string, grouping: 'hash' | 'cluster
  */
 export default async function DatasetsPage(props: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ days?: string }>;
 }) {
   const { locale } = await props.params;
   setRequestLocale(locale);
 
+  const days = reportDays(await props.searchParams);
   const session = await currentSession();
   if (!session) {
     redirect('/auth/login');
@@ -44,7 +53,7 @@ export default async function DatasetsPage(props: {
   // ITEM-105: the registry names the same hashes the clusters group, so it
   // belongs on this page rather than beside the spend reports.
   const [data, prompts] = await Promise.all([
-    api.datasets(DAYS, session.cookie),
+    api.datasets(days, session.cookie),
     api.prompts(session.cookie),
   ]);
   const promptsCopy = await getTranslations({ locale, namespace: 'PromptsPage' });
@@ -60,18 +69,47 @@ export default async function DatasetsPage(props: {
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader
+        title={t('title_bar')}
+        description={t('title_bar_description')}
+        action={<WindowChip days={days} />}
+      />
 
       <div className="
         mt-6 grid grid-cols-2 gap-3
         lg:grid-cols-4
       "
       >
-        <KpiCard label={t('examples')} value={integer(examples)} hint={t('examples_help')} />
-        <KpiCard label={t('clusters')} value={integer(clusters.length)} />
-        <KpiCard label={t('spend')} value={formatUsd(spend.toString())} hint={t('spend_help')} />
-        <KpiCard label={t('excluded')} value={integer(excluded)} goodWhen="down" />
-        <KpiCard label={t('grouping')} value={groupingLabel} hint={t('grouping_help')} />
+        <KpiCard
+          label={t('examples')}
+          icon="layers"
+          value={integer(examples)}
+          window={days}
+          hint={t('examples_help')}
+        />
+        <KpiCard
+          label={t('clusters')}
+          icon="datasets"
+          value={integer(clusters.length)}
+          window={days}
+          definition={t('clusters_help')}
+        />
+        <KpiCard
+          label={t('spend')}
+          icon="cost"
+          value={money(spend)}
+          window={days}
+          hint={t('spend_help')}
+        />
+        <KpiCard
+          label={t('excluded')}
+          icon="warning"
+          value={integer(excluded)}
+          window={days}
+          goodWhen="down"
+          definition={t('excluded_help')}
+        />
+        <KpiCard label={t('grouping')} icon="layers" value={groupingLabel} hint={t('grouping_help')} />
       </div>
 
       <div className="mt-4">
@@ -110,7 +148,7 @@ export default async function DatasetsPage(props: {
                       font-mono text-xs
                     `}
                     >
-                      {short(cluster.prompt_hash)}
+                      <span title={cluster.prompt_hash}>{short(cluster.prompt_hash)}</span>
                     </td>
                     <td className={`
                       ${CELL}
@@ -134,19 +172,19 @@ export default async function DatasetsPage(props: {
                         .map(([reason, count]) => `${reason}: ${count}`)
                         .join(' · ') || '—'}
                     </td>
-                    <td className={CELL}>{formatUsd(cluster.spend_usd)}</td>
+                    <td className={CELL}>{money(cluster.spend_usd)}</td>
                     <td className={`
                       ${CELL}
                       text-xs text-muted-foreground
                     `}
                     >
-                      {cluster.last_seen.slice(0, 16)}
+                      <span title={cluster.last_seen}>{cluster.last_seen.slice(0, 16)}</span>
                     </td>
                     <td className={CELL}>
                       {cluster.distinct_examples > 0 && (
                         <a
                           className="text-sm underline underline-offset-4"
-                          href={exportHref(cluster.prompt_hash, cluster.model, data.grouping)}
+                          href={exportHref(cluster.prompt_hash, cluster.model, data.grouping, days)}
                         >
                           {t('export')}
                         </a>

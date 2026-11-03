@@ -142,25 +142,6 @@ export type Quality = {
   prompts: QualityPromptRow[];
 };
 
-/** ITEM-092: the performance report — proxy overhead first, then the rest. */
-export type PerformanceCacheCount = {
-  hits: number;
-  misses: number;
-  hit_rate: number | null;
-};
-
-export type PerformanceCache = {
-  auth: PerformanceCacheCount;
-  config: PerformanceCacheCount;
-  route: PerformanceCacheCount;
-  warm: PerformanceCacheCount;
-  spend: PerformanceCacheCount;
-  invalidations: number;
-  tenants: number;
-  /** ITEM-092: age of the oldest cached snapshot — how stale a hit can be. */
-  oldest_age_ms: number | null;
-};
-
 export type PerformanceModelRow = {
   model: string;
   requests: number;

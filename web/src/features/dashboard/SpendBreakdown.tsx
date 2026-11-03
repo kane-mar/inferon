@@ -6,8 +6,9 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { centsToUsd, formatCompact, formatInt, moneyDeltaPct, spiked, trend } from '@/libs/dashboardMetrics';
 import { errorMessage } from '@/libs/errors';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { cn } from '@/utils/Helpers';
+import { money } from './money';
 
 export type SpendBreakdownRow = {
   /** key_id / provider_id — `null` for a legacy/shared row (not editable). */
@@ -145,7 +146,7 @@ const LimitCell = (props: {
             over ? 'text-destructive' : 'text-muted-foreground',
           )}
         >
-          {formatUsd(centsToUsd(row.limitCents))}
+          {money(centsToUsd(row.limitCents))}
         </span>
       )}
 
@@ -258,7 +259,7 @@ export const SpendBreakdown = (props: {
               )}
               <td className="py-2 text-right tabular-nums">{formatCompact(row.tokens)}</td>
               <td className="py-2 text-right tabular-nums">
-                {formatUsd(row.costUsd)}
+                {money(row.costUsd)}
                 {delta != null && <TrendDelta delta={delta} />}
               </td>
               <LimitCell kind={props.kind} row={row} canEdit={props.canEdit} />

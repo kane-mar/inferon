@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { formatCompact, formatInt, formatMs } from '@/libs/dashboardMetrics';
-import { formatUsd } from '@/libs/InferonApi';
+import { money } from './money';
 
 export type ValueFormat = 'int' | 'usd' | 'compact' | 'ms';
 
@@ -19,7 +19,7 @@ const formatter
   = (kind: ValueFormat): ((value: number) => string) => {
     switch (kind) {
       case 'usd':
-        return value => formatUsd(value.toFixed(6));
+        return value => money(value);
       case 'ms':
         return value => formatMs(value);
       case 'compact':

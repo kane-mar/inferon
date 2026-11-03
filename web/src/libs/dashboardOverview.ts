@@ -161,10 +161,10 @@ export const attention = (input: {
 
   const errors = summary.requests > 0 ? summary.errors / summary.requests : null;
   if (metricTone(errors, THRESHOLDS.errorRate) === 'bad') {
-    findings.push({ kind: 'errors', severity: 0, amount: 0, href: '/dashboard/quality' });
+    findings.push({ kind: 'errors', severity: 0, amount: 0, href: '/dashboard/routing' });
   }
   if (metricTone(summary.ttft_p95_ms, THRESHOLDS.ttftP95Ms) === 'bad') {
-    findings.push({ kind: 'latency', severity: 1, amount: 0, href: '/dashboard/runtime' });
+    findings.push({ kind: 'latency', severity: 1, amount: 0, href: '/dashboard/routing' });
   }
 
   const recoverable = Object.values(waste ?? {}).reduce(
@@ -172,7 +172,7 @@ export const attention = (input: {
     0,
   );
   if (recoverable > 0) {
-    findings.push({ kind: 'waste', severity: 1, amount: recoverable, href: '/dashboard/audit' });
+    findings.push({ kind: 'waste', severity: 1, amount: recoverable, href: '/dashboard/routing' });
   }
 
   const linted = Number(payloads?.lint.preflight.wasted_usd ?? 0);

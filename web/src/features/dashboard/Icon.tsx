@@ -34,6 +34,7 @@ const GLYPHS = {
   prune: Sliders,
   lint: Eye,
   pii: Lock,
+  lock: Lock,
   cost: Zap,
   latency: Clock,
   warning: AlertTriangle,
@@ -49,10 +50,12 @@ export const Icon = (props: { name: IconName; size?: number; className?: string 
   const Glyph = GLYPHS[props.name];
 
   return (
-    <Glyph
-      size={props.size ?? 16}
-      className={props.className}
-      color="currentColor"
-    />
+    <span aria-hidden className="contents">
+      <Glyph
+        size={props.size ?? 16}
+        className={props.className}
+        color="currentColor"
+      />
+    </span>
   );
 };

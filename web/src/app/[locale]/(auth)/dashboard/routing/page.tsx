@@ -42,12 +42,12 @@ export default async function RoutingPage(props: RoutingPageProps) {
   return (
     <>
       <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
-      <Card title={t('chain')}>
+      <Card title={t('chain')} icon="layers">
         <RoutingPanel data={data} modelIds={modelIds} />
       </Card>
 
       <div className="mt-4">
-        <Card title={t('tier_pairs')}>
+        <Card title={t('tier_pairs')} icon="prune">
           <TierPairsPanel
             pairs={data.tier_pairs}
             modelIds={modelIds}
@@ -57,13 +57,13 @@ export default async function RoutingPage(props: RoutingPageProps) {
       </div>
 
       <div className="mt-4">
-        <Card title={t('prune')}>
+        <Card title={t('prune')} icon="prune">
           <PrunePanel policy={config.prune} canEdit={config.role === 'owner'} />
         </Card>
       </div>
 
       <div className="mt-4">
-        <Card title={t('controls')}>
+        <Card title={t('controls')} icon="activity">
           <ControlsPanel data={config} modelIds={modelIds} />
         </Card>
       </div>

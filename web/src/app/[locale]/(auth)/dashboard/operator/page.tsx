@@ -2,10 +2,11 @@ import type { OperatorGuard } from '@/libs/InferonApi';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
-import { StatCard } from '@/features/dashboard/StatCard';
-import { WindowSwitcher } from '@/features/dashboard/WindowSwitcher';
+import { KpiCard } from '@/features/dashboard/KpiCard';
+import { money } from '@/features/dashboard/money';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
-import { formatUsd, InferonApi } from '@/libs/InferonApi';
+import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
 /**
@@ -64,7 +65,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
           title={t('title_bar')}
           description={t('title_bar_description', { days })}
         />
-        <WindowSwitcher days={days} path="/dashboard/operator" />
+        <WindowChip days={days} />
       </div>
 
       <div className="
@@ -72,9 +73,9 @@ export default async function OperatorPage(props: OperatorPageProps) {
         sm:grid-cols-3
       "
       >
-        <StatCard label={t('requests')} value={String(summary.requests)} />
-        <StatCard label={t('errors')} value={String(summary.errors)} />
-        <StatCard label={t('total_cost')} value={formatUsd(summary.total_cost_usd)} />
+        <KpiCard label={t('requests')} icon="activity" value={String(summary.requests)} unit={t('requests_unit')} window={days} definition={t('requests_help')} />
+        <KpiCard label={t('errors')} icon="warning" value={String(summary.errors)} unit={t('requests_unit')} window={days} definition={t('errors_help')} />
+        <KpiCard label={t('total_cost')} icon="cost" value={money(summary.total_cost_usd)} window={days} definition={t('total_cost_help')} />
       </div>
 
       <div className="
@@ -82,27 +83,28 @@ export default async function OperatorPage(props: OperatorPageProps) {
         lg:grid-cols-2
       "
       >
-        <Card title={t('engagement')}>
+        <Card title={t('engagement')} icon="activity">
           <div className="
             grid grid-cols-2 gap-3
             sm:grid-cols-4
           "
           >
-            <StatCard label={t('active_tenants')} value={String(activation.active_tenants)} />
-            <StatCard label={t('active_keys')} value={String(activation.active_keys)} />
-            <StatCard
+            <KpiCard label={t('active_tenants')} icon="store" value={String(activation.active_tenants)} />
+            <KpiCard label={t('active_keys')} icon="lock" value={String(activation.active_keys)} />
+            <KpiCard
               label={t('requests_per_dev')}
+              icon="activity"
               value={
                 activation.requests_per_active_tenant == null
                   ? '—'
                   : activation.requests_per_active_tenant.toFixed(1)
               }
             />
-            <StatCard label={t('signups')} value={String(activation.signups)} />
+            <KpiCard label={t('signups')} icon="up" value={String(activation.signups)} />
           </div>
         </Card>
 
-        <Card title={t('funnel')}>
+        <Card title={t('funnel')} icon="layers">
           <ul className="text-sm">
             {([
               [t('signed_up'), activation.funnel.signed_up],
@@ -130,7 +132,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
         lg:grid-cols-2
       "
       >
-        <Card title={t('tenants')}>
+        <Card title={t('tenants')} icon="store">
           {tenants.tenants.length === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
@@ -158,7 +160,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
                           <td className="py-2 font-mono text-xs">{tenant.tenant_id}</td>
                           <td className="py-2 tabular-nums">{tenant.requests}</td>
                           <td className="py-2 tabular-nums">{tenant.errors}</td>
-                          <td className="py-2 tabular-nums">{formatUsd(tenant.cost_usd)}</td>
+                          <td className="py-2 tabular-nums">{money(tenant.cost_usd)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -167,7 +169,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
               )}
         </Card>
 
-        <Card title={t('guard')}>
+        <Card title={t('guard')} icon="quality">
           {guard.guarded_requests === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
@@ -202,7 +204,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
       </div>
 
       <div className="mt-4">
-        <Card title={t('alerts')}>
+        <Card title={t('alerts')} icon="warning">
           {alerts.alerts.length === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
@@ -233,8 +235,16 @@ export default async function OperatorPage(props: OperatorPageProps) {
                             {alert.provider_name ?? alert.class}
                           </td>
                           <td className="py-2">{alert.status}</td>
-                          <td className="py-2">{alert.first_fired_at.slice(0, 16).replace('T', ' ')}</td>
-                          <td className="py-2">{alert.last_fired_at.slice(0, 16).replace('T', ' ')}</td>
+                          <td className="py-2">
+                            <span title={alert.first_fired_at}>
+                              {alert.first_fired_at.slice(0, 16).replace('T', ' ')}
+                            </span>
+                          </td>
+                          <td className="py-2">
+                            <span title={alert.last_fired_at}>
+                              {alert.last_fired_at.slice(0, 16).replace('T', ' ')}
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -243,7 +253,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
               )}
         </Card>
 
-        <Card title={t('evolution')}>
+        <Card title={t('evolution')} icon="layers">
           {evolution.jobs.length === 0
             ? (
                 <p className="text-sm text-muted-foreground">{t('no_data')}</p>
@@ -278,7 +288,9 @@ export default async function OperatorPage(props: OperatorPageProps) {
                               : `${(job.evidence.rate * 100).toFixed(1)}%`}
                           </td>
                           <td className="py-2">
-                            {job.created_at.slice(0, 16).replace('T', ' ')}
+                            <span title={job.created_at}>
+                              {job.created_at.slice(0, 16).replace('T', ' ')}
+                            </span>
                           </td>
                         </tr>
                       ))}

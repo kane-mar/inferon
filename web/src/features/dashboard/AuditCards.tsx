@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import { formatInt } from '@/libs/dashboardMetrics';
-import { formatUsd } from '@/libs/InferonApi';
 import { Finding } from './Finding';
+import { money } from './money';
 
 /** A waste flag as both the dashboard and the public report expose it. */
 export type WasteEntry = {
@@ -50,7 +50,7 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
   const cached = data.waste.cache_miss;
 
   const named = (row?: { name: string; cost: string }): string =>
-    row ? `${row.name} · ${formatUsd(row.cost)}` : t('none');
+    row ? `${row.name} · ${money(row.cost)}` : t('none');
 
   return (
     <div className="
@@ -61,47 +61,47 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       <Finding
         title={t('f1_title')}
         description={t('f1_desc')}
-        highlight={formatUsd(over?.savings_est_usd ?? '0')}
+        highlight={money(over?.savings_est_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(over?.requests ?? 0) },
-          { label: t('spend'), value: formatUsd(over?.spend_usd ?? '0') },
-          { label: t('recoverable'), value: formatUsd(over?.savings_est_usd ?? '0') },
+          { label: t('spend'), value: money(over?.spend_usd ?? '0') },
+          { label: t('recoverable'), value: money(over?.savings_est_usd ?? '0') },
         ]}
       />
       <Finding
         title={t('f2_title')}
         description={t('f2_desc')}
-        highlight={formatUsd(misuse?.savings_est_usd ?? '0')}
+        highlight={money(misuse?.savings_est_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(misuse?.requests ?? 0) },
-          { label: t('spend'), value: formatUsd(misuse?.spend_usd ?? '0') },
-          { label: t('recoverable'), value: formatUsd(misuse?.savings_est_usd ?? '0') },
+          { label: t('spend'), value: money(misuse?.spend_usd ?? '0') },
+          { label: t('recoverable'), value: money(misuse?.savings_est_usd ?? '0') },
         ]}
       />
       <Finding
         title={t('f3_title')}
         description={t('f3_desc')}
-        highlight={formatUsd(cached?.spend_usd ?? '0')}
+        highlight={money(cached?.spend_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(cached?.requests ?? 0) },
-          { label: t('spend'), value: formatUsd(cached?.spend_usd ?? '0') },
+          { label: t('spend'), value: money(cached?.spend_usd ?? '0') },
         ]}
       />
       <Finding
         title={t('f4_title')}
         description={t('f4_desc')}
-        highlight={formatUsd(data.savings.total)}
+        highlight={money(data.savings.total)}
         metrics={[
-          { label: t('router'), value: formatUsd(data.savings.router) },
-          { label: t('fallback'), value: formatUsd(data.savings.fallback) },
-          { label: t('cache'), value: formatUsd(data.savings.cache) },
+          { label: t('router'), value: money(data.savings.router) },
+          { label: t('fallback'), value: money(data.savings.fallback) },
+          { label: t('cache'), value: money(data.savings.cache) },
           { label: t('affinity_requests'), value: formatInt(data.savings.affinity) },
         ]}
       />
       <Finding
         title={t('f5_title')}
         description={t('f5_desc')}
-        highlight={formatUsd(data.cost)}
+        highlight={money(data.cost)}
         metrics={[
           { label: t('top_model'), value: named(data.top.model) },
           { label: t('top_provider'), value: named(data.top.provider) },

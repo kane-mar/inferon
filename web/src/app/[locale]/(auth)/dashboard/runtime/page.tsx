@@ -12,12 +12,12 @@ import {
   us,
 } from '@/features/dashboard/reportFormat';
 import { Status } from '@/features/dashboard/ReportStatus';
+import { reportDays } from '@/features/dashboard/reportWindow';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
-
-const DAYS = 30;
 
 /**
  * Runtime (ITEM-092/099/103): is the proxy fast? The contract, the proxy's own
@@ -26,23 +26,29 @@ const DAYS = 30;
  */
 export default async function RuntimePage(props: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ days?: string }>;
 }) {
   const { locale } = await props.params;
   setRequestLocale(locale);
 
+  const days = reportDays(await props.searchParams);
   const session = await currentSession();
   if (!session) {
     redirect('/auth/login');
   }
 
   const t = await getTranslations({ locale, namespace: 'RuntimePage' });
-  const data = await InferonApi.fromEnv().runtime(DAYS, session.cookie);
+  const data = await InferonApi.fromEnv().runtime(days, session.cookie);
   const { overhead, contract, latency } = data;
   const hasSamples = contract.samples >= contract.min_samples;
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader
+        title={t('title_bar')}
+        description={t('title_bar_description')}
+        action={<WindowChip days={days} />}
+      />
 
       {/* The headline: what the proxy itself adds. */}
       <div className="
@@ -52,7 +58,10 @@ export default async function RuntimePage(props: {
       >
         <KpiCard
           label={t('overhead_p50')}
+          icon="latency"
           value={us(overhead.p50_us)}
+          window={days}
+          definition={t('overhead_help')}
           tone={metricTone(overhead.p50_us, THRESHOLDS.proxyP50Us)}
           hint={contract.p50_met == null
             ? t('not_enough_samples', { count: contract.min_samples })
@@ -62,15 +71,28 @@ export default async function RuntimePage(props: {
         />
         <KpiCard
           label={t('overhead_p95')}
+          icon="latency"
           value={us(overhead.p95_us)}
+          window={days}
+          definition={t('overhead_help')}
           tone={metricTone(overhead.p95_us, THRESHOLDS.proxyP95Us)}
         />
         <KpiCard
           label={t('under_1ms')}
+          icon="ok"
           value={rate(overhead.under_1ms_rate)}
+          window={days}
+          definition={t('under_1ms_help')}
           tone={metricTone(overhead.under_1ms_rate, THRESHOLDS.under1msRate)}
         />
-        <KpiCard label={t('samples')} value={integer(overhead.samples)} />
+        <KpiCard
+          label={t('samples')}
+          icon="activity"
+          value={integer(overhead.samples)}
+          unit={t('requests')}
+          window={days}
+          definition={t('samples_help')}
+        />
       </div>
 
       <div className="mt-4">
@@ -104,22 +126,48 @@ export default async function RuntimePage(props: {
             lg:grid-cols-3
           "
           >
-            <KpiCard label={t('total_p50')} value={ms(latency.total_p50_ms)} />
+            <KpiCard
+              label={t('total_p50')}
+              icon="latency"
+              value={ms(latency.total_p50_ms)}
+              window={days}
+              definition={t('total_help')}
+            />
             <KpiCard
               label={t('total_p95')}
+              icon="latency"
               value={ms(latency.total_p95_ms)}
+              window={days}
+              definition={t('total_help')}
               tone={metricTone(latency.total_p95_ms, THRESHOLDS.totalP95Ms)}
             />
-            <KpiCard label={t('total_p99')} value={ms(latency.total_p99_ms)} />
-            <KpiCard label={t('ttft_p50')} value={ms(latency.ttft_p50_ms)} />
+            <KpiCard
+              label={t('total_p99')}
+              icon="latency"
+              value={ms(latency.total_p99_ms)}
+              window={days}
+              definition={t('total_help')}
+            />
+            <KpiCard
+              label={t('ttft_p50')}
+              icon="latency"
+              value={ms(latency.ttft_p50_ms)}
+              window={days}
+              definition={t('ttft_help')}
+            />
             <KpiCard
               label={t('ttft_p95')}
+              icon="latency"
               value={ms(latency.ttft_p95_ms)}
+              window={days}
+              definition={t('ttft_help')}
               tone={metricTone(latency.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
             />
             <KpiCard
               label={t('proxy_share')}
+              icon="cost"
               value={rate(latency.proxy_share)}
+              window={days}
               hint={t('proxy_share_help')}
             />
           </div>
@@ -202,6 +250,36 @@ export default async function RuntimePage(props: {
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* The tint is a hint, so it has to say what it hints (ITEM-106). */}
+            <div className="
+              mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs
+              text-muted-foreground
+            "
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block size-3 rounded-sm border" />
+                {t('legend_healthy')}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="
+                  inline-block size-3 rounded-sm bg-destructive/5
+                "
+                />
+                {t('legend_degraded')}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="
+                  inline-block size-3 rounded-sm bg-destructive/15
+                "
+                />
+                {t('legend_failing')}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="font-mono">·</span>
+                {t('legend_empty')}
+              </span>
             </div>
           </Card>
         </div>

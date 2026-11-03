@@ -64,16 +64,23 @@ export const kpiDeltaClass = (tone: Tone | undefined, improved: boolean): string
     return 'text-xs font-medium opacity-75';
   }
   return improved
-    ? 'text-xs font-medium text-emerald-600 dark:text-emerald-400'
+    ? 'text-xs font-medium text-emerald-700 dark:text-emerald-400'
     : 'text-xs font-medium text-destructive';
 };
 
-/** Table cells coloured the same way: tinted background, contrasting text. */
-export const TONE_CELL: Record<Tone, string> = {
-  good: 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50',
-  warn: 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-50',
-  bad: 'bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-50',
-  neutral: '',
+/**
+ * Table cells colour the number, not the cell: healthy stays the normal
+ * foreground and only a warning or a failure takes ink (ITEM-107).
+ */
+export const toneText = (tone: Tone | undefined): string => {
+  switch (tone) {
+    case 'bad':
+      return 'text-destructive font-medium';
+    case 'warn':
+      return 'text-amber-700 dark:text-amber-400 font-medium';
+    default:
+      return '';
+  }
 };
 
 /** The tone of a measured value, or `neutral` when there is no measurement. */

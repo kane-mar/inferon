@@ -102,7 +102,7 @@ export default async function SettingsPage(props: {
           lg:col-span-2
         "
         >
-          <Card title={t('connect_title')}>
+          <Card title={t('connect_title')} icon="cost">
             <p className="mb-4 text-sm text-muted-foreground">{t('connect_body')}</p>
             <Onboarding
               firstTraceAt={summary.first_trace_at}
@@ -113,19 +113,19 @@ export default async function SettingsPage(props: {
             />
           </Card>
 
-          <Card title={t('keys_title')}>
+          <Card title={t('keys_title')} icon="lock">
             <p className="mb-4 text-sm text-muted-foreground">{t('keys_help')}</p>
             <KeysPanel data={keysData} />
           </Card>
 
-          <Card title={t('members_title')}>
+          <Card title={t('members_title')} icon="store">
             <p className="mb-4 text-sm text-muted-foreground">{t('members_help')}</p>
             <MembersPanel data={membersData} />
           </Card>
         </div>
 
         <div className="space-y-4">
-          <Card title={t('workspace_title')}>
+          <Card title={t('workspace_title')} icon="layers">
             <dl className="divide-y">
               <Field label={t('signed_in_as')} value={session.me.github_login} />
               <Field
@@ -143,7 +143,7 @@ export default async function SettingsPage(props: {
             </dl>
           </Card>
 
-          <Card title={t('related_title')}>
+          <Card title={t('related_title')} icon="layers">
             <p className="mb-3 text-sm text-muted-foreground">{t('related_body')}</p>
             <ul className="space-y-2 text-sm">
               <li>

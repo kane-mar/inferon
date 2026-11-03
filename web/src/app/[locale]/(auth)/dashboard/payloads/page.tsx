@@ -3,12 +3,12 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { coverage, integer, rate, usd } from '@/features/dashboard/reportFormat';
+import { reportDays } from '@/features/dashboard/reportWindow';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
-
-const DAYS = 30;
 
 /** A labelled on/off/known value, used by every card here. */
 const State = (props: { label: string; value: string; tone?: 'good' | 'off' }) => (
@@ -19,7 +19,7 @@ const State = (props: { label: string; value: string; tone?: 'good' | 'off' }) =
         text-sm font-medium
         ${props.tone === 'good'
     ? `
-      text-emerald-600
+      text-emerald-700
       dark:text-emerald-400
     `
     : ''}
@@ -38,22 +38,28 @@ const State = (props: { label: string; value: string; tone?: 'good' | 'off' }) =
  */
 export default async function PayloadsPage(props: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ days?: string }>;
 }) {
   const { locale } = await props.params;
   setRequestLocale(locale);
 
+  const days = reportDays(await props.searchParams);
   const session = await currentSession();
   if (!session) {
     redirect('/auth/login');
   }
 
   const t = await getTranslations({ locale, namespace: 'PayloadsPage' });
-  const data = await InferonApi.fromEnv().payloads(DAYS, session.cookie);
+  const data = await InferonApi.fromEnv().payloads(days, session.cookie);
   const { capture, lint, pruning, pii } = data;
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader
+        title={t('title_bar')}
+        description={t('title_bar_description')}
+        action={<WindowChip days={days} />}
+      />
 
       <div className="
         mt-6 grid grid-cols-2 gap-3
@@ -62,6 +68,7 @@ export default async function PayloadsPage(props: {
       >
         <KpiCard
           label={t('capture_state')}
+          icon="store"
           value={capture.enabled ? t('on') : t('off')}
           tone={capture.enabled ? 'good' : undefined}
           hint={capture.enabled
@@ -70,7 +77,10 @@ export default async function PayloadsPage(props: {
         />
         <KpiCard
           label={t('lint_coverage')}
+          icon="lint"
           value={coverage(lint.preflight.scanned, data.requests)}
+          window={days}
+          definition={t('lint_coverage_help')}
           hint={t('lint_scanned', {
             scanned: integer(lint.preflight.scanned),
             total: integer(data.requests),
@@ -78,12 +88,18 @@ export default async function PayloadsPage(props: {
         />
         <KpiCard
           label={t('lint_findings')}
+          icon="warning"
           value={integer(lint.preflight.findings)}
+          window={days}
+          definition={t('lint_findings_help')}
           hint={usd(lint.preflight.wasted_usd)}
         />
         <KpiCard
           label={t('prune_removed')}
+          icon="prune"
           value={integer(pruning.rewritten)}
+          window={days}
+          definition={t('prune_removed_help')}
           hint={pruning.policy?.enabled ? t('prune_on') : t('prune_off')}
         />
       </div>

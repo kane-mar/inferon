@@ -3,9 +3,11 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { EvalsPanel } from '@/features/dashboard/EvalsPanel';
 import { KpiCard } from '@/features/dashboard/KpiCard';
+import { reportDays } from '@/features/dashboard/reportWindow';
+import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
-import { metricTone, THRESHOLDS, TONE_CELL } from '@/libs/reportTone';
+import { metricTone, THRESHOLDS, toneText } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
@@ -14,9 +16,9 @@ const CELL = 'px-3 py-2 text-sm tabular-nums';
 const pct = (value: number | null): string =>
   (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
-/** The per-model success cell, tinted by the same thresholds as the KPI. */
+/** The per-model success cell, coloured by the same thresholds as the KPI. */
 const successClass = (rate: number | null): string =>
-  TONE_CELL[metricTone(rate, THRESHOLDS.okRate)];
+  toneText(metricTone(rate, THRESHOLDS.okRate));
 
 /**
  * Quality view (ITEM-055): how often responses were usable, derived from the
@@ -24,10 +26,12 @@ const successClass = (rate: number | null): string =>
  */
 export default async function QualityPage(props: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ days?: string }>;
 }) {
   const { locale } = await props.params;
   setRequestLocale(locale);
 
+  const days = reportDays(await props.searchParams);
   const session = await currentSession();
   if (!session) {
     redirect('/auth/login');
@@ -45,7 +49,11 @@ export default async function QualityPage(props: {
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader
+        title={t('title_bar')}
+        description={t('title_bar_description')}
+        action={<WindowChip days={days} />}
+      />
 
       <div className="
         mt-6 grid grid-cols-2 gap-3
@@ -55,27 +63,53 @@ export default async function QualityPage(props: {
       >
         <KpiCard
           label={t('success_rate')}
+          icon="ok"
           value={pct(overall.success_rate)}
+          window={days}
           tone={metricTone(overall.success_rate, THRESHOLDS.okRate)}
+          hint={t('success_rate_help')}
         />
-        <KpiCard label={t('empty_rate')} value={pct(overall.empty_rate)} goodWhen="down" />
-        <KpiCard label={t('refusal_rate')} value={pct(overall.refusal_rate)} goodWhen="down" />
+        <KpiCard
+          label={t('empty_rate')}
+          icon="warning"
+          value={pct(overall.empty_rate)}
+          window={days}
+          goodWhen="down"
+          definition={t('empty_rate_help')}
+        />
+        <KpiCard
+          label={t('refusal_rate')}
+          icon="warning"
+          value={pct(overall.refusal_rate)}
+          window={days}
+          goodWhen="down"
+          definition={t('refusal_rate_help')}
+        />
         <KpiCard
           label={t('error_rate')}
+          icon="warning"
           value={pct(overall.error_rate)}
+          window={days}
           goodWhen="down"
           tone={metricTone(overall.error_rate, THRESHOLDS.errorRate)}
+          definition={t('error_rate_help')}
         />
         <KpiCard
           label={t('truncated_rate')}
+          icon="warning"
           value={pct(overall.truncated_rate)}
+          window={days}
           goodWhen="down"
           tone={metricTone(overall.truncated_rate, THRESHOLDS.truncatedRate)}
+          definition={t('truncated_rate_help')}
         />
         <KpiCard
           label={t('guard_fallback_rate')}
+          icon="warning"
           value={pct(overall.guard_fallback_rate)}
+          window={days}
           goodWhen="down"
+          definition={t('guard_fallback_rate_help')}
         />
       </div>
 
@@ -191,7 +225,9 @@ export default async function QualityPage(props: {
                       font-mono
                     `}
                     >
-                      {prompt.system_prompt_hash.slice(0, 12)}
+                      <span title={prompt.system_prompt_hash}>
+                        {prompt.system_prompt_hash.slice(0, 12)}
+                      </span>
                     </td>
                     <td className={CELL}>{prompt.requests}</td>
                     <td className={CELL}>{prompt.ok}</td>

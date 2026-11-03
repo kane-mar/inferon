@@ -291,9 +291,24 @@ describe('attention — the landing page only lists what to act on', () => {
     expect(findings).toEqual([]);
   });
 
+  it('links every finding to the control that fixes it', () => {
+    const findings = attention({
+      summary: summary({ requests: 100, errors: 40, ttft_p95_ms: 9_000 }),
+      waste: { over_provisioned: { requests: 1, savings_est_usd: '0.01' } },
+      payloads: payloads(2, '12.50'),
+    });
+
+    expect(findings.map(finding => finding.href)).toEqual([
+      '/dashboard/routing',
+      '/dashboard/payloads',
+      '/dashboard/routing',
+      '/dashboard/routing',
+    ]);
+  });
+
   it('flags a slow tail as actionable latency', () => {
     const findings = attention({ summary: summary({ ttft_p95_ms: 9_000 }) });
 
-    expect(findings[0]).toMatchObject({ kind: 'latency', href: '/dashboard/runtime' });
+    expect(findings[0]).toMatchObject({ kind: 'latency', href: '/dashboard/routing' });
   });
 });
