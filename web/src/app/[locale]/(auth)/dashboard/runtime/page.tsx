@@ -74,7 +74,7 @@ export default async function RuntimePage(props: {
       </div>
 
       <div className="mt-4">
-        <Card title={t('claim')}>
+        <Card title={t('claim')} icon="ok">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span>{t('claim_p50')}</span>
@@ -98,7 +98,7 @@ export default async function RuntimePage(props: {
 
       {/* End to end, so the proxy's share is visible. */}
       <div className="mt-4">
-        <Card title={t('end_to_end')}>
+        <Card title={t('end_to_end')} icon="latency">
           <div className="
             grid grid-cols-2 gap-3
             lg:grid-cols-3
@@ -132,6 +132,7 @@ export default async function RuntimePage(props: {
         <div className="mt-4">
           <Card
             title={t('heatmap', { step: data.heatmap.step })}
+            icon="activity"
             action={(
               <div className="flex gap-2 text-xs">
                 <a
@@ -208,7 +209,7 @@ export default async function RuntimePage(props: {
 
       {/* Where the overhead goes. */}
       <div className="mt-4">
-        <Card title={t('by_model')}>
+        <Card title={t('by_model')} icon="runtime">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

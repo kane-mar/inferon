@@ -1,7 +1,11 @@
 import type { Tone } from '@/libs/reportTone';
 import { trend } from '@/libs/dashboardMetrics';
-import { kpiCardClass, kpiDeltaClass, kpiSubtleClass } from '@/libs/reportTone';
+import { kpiCardClass, kpiDeltaClass, kpiSubtleClass, kpiValueClass, toneGlyph } from '@/libs/reportTone';
 import { cn } from '@/utils/Helpers';
+import { Icon } from './Icon';
+
+const SEVERE = 'text-destructive';
+const WARNING = 'text-amber-600 dark:text-amber-400';
 
 /**
  * Headline metric with an optional period-over-period delta. `goodWhen` marks
@@ -36,7 +40,14 @@ export const KpiCard = (props: {
         {props.label}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-2xl font-semibold tabular-nums">{props.value}</span>
+        {toneGlyph(props.tone) && (
+          <Icon
+            name={toneGlyph(props.tone)!}
+            size={16}
+            className={props.tone === 'bad' ? SEVERE : WARNING}
+          />
+        )}
+        <span className={kpiValueClass(props.tone)}>{props.value}</span>
         {delta != null && direction !== 'flat' && (
           <span
             className={kpiDeltaClass(props.tone, improved === true)}

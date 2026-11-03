@@ -24,6 +24,7 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-107 | Design language: line icons, restrained colour, minimalist hierarchy | improvement | **new (2026-11-03)** — the reports carry no icons, tone-tint whole KPI boxes (colour as decoration rather than highlight), and use the same visual weight for a headline number and a footnote. Apply the dashboard-design principles: one icon per section from a **line set** (slimicons, MIT, 1.5 px stroke), colour only as a highlight or an alert (never fills, never colour alone), one type scale with a clear primary/secondary split, and whitespace instead of borders. Accessible: every tone also carries an icon and a word |
 | ITEM-104 | Overview as an attention list, not a report index | improvement | **new (2026-11-03)** — the landing page repeats five other tabs as mini-cards (top spend, waste, quality, performance, datasets) and never says what to do. Reduce to 5 KPIs, one trend, and an **Attention** strip: the top findings by $ impact, each linking to the control that fixes it |
 | ITEM-106 | One presentation language across the reports | improvement | **new (2026-11-03)** — windows are inconsistent and unlabelled (Performance/Datasets hard-code 30 days; others have a switcher), the same metric appears on up to 5 pages with no authority, KPI rows run 3/4/6/7 up, money prints `$0.000129`, hashes truncate with no tooltip, and the heatmap has no legend. One `WindowChip`, one KPI component (value + unit + window + definition), adaptive money, `title` on truncated values, legend on the heatmap |
 | **— gated below this line —** | | | |
@@ -112,10 +113,9 @@ _Last updated: 2026-11-03 — the IA pass captured (103–106) and ranked; ITEM-
 delivered. Same form: one ranked list, gated at its bottom, then delivered
 history, then retired items._
 
-**Next pull: ITEM-104** (Overview as an attention list), then ITEM-106 (one
-presentation language). Both are the remainder of the IA pass; neither changes a
-read model, and each is verifiable in the browser. The gated block below still
-needs a decision rather than a build.
+**Next pull: ITEM-107** (the design language: icons, restrained colour, hierarchy),
+then ITEM-104 (Overview as an attention list) and ITEM-106 (one presentation
+language). The three are the rest of the IA pass; none changes a read model.
 
 **Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.

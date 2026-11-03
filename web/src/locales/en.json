@@ -156,7 +156,13 @@
     "grouping_hash": "prompt hash",
     "datasets_spend": "Spend on these prompts",
     "datasets_excluded": "Excluded pairs",
-    "thumbs": "Thumbs up / down"
+    "thumbs": "Thumbs up / down",
+    "attention": "Needs attention",
+    "attention_errors": "Requests are failing more often than the attention line allows",
+    "attention_latency": "The p95 time to first token is far above the attention line",
+    "attention_waste": "Spend the audit can recover",
+    "attention_lint": "Payload waste the lint has priced",
+    "attention_now": "now"
   },
   "KeysPage": {
     "label_field": "Label",

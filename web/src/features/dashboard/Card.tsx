@@ -1,5 +1,10 @@
+import type { IconName } from './Icon';
+import { Icon } from './Icon';
+
 export const Card = (props: {
   title: string;
+  /** A line icon for the section; decorative, so the title carries the meaning. */
+  icon?: IconName;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) => (
@@ -8,7 +13,12 @@ export const Card = (props: {
       flex items-center justify-between gap-3 border-b px-4 py-3
     "
     >
-      <h2 className="font-semibold">{props.title}</h2>
+      <h2 className="flex items-center gap-2 font-semibold">
+        {props.icon && (
+          <Icon name={props.icon} size={16} className="text-muted-foreground" />
+        )}
+        {props.title}
+      </h2>
       {props.action}
     </header>
 

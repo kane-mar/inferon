@@ -77,6 +77,7 @@ export default async function DatasetsPage(props: {
       <div className="mt-4">
         <Card
           title={t('by_prompt')}
+          icon="datasets"
           action={canExport ? <DatasetPurge /> : undefined}
         >
           <div className="overflow-x-auto">
@@ -163,7 +164,7 @@ export default async function DatasetsPage(props: {
       </div>
 
       <div className="mt-4">
-        <Card title={promptsCopy('title_bar')}>
+        <Card title={promptsCopy('title_bar')} icon="layers">
           <p className="mb-4 text-sm text-muted-foreground">
             {promptsCopy('title_bar_description')}
           </p>

@@ -156,7 +156,13 @@
     "grouping_hash": "empreinte du prompt",
     "datasets_spend": "Dépense sur ces prompts",
     "datasets_excluded": "Paires exclues",
-    "thumbs": "Pouces haut / bas"
+    "thumbs": "Pouces haut / bas",
+    "attention": "À examiner",
+    "attention_errors": "Les requêtes échouent plus souvent que le seuil d’attention",
+    "attention_latency": "Le p95 du premier token dépasse largement le seuil d’attention",
+    "attention_waste": "Dépense récupérable selon l’audit",
+    "attention_lint": "Gaspillage de charge utile chiffré par l’analyse",
+    "attention_now": "maintenant"
   },
   "KeysPage": {
     "label_field": "Libellé",

@@ -17,33 +17,43 @@ export type MetricSpec = {
 };
 
 /**
- * A whole KPI box, tinted by its verdict: background, border and a contrasting
- * foreground, so the number is readable *because* of the colour rather than
- * despite it. Whole strings — never concatenated in a `className` — so
- * Tailwind's scanner keeps every one.
+ * The KPI box is always the neutral surface. Colour is a highlight on the value
+ * (and the icon beside it), never a filled card: five coloured boxes is
+ * decoration, and the eye stops telling "notable" from "normal".
  */
-export const kpiCardClass = (tone: Tone | undefined): string => {
+export const kpiCardClass = (_tone?: Tone): string =>
+  'rounded-lg border bg-card p-4 text-card-foreground';
+
+/**
+ * The value's colour: a warning or a failure stands out; a healthy number is the
+ * normal foreground, because "good" is the expected state and does not need ink.
+ */
+export const kpiValueClass = (tone: Tone | undefined): string => {
   switch (tone) {
-    case 'good':
-      return `rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 shadow-sm
-        dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-50`;
-    case 'warn':
-      return `rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm
-        dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-50`;
     case 'bad':
-      return `rounded-lg border border-red-200 bg-red-50 p-4 text-red-900 shadow-sm
-        dark:border-red-900 dark:bg-red-950/40 dark:text-red-50`;
+      return 'text-2xl font-semibold tabular-nums text-destructive';
+    case 'warn':
+      return 'text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-400';
     default:
-      return 'rounded-lg border bg-card p-4 text-card-foreground shadow-sm';
+      return 'text-2xl font-semibold tabular-nums';
   }
 };
 
-/**
- * The label and hint inside a box. On a tinted box they inherit the foreground
- * and only soften; on a plain box they stay muted, as everywhere else.
- */
-export const kpiSubtleClass = (tone: Tone | undefined): string =>
-  tone == null || tone === 'neutral' ? 'text-muted-foreground' : 'opacity-75';
+/** The icon that repeats the verdict, so a reader who cannot see colour still can. */
+export const toneGlyph = (tone: Tone | undefined): 'warning' | 'ok' | undefined => {
+  switch (tone) {
+    case 'bad':
+    case 'warn':
+      return 'warning';
+    case 'good':
+      return 'ok';
+    default:
+      return undefined;
+  }
+};
+
+/** The label and hint inside a KPI box: muted, always. */
+export const kpiSubtleClass = (_tone?: Tone): string => 'text-muted-foreground';
 
 /**
  * The delta beside the value: green/red where colour is free (a plain box), and

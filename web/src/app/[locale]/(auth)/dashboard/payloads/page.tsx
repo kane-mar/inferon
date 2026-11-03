@@ -94,7 +94,7 @@ export default async function PayloadsPage(props: {
       "
       >
         {/* Capture and retention */}
-        <Card title={t('capture')}>
+        <Card title={t('capture')} icon="store">
           <p className="mb-3 text-xs text-muted-foreground">{t('capture_help')}</p>
           <State
             label={t('storing')}
@@ -114,7 +114,7 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* The lint */}
-        <Card title={t('lint')}>
+        <Card title={t('lint')} icon="lint">
           <p className="mb-3 text-xs text-muted-foreground">{t('lint_help')}</p>
           <State
             label={t('lint_state')}
@@ -156,7 +156,7 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* Pruning */}
-        <Card title={t('pruning')}>
+        <Card title={t('pruning')} icon="prune">
           <p className="mb-3 text-xs text-muted-foreground">{t('pruning_help')}</p>
           {pruning.policy == null || !pruning.policy.enabled
             ? <p className="text-sm text-muted-foreground">{t('pruning_off')}</p>
@@ -199,7 +199,7 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* PII */}
-        <Card title={t('pii')}>
+        <Card title={t('pii')} icon="pii">
           <p className="mb-3 text-xs text-muted-foreground">{t('pii_help')}</p>
           <State
             label={t('detection')}
