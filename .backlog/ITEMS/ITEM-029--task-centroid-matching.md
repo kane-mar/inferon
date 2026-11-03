@@ -10,8 +10,16 @@
 3. A no-match prompt falls back gracefully to the ITEM-015 heuristic path (embedding never blocks a request)
 4. Classification quality is gated against the ITEM-015 heuristic on the same corpus before this becomes a routing input
 
-**Technical Notes:**
-- Depends on ITEM-028 (currently staged by the 2026-09-06 engineering review) and on real task traffic: the refinement log's ordering question ('worth building before ITEM-018/020 bring real traffic and real task clusters?') is now answered by evidence — today's trace corpus holds no real task clusters, so centroid building (AC1) and the AC4 quality gate vs ITEM-015 would be vacuous. Staged with 028; unpark when a real-traffic corpus exists (ITEM-018 tenants active) AND ITEM-028 lands.
-- Parent: ITEM-022 (archived), slice 022b
-- Depends on ITEM-028 (the embedder); consumes the centroid shape built from ITEM-026's negative samples later
-- Ordering question (from parent, still open): is this worth building before ITEM-018/020 bring real traffic and real task clusters? If not, ITEM-029/030 may drop below 020's alerts when 018 lands
+**Technical Notes (refreshed 2026-11-04, backlog review):**
+- ITEM-028 (the in-process embedder) is **delivered** and runs off the hot path;
+  ITEM-018 is **delivered** (real traffic flows), so the old "no real corpus"
+  gate is gone.
+- ITEM-089 is **delivered** and already computes what AC1 needs: a versioned
+  vector per distinct prompt (stored once, never re-embedded) and cosine
+  clusters at 0.92 over live traffic. The routing use (map a request to a task
+  centroid) can consume that pipeline instead of building a second one.
+- **The gate is now a PO decision, not a dependency**: whether centroid routing
+  is worth the risk now that its input exists. If pulled, AC1's method is the
+  ITEM-089 pipeline; AC4's quality gate still compares against the ITEM-015
+  heuristic on the same corpus.
+- Parent: ITEM-022 (archived), slice 022b. ITEM-030/072 follow this item.

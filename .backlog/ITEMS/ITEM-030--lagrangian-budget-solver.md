@@ -12,7 +12,7 @@
 5. Unit tests cover the schedule boundaries (TDD — healthy/balanced/depleted budget) and an end-to-end scenario proves month-end loosening actually precedes the 429 cap
 
 **Technical Notes:**
-- Depends on ITEM-028/029 (task signal). The epsilon schedule formulas (AC1/AC5) are pure and testable, but as a *routing* input (AC3: route when predicted quality gap <= epsilon) it consumes 029's quality-gap prediction, which needs real centroids; without it, replacing the working ITEM-015/016 cost protection would be unvalidated. Staged with 028/029 by the 2026-09-06 engineering review. The epsilon-schedule unit tests (AC5 TDD) are ready to write the moment the chain is pulled.
+- ITEM-028 (embedder) is delivered; the open dependency is ITEM-029 (task signal). The epsilon schedule formulas (AC1/AC5) are pure and testable, but as a *routing* input (AC3: route when predicted quality gap <= epsilon) it consumes 029's quality-gap prediction, which needs real centroids; without it, replacing the working ITEM-015/016 cost protection would be unvalidated. Gated on 029 (refreshed 2026-11-04). The epsilon-schedule unit tests (AC5 TDD) are ready to write the moment the chain is pulled.
 - Parent: ITEM-022 (archived), slice 022c — the OmniRouting core's completion slice
 - Depends on ITEM-028/029 (task signal), the ITEM-015 router and ITEM-016 budget breaker
 - Spec assumes gpt-4o/claude frontier; in the DeepSeek-only world frontier vs cheap = original requested model vs downgrade target (same convention as ITEM-025)

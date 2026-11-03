@@ -24,11 +24,13 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-108 | Audit trail for control-plane changes | feature | **new (2026-11-04, review)** — ITEM-046 closed with "audit trail deferred" but never captured it. No config write records its actor: a two-owner tenant cannot tell who raised the cap or turned the guard off (`tenant_policies` versions the adaptive loop only). Append-only events (actor, setting, old/new, at) for every owner-only mutation, shown on Routing; secrets never logged |
+| ITEM-109 | Per-step fallback triggers | feature | **new (2026-11-04, review)** — ITEM-045 closed with "per-step triggers + guard trigger deferred" but never captured it. Every step triggers on the same set (transport/429/5xx) and the guard keeps a private frontier replay, so a chain cannot say "step 2 only on 5xx". Per-step trigger sets, legacy chain compatibility, guard as a chain trigger, trigger recorded on `routing_event` |
 | **— gated below this line —** | | | |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
 | ITEM-029 | OmniRouting: task-centroid matching | feature | **staged — gate moved (2026-10-31)** — was gated on task traffic for centroid building; **ITEM-089 now computes exactly that**: a versioned vector per distinct prompt (stored once, never re-embedded) plus cosine clusters at 0.92, over live traffic (5 clusters from 33 prompts). The routing use (map a request to a task centroid) has its input now, so this needs a re-decision, not more traffic |
-| ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — with 028/029 (consumes the 029 quality-gap signal; see item file) |
+| ITEM-030 | OmniRouting: Lagrangian budget solver | feature | **staged** — 028 is delivered; gated on 029, whose quality-gap signal it consumes (see item file) |
 | ITEM-072 | Task-cluster model preference (ITEM-069 AC2) | feature | **staged** — gated on ITEM-029: map task clusters to measured per-model quality (ITEM-055) and record a per-cluster model preference the router consults. Bounded, holdout-gated, kill-switchable |
 | ITEM-084 | Connector / reverse tunnel | feature | **staged** — unpark only if a customer refuses both a reachable endpoint (051/082) and Docker on their own host (083); prompt would transit the cloud |
 
@@ -94,8 +96,8 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **done (2026-10-06)** — `/dashboard/onboarding`: mint key → base URL → snippets (tenant model) → first-request detection; links to providers (models live there now) |
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **done (2026-10-06)** — spend by provider/model/key/prompt with period deltas + inline spike badge; per-key/per-provider monthly limits (owner UI) with ITEM-020 alerts; onboarding empty state |
-| ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). Audit trail deferred |
-| ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; per-step triggers + guard trigger deferred |
+| ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). deferred scope (audit trail) captured as ITEM-108 on the 2026-11-04 review |
+| ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; deferred scope (per-step triggers + guard trigger) captured as ITEM-109 on the 2026-11-04 review |
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 
 ### Retired
@@ -109,14 +111,22 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-03 — the dashboard IA pass (ITEM-102–107) is delivered and
-archived; the pullable region is empty. Same form: one ranked list, gated at its
-bottom, then delivered history, then retired items._
+_Last updated: 2026-11-04 — backlog review: delivered item files 085–100 moved
+to the archive, and two explicitly deferred scopes that had never been captured
+(ITEM-045's per-step triggers, ITEM-046's audit trail) are now ITEM-108/109.
+Same form: one ranked list, gated at its bottom, then delivered history, then
+retired items._
 
-**Nothing is pullable — the backlog needs replenishment.** Every open item is
-gated (below). The next move is a PO decision, not a build: either unpark ITEM-029
-(its input now exists) or capture the next slice. Until then agents must not invent
-work; see the gated notes for what each item waits on.
+**Next pull: ITEM-108** (the control-plane audit trail), then ITEM-109 (per-step
+fallback triggers). Both are small, unblocked, and close trust/parity gaps the
+delivered items knowingly left open. After them the pullable region is empty
+again and the next move is the PO's gated-block decision (below).
+
+**PO action (not a build item):** the goal's first clause — put it in front of
+**real external developers** — has no open item. ITEM-018 closed on dogfooding
+(2026-10-12), and the live cloud still has one human user across two tenants (one
+is the smoke tenant). Either name a developer and hand them a key, or re-scope the
+goal's first clause; until then nothing in the pullable list advances it.
 
 **Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.
