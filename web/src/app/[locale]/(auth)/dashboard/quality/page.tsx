@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
+import { EvalsPanel } from '@/features/dashboard/EvalsPanel';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
@@ -33,8 +34,14 @@ export default async function QualityPage(props: {
   }
 
   const t = await getTranslations({ locale, namespace: 'QualityPage' });
-  const data = await InferonApi.fromEnv().quality(30, session.cookie);
+  const api = InferonApi.fromEnv();
+  // ITEM-105: a regression gate is a quality question, so evals live here.
+  const [data, evals] = await Promise.all([
+    api.quality(30, session.cookie),
+    api.evals(session.cookie),
+  ]);
   const overall = data.overall;
+  const evalsCopy = await getTranslations({ locale, namespace: 'EvalsPage' });
 
   return (
     <>
@@ -196,6 +203,18 @@ export default async function QualityPage(props: {
               </tbody>
             </table>
           </div>
+        </Card>
+      </div>
+      <div className="mt-4">
+        <Card title={evalsCopy('title_bar')}>
+          <p className="mb-4 text-sm text-muted-foreground">
+            {evalsCopy('title_bar_description')}
+          </p>
+          <EvalsPanel
+            goldSets={evals.gold_sets}
+            runs={evals.runs}
+            canEdit={evals.role === 'owner'}
+          />
         </Card>
       </div>
     </>

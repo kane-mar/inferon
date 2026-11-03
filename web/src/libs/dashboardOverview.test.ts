@@ -1,4 +1,4 @@
-import type { Datasets, PerformanceReport, Quality, Summary } from './InferonApi';
+import type { Datasets, Quality, RuntimeReport, Summary } from './InferonApi';
 import { describe, expect, it } from 'vitest';
 import { collectOverview } from './dashboardOverview';
 
@@ -67,10 +67,9 @@ const quality = (overrides: Partial<Quality['overall']> = {}): Quality => ({
 });
 
 const performance = (
-  overhead: Partial<PerformanceReport['overhead']> = {},
-  latency: Partial<PerformanceReport['latency']> = {},
-  cache: PerformanceReport['cache'] = null,
-): PerformanceReport =>
+  overhead: Partial<RuntimeReport['overhead']> = {},
+  latency: Partial<RuntimeReport['latency']> = {},
+): RuntimeReport =>
   ({
     window: { days: 7, offset_days: 0 },
     contract: {
@@ -102,34 +101,7 @@ const performance = (
       proxy_share: 0.1,
       ...latency,
     },
-    lint: {
-      enabled: true,
-      requests: 0,
-      preflight: { scanned: 0, findings: 0, dismissed: 0, wasted_usd: '0' },
-      batch: { checked: 0, flagged: 0, by_rule: {} },
-      by_kind: {},
-      dismissed: 0,
-      wasted_usd: '0',
-    },
-    pruning: {
-      enabled: false,
-      rewritten: 0,
-      holdout_requests: 0,
-      tokens_saved_est: 0,
-      usd_saved_est: '0',
-      pruned_ok_rate: null,
-      holdout_ok_rate: null,
-      delta: null,
-    },
-    pii: {
-      scanned: 0,
-      redacted_storage: 0,
-      redacted_wire: 0,
-      matches: 0,
-      by_class: {},
-    },
     heatmap: { step: 'day', buckets: [], models: [] },
-    cache,
     by_model: [],
   });
 

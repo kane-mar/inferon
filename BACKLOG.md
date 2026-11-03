@@ -20,10 +20,14 @@ retired items last.
 
 ### Undelivered (rank order)
 
-Nothing is pullable: every remaining item is gated, below the line.
+Ranked by value then effort; the gated block sits at the bottom of this same list.
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-103 | Split Performance into Runtime and Payloads | improvement | **new (2026-11-03)** — the Performance page is four pages in one: 13 KPIs and 9 cards spanning the sub-ms claim, end-to-end latency, transaction cost, a heatmap, lint findings, the pruning holdout, PII counts and operator-only cache counters. Split it into **Runtime** (claim, overhead, end-to-end, heatmap, by-model) and **Payloads** (lint rules + findings, pruning policy + holdout result, PII modes, retention/consent); move transaction cost to Spend and the process-wide cache to the operator console |
+| ITEM-105 | Fold Evals into Quality and Prompts into Datasets | improvement | **new (2026-11-03)** — the tab bar mixes views (Spend/Audit/Quality/Runtime/Datasets) with workflows (Evals/Prompts). Fold Evals into Quality (a gate is a quality question) and Prompts into Datasets (a registry is a view over the same hashes) → Overview · Spend · Audit · Quality · Datasets · Runtime · Payloads (7 tabs) |
+| ITEM-104 | Overview as an attention list, not a report index | improvement | **new (2026-11-03)** — the landing page repeats five other tabs as mini-cards (top spend, waste, quality, performance, datasets) and never says what to do. Reduce to 5 KPIs, one trend, and an **Attention** strip: the top findings by $ impact, each linking to the control that fixes it |
+| ITEM-106 | One presentation language across the reports | improvement | **new (2026-11-03)** — windows are inconsistent and unlabelled (Performance/Datasets hard-code 30 days; others have a switcher), the same metric appears on up to 5 pages with no authority, KPI rows run 3/4/6/7 up, money prints `$0.000129`, hashes truncate with no tooltip, and the heatmap has no legend. One `WindowChip`, one KPI component (value + unit + window + definition), adaptive money, `title` on truncated values, legend on the heatmap |
 | **— gated below this line —** | | | |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
@@ -104,15 +108,14 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-03 — ITEM-102 delivered; the undelivered list is now
-gated-only (nothing pullable). Same form: one ranked list, gated at its bottom,
-then delivered history, then retired items._
+_Last updated: 2026-11-03 — the IA pass captured (103–106) and ranked; ITEM-102
+delivered. Same form: one ranked list, gated at its bottom, then delivered
+history, then retired items._
 
-**Nothing is pullable.** Every live surface is now reachable from the dashboard:
-pruning is configured on Routing, and Evals and Prompts are tabs. What remains is
-the gated block, and each of those needs a decision before it can be built — GPU
-infra for 076/032, a call on centroid routing for 029 (its data gate is met), and
-a customer refusing both hosted options for 084.
+**Next pull: ITEM-103** (split Performance into Runtime and Payloads), then 105 →
+104 → 106. The four are one IA pass: they touch no backend read model except to
+split one, and each is verifiable in the browser. The gated block below still
+needs a decision rather than a build.
 
 **Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.

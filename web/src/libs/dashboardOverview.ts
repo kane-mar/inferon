@@ -1,4 +1,4 @@
-import type { Datasets, PerformanceReport, Quality, Summary } from './InferonApi';
+import type { Datasets, Quality, RuntimeReport, Summary } from './InferonApi';
 
 /**
  * The single dashboard's numbers: the most important metric from each report,
@@ -11,7 +11,7 @@ import type { Datasets, PerformanceReport, Quality, Summary } from './InferonApi
 export type OverviewInput = {
   summary: Summary;
   quality?: Quality | null;
-  performance?: PerformanceReport | null;
+  performance?: RuntimeReport | null;
   datasets?: Datasets | null;
   /** The audit findings: `{ kind: { requests, savings_est_usd } }`. */
   waste?: Record<string, { requests: number; savings_est_usd: string }> | null;

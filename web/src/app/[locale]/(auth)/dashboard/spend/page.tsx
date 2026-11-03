@@ -5,6 +5,8 @@ import { Suspense } from 'react';
 import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
+import { KpiCard } from '@/features/dashboard/KpiCard';
+import { CELL, integer, HEAD as REPORT_HEAD, usd } from '@/features/dashboard/reportFormat';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatCompact, formatInt, spendRows } from '@/libs/dashboardMetrics';
@@ -46,12 +48,15 @@ export default async function SpendReportPage(props: {
   const heading = await getTranslations({ locale, namespace: 'SpendReportPage' });
   const api = InferonApi.fromEnv();
 
-  const [byModel, byProvider, byKey, byPrompt, keys] = await Promise.all([
+  // ITEM-103: the unit of work — what one client transaction costs — is a spend
+  // question, so it lives here rather than beside the latency numbers.
+  const [byModel, byProvider, byKey, byPrompt, keys, sessions] = await Promise.all([
     api.byModel(days, session.cookie),
     api.byProvider(days, 0, session.cookie),
     api.byKey(days, 0, session.cookie),
     api.byPrompt(days, 10, session.cookie),
     api.keys(session.cookie),
+    api.sessions(days, session.cookie),
   ]);
 
   const models = spendRows(byModel.models, hideZero);
@@ -263,6 +268,65 @@ export default async function SpendReportPage(props: {
                   </tbody>
                 </table>
               )}
+        </Card>
+      </div>
+
+      {/* The unit of work: what one client transaction actually costs. */}
+      <div className="mt-4">
+        <Card title={heading('transactions')}>
+          <div className="grid grid-cols-3 gap-3">
+            <KpiCard
+              label={heading('transactions_p50')}
+              value={usd(sessions.distribution.p50_cost_usd)}
+            />
+            <KpiCard
+              label={heading('transactions_p95')}
+              value={usd(sessions.distribution.p95_cost_usd)}
+            />
+            <KpiCard
+              label={heading('transactions_count')}
+              value={integer(sessions.distribution.sessions)}
+            />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">{heading('transactions_help')}</p>
+          {sessions.sessions.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className={REPORT_HEAD}>{heading('transaction')}</th>
+                    <th className={REPORT_HEAD}>{heading('turns')}</th>
+                    <th className={REPORT_HEAD}>{heading('models')}</th>
+                    <th className={REPORT_HEAD}>{heading('cost')}</th>
+                    <th className={REPORT_HEAD}>{heading('errors')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.sessions.slice(0, 5).map(row => (
+                    <tr
+                      key={row.session}
+                      className="
+                        border-b
+                        last:border-0
+                      "
+                    >
+                      <td className={`
+                        ${CELL}
+                        font-mono text-xs
+                      `}
+                      >
+                        {row.session}
+                      </td>
+                      <td className={CELL}>{integer(row.turns)}</td>
+                      <td className={CELL}>{integer(row.models)}</td>
+                      <td className={CELL}>{formatUsd(row.cost_usd)}</td>
+                      <td className={CELL}>{integer(row.errors)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       </div>
     </>

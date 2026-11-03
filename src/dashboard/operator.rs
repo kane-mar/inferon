@@ -475,3 +475,25 @@ pub struct CreateKeyBody {
     label: Option<String>,
 }
 
+
+/// The process-wide hot-path cache, for the operator console (ITEM-103: it is
+/// operator information and does not belong on a tenant page).
+pub(crate) fn cache_json(stats: crate::hotpath::CacheStats) -> Value {
+    let count = |count: crate::hotpath::CacheCount| {
+        json!({
+            "hits": count.hits,
+            "misses": count.misses,
+            "hit_rate": count.hit_rate(),
+        })
+    };
+    json!({
+        "auth": count(stats.auth),
+        "config": count(stats.config),
+        "route": count(stats.route),
+        "warm": count(stats.warm),
+        "spend": count(stats.spend),
+        "invalidations": stats.invalidations,
+        "tenants": stats.tenants,
+        "oldest_age_ms": stats.oldest_age_ms,
+    })
+}

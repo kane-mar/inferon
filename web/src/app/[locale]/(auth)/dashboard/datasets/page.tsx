@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { DatasetPurge } from '@/features/dashboard/DatasetPurge';
 import { KpiCard } from '@/features/dashboard/KpiCard';
+import { PromptsPanel } from '@/features/dashboard/PromptsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatUsd, InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
@@ -39,7 +40,14 @@ export default async function DatasetsPage(props: {
   }
 
   const t = await getTranslations({ locale, namespace: 'DatasetsPage' });
-  const data = await InferonApi.fromEnv().datasets(DAYS, session.cookie);
+  const api = InferonApi.fromEnv();
+  // ITEM-105: the registry names the same hashes the clusters group, so it
+  // belongs on this page rather than beside the spend reports.
+  const [data, prompts] = await Promise.all([
+    api.datasets(DAYS, session.cookie),
+    api.prompts(session.cookie),
+  ]);
+  const promptsCopy = await getTranslations({ locale, namespace: 'PromptsPage' });
   const clusters = data.clusters;
   // ITEM-089: say which grouping produced these rows — the exact prompt hash,
   // or the semantic task cluster once the signatures have been computed.
@@ -151,6 +159,19 @@ export default async function DatasetsPage(props: {
               <p className="text-sm text-muted-foreground">{t('empty')}</p>
             )}
           </div>
+        </Card>
+      </div>
+
+      <div className="mt-4">
+        <Card title={promptsCopy('title_bar')}>
+          <p className="mb-4 text-sm text-muted-foreground">
+            {promptsCopy('title_bar_description')}
+          </p>
+          <PromptsPanel
+            prompts={prompts.prompts}
+            canEdit={prompts.role === 'owner'}
+            contentAvailable={prompts.content_available === true}
+          />
         </Card>
       </div>
     </>

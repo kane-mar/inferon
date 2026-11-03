@@ -1635,23 +1635,33 @@ async fn a_member_cannot_change_tier_pairs() {
     }
 
     #[tokio::test]
-    async fn the_performance_report_is_session_scoped() {
-        let anonymous = crate::build_router(dashboard_state())
-            .oneshot(get("/v1/dashboard/api/performance?days=7", None))
-            .await
-            .unwrap();
-        assert_eq!(anonymous.status(), axum::http::StatusCode::UNAUTHORIZED);
+    async fn the_runtime_and_payloads_reports_are_session_scoped() {
+        // ITEM-103: one page per question, both gated like every other report.
+        for uri in [
+            "/v1/dashboard/api/runtime?days=7",
+            "/v1/dashboard/api/payloads?days=7",
+        ] {
+            let anonymous = crate::build_router(dashboard_state())
+                .oneshot(get(uri, None))
+                .await
+                .unwrap();
+            assert_eq!(
+                anonymous.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{uri} answered without a session"
+            );
 
-        let (state, token) = tenant_role_session("owner").await;
-        let scoped = crate::build_router(state)
-            .oneshot(request_with_cookie("/v1/dashboard/api/performance?days=7", &token))
-            .await
-            .unwrap();
-        assert_ne!(
-            scoped.status(),
-            axum::http::StatusCode::UNAUTHORIZED,
-            "a session reaches the query (the lazy pool then fails it)"
-        );
+            let (state, token) = tenant_role_session("owner").await;
+            let scoped = crate::build_router(state)
+                .oneshot(request_with_cookie(uri, &token))
+                .await
+                .unwrap();
+            assert_ne!(
+                scoped.status(),
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{uri} rejected a session"
+            );
+        }
     }
 
     #[tokio::test]

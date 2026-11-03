@@ -245,14 +245,14 @@ describe('InferonApi — tenant tier pairs (ITEM-081)', () => {
   });
 });
 
-describe('InferonApi — performance report (ITEM-092)', () => {
-  it('requests the performance window with the session cookie', async () => {
+describe('InferonApi — runtime report (ITEM-092/103)', () => {
+  it('requests the runtime window with the session cookie', async () => {
     const fetchImpl = vi.fn(async () => json({ overhead: {}, latency: {}, by_model: [] }));
-    await makeApi(fetchImpl).performance(30, 'inferon_session=abc');
+    await makeApi(fetchImpl).runtime(30, 'inferon_session=abc');
 
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
 
-    expect(url).toBe('http://proxy:8080/v1/dashboard/api/performance?days=30');
+    expect(url).toBe('http://proxy:8080/v1/dashboard/api/runtime?days=30');
     expect(new Headers(init.headers).get('cookie')).toBe('inferon_session=abc');
   });
 });

@@ -93,7 +93,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       api.quality(view.days, session.cookie),
     ]);
   const [performance, datasets] = await Promise.all([
-    api.performance(view.days, session.cookie).catch(() => null),
+    api.runtime(view.days, session.cookie).catch(() => null),
     api.datasets(view.days, session.cookie).catch(() => null),
   ]);
   const overview = collectOverview({ summary, quality, performance, datasets, waste });

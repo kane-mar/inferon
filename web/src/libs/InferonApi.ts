@@ -170,7 +170,7 @@ export type PerformanceModelRow = {
   total_p95_ms: number | null;
 };
 
-export type PerformanceReport = {
+export type RuntimeReport = {
   window: { days: number; offset_days: number };
   contract: {
     p50_us: number;
@@ -215,17 +215,28 @@ export type PerformanceReport = {
       } | null)[];
     }[];
   };
-  /** ITEM-096: PII shapes found (counts only — never a value). */
-  pii: {
-    scanned: number;
-    redacted_storage: number;
-    redacted_wire: number;
-    matches: number;
-    by_class: Record<string, number>;
-  };
-  /** ITEM-091: context pruning and its held-out control arm. */
-  pruning: {
+  by_model: PerformanceModelRow[];
+};
+
+/** ITEM-103: the payloads report — what happens to prompts and completions? */
+export type PayloadsReport = {
+  window: { days: number };
+  requests: number;
+  capture: { enabled: boolean; retention_days: number };
+  lint: {
     enabled: boolean;
+    rules: LintRule[];
+    preflight: {
+      scanned: number;
+      findings: number;
+      dismissed: number;
+      wasted_usd: string;
+      by_kind: Record<string, number>;
+    };
+    batch: { checked: number; flagged: number; by_rule: Record<string, number> };
+  };
+  pruning: {
+    policy: PrunePolicy | null;
     rewritten: number;
     holdout_requests: number;
     tokens_saved_est: number;
@@ -234,37 +245,16 @@ export type PerformanceReport = {
     holdout_ok_rate: number | null;
     delta: number | null;
   };
-  /**
-   * ITEM-090: the payload lint, reported as coverage and outcome — a scan that
-   * finds nothing must still be visible, or "is it running?" is unanswerable.
-   */
-  lint: {
-    /** The per-tenant kill switch. */
-    enabled: boolean;
-    /** Requests in the window (the coverage denominator). */
-    requests: number;
-    preflight: {
-      /** Requests scanned before dispatch (kind list empty = nothing found). */
-      scanned: number;
-      findings: number;
-      dismissed: number;
-      wasted_usd: string;
-    };
-    /** The post-hoc rules A/B/C, from the batch worker. */
-    batch: {
-      checked: number;
-      flagged: number;
-      by_rule: Record<string, number>;
-    };
-    by_kind: Record<string, number>;
-    /** Findings the tenant dismissed as false positives. */
-    dismissed: number;
-    /** Estimated waste of the actionable findings, in USD. */
-    wasted_usd: string;
+  pii: {
+    detection: boolean;
+    redact_storage: boolean;
+    redact_wire: boolean;
+    scanned: number;
+    redacted_storage: number;
+    redacted_wire: number;
+    matches: number;
+    by_class: Record<string, number>;
   };
-  /** Process-wide, operator-only; `null` for a tenant reader. */
-  cache: PerformanceCache | null;
-  by_model: PerformanceModelRow[];
 };
 
 export type PromptRow = {
@@ -869,11 +859,20 @@ export class InferonApi {
     return this.request('POST', '/v1/dashboard/api/datasets/purge', {}, { cookie });
   }
 
-  performance(days: number, cookie?: string, step?: 'day' | 'hour'): Promise<PerformanceReport> {
+  runtime(days: number, cookie?: string, step?: 'day' | 'hour'): Promise<RuntimeReport> {
     const query = `${windowQuery(days)}${step ? `&step=${step}` : ''}`;
-    return this.request<PerformanceReport>(
+    return this.request<RuntimeReport>(
       'GET',
-      `/v1/dashboard/api/performance${query}`,
+      `/v1/dashboard/api/runtime${query}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  payloads(days: number, cookie?: string): Promise<PayloadsReport> {
+    return this.request<PayloadsReport>(
+      'GET',
+      `/v1/dashboard/api/payloads${windowQuery(days)}`,
       undefined,
       { cookie },
     );

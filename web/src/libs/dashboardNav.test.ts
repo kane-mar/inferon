@@ -25,10 +25,9 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
       '/dashboard/spend',
       '/dashboard/audit',
       '/dashboard/quality',
-      '/dashboard/performance',
+      '/dashboard/runtime',
+      '/dashboard/payloads',
       '/dashboard/datasets',
-      '/dashboard/evals',
-      '/dashboard/prompts',
     ]);
   });
 

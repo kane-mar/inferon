@@ -143,7 +143,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/lint/dismiss", post(dismiss_lint))
         .route("/v1/models", get(list_models))
         .route("/v1/dashboard/api/summary", get(dashboard::summary))
-        .route("/v1/dashboard/api/performance", get(dashboard::performance))
+        .route("/v1/dashboard/api/runtime", get(dashboard::runtime))
+        .route("/v1/dashboard/api/payloads", get(dashboard::payloads))
         .route("/v1/dashboard/api/datasets", get(dashboard::datasets))
         .route("/v1/dashboard/api/sessions", get(dashboard::sessions))
         .route(
