@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
+import { PrunePanel } from '@/features/dashboard/PrunePanel';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
 import { TierPairsPanel } from '@/features/dashboard/TierPairsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -52,6 +53,12 @@ export default async function RoutingPage(props: RoutingPageProps) {
             modelIds={modelIds}
             canEdit={data.role === 'owner'}
           />
+        </Card>
+      </div>
+
+      <div className="mt-4">
+        <Card title={t('prune')}>
+          <PrunePanel policy={config.prune} canEdit={config.role === 'owner'} />
         </Card>
       </div>
 

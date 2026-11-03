@@ -1730,3 +1730,54 @@ async fn a_member_cannot_change_tier_pairs() {
             .unwrap();
         assert_ne!(scoped.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
+
+/// ITEM-102: the three surfaces that had only an API now have a page. The pages
+/// are session-scoped like every other report; a missing session must not reach
+/// the read model, and a member must not publish a pruning policy.
+#[tokio::test]
+async fn the_new_report_surfaces_are_session_scoped() {
+    for uri in ["/v1/dashboard/api/evals", "/v1/dashboard/api/prompts"] {
+        let anonymous = crate::build_router(dashboard_state())
+            .oneshot(get(uri, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            anonymous.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{uri} answered without a session"
+        );
+
+        let (state, token) = tenant_role_session("owner").await;
+        let scoped = crate::build_router(state)
+            .oneshot(request_with_cookie(uri, &token))
+            .await
+            .unwrap();
+        assert_ne!(
+            scoped.status(),
+            axum::http::StatusCode::UNAUTHORIZED,
+            "{uri} rejected a session"
+        );
+    }
+}
+
+#[tokio::test]
+async fn only_an_owner_can_publish_a_pruning_policy() {
+    let body = r#"{"enabled":true,"drop_duplicate_turns":true,"max_prompt_tokens":null,"holdout_percent":10}"#;
+
+    let anonymous = crate::build_router(dashboard_state())
+        .oneshot(post("/v1/dashboard/api/prune", None, body))
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+    let (member_state, member) = tenant_role_session("member").await;
+    let refused = crate::build_router(member_state)
+        .oneshot(post_with_cookie("/v1/dashboard/api/prune", &member, body))
+        .await
+        .unwrap();
+    assert_eq!(
+        refused.status(),
+        axum::http::StatusCode::FORBIDDEN,
+        "a member must not change pruning"
+    );
+}

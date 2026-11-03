@@ -27,6 +27,8 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
       '/dashboard/quality',
       '/dashboard/performance',
       '/dashboard/datasets',
+      '/dashboard/evals',
+      '/dashboard/prompts',
     ]);
   });
 

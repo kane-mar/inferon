@@ -37,6 +37,8 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
       { href: '/dashboard/quality', labelKey: 'quality' },
       { href: '/dashboard/performance', labelKey: 'performance' },
       { href: '/dashboard/datasets', labelKey: 'datasets' },
+      { href: '/dashboard/evals', labelKey: 'evals' },
+      { href: '/dashboard/prompts', labelKey: 'prompts' },
     ],
   },
   { href: '/dashboard/providers', labelKey: 'providers' },

@@ -541,6 +541,77 @@ export type Datasets = {
   clusters: DatasetCluster[];
 };
 
+/** ITEM-091: the tenant's context-pruning policy (a versioned tenant policy). */
+export type PrunePolicy = {
+  enabled: boolean;
+  drop_duplicate_turns: boolean;
+  /** Estimated prompt-token ceiling; `null` = no budget. */
+  max_prompt_tokens: number | null;
+  /** Share sent unpruned so the effect is measurable (clamped at 50). */
+  holdout_percent: number;
+};
+
+/** ITEM-098: a pinned, versioned gold set. */
+export type GoldSet = {
+  gold_set_id: string;
+  version: number;
+  cases: number;
+  created_at: string;
+};
+
+/** ITEM-098: one eval run against a gold set. */
+export type EvalRun = {
+  run_id: string;
+  model: string;
+  status: 'running' | 'complete' | 'partial' | 'failed';
+  cases: number;
+  scored: number;
+  passed: number;
+  failed: number;
+  pass_rate: number | null;
+  cost_usd: string;
+  created_at: string;
+};
+
+export type EvalsReport = { role: Role; gold_sets: GoldSet[]; runs: EvalRun[] };
+
+/** ITEM-098: the regression gate's verdict for two runs. */
+export type EvalVerdict = {
+  verdict: 'insufficient' | 'unchanged' | 'improved' | 'regressed';
+  detail: string;
+  baseline: { model: string; scored: number; passed: number };
+  challenger: { model: string; scored: number; passed: number };
+};
+
+/** ITEM-097: one version (content hash) of a named prompt. */
+export type PromptVersion = {
+  prompt_hash: string;
+  first_seen: string;
+  last_seen: string;
+  requests: number;
+  ok_rate: number | null;
+  thumbs_down: number;
+  spend_usd: string;
+};
+
+/** ITEM-097: a named prompt and its versions, oldest first. */
+export type PromptEntry = { name: string; versions: PromptVersion[] };
+
+export type PromptsReport = {
+  role: Role;
+  /** False when the tenant does not capture payloads — content cannot be diffed. */
+  content_available: boolean | null;
+  prompts: PromptEntry[];
+};
+
+/** ITEM-097: a line diff between two versions of a prompt. */
+export type PromptDiff = {
+  name: string;
+  from: string;
+  to: string;
+  changes: { kind: 'same' | 'added' | 'removed'; text: string }[];
+};
+
 export type RoutingResponse = {
   fallbacks: string[];
   tier_pairs: ActiveTierPair[];
@@ -562,6 +633,8 @@ export type TenantConfig = {
   lint_enabled: boolean;
   /** ITEM-090: which pre-flight rules run. */
   lint_rules: LintRule[];
+  /** ITEM-091: the active context-pruning policy, or null when never published. */
+  prune: PrunePolicy | null;
   role: Role;
 };
 
@@ -739,6 +812,57 @@ export class InferonApi {
       undefined,
       { cookie },
     );
+  }
+
+  /** ITEM-091: publish a pruning policy (a new versioned tenant policy). */
+  setPrune(policy: PrunePolicy, cookie?: string): Promise<{ version: number; prune: PrunePolicy }> {
+    return this.request('POST', '/v1/dashboard/api/prune', policy, { cookie });
+  }
+
+  /** ITEM-098: pinned gold sets and eval runs. */
+  evals(cookie?: string): Promise<EvalsReport> {
+    return this.request<EvalsReport>('GET', '/v1/dashboard/api/evals', undefined, { cookie });
+  }
+
+  pinGoldSet(cases: number, cookie?: string): Promise<{ gold_set_id: string; version: number; cases: number }> {
+    return this.request('POST', '/v1/dashboard/api/evals/gold', { cases }, { cookie });
+  }
+
+  runEval(
+    body: { model: string; max_cases?: number; max_cost_cents?: number; gold_set_id?: string },
+    cookie?: string,
+  ): Promise<{ run_id: string; status: string }> {
+    return this.request('POST', '/v1/dashboard/api/evals/run', body, { cookie });
+  }
+
+  compareEvals(baseline: string, challenger: string, cookie?: string): Promise<EvalVerdict> {
+    return this.request('POST', '/v1/dashboard/api/evals/compare', { baseline, challenger }, { cookie });
+  }
+
+  /** ITEM-097: named prompts and their versions. */
+  prompts(cookie?: string): Promise<PromptsReport> {
+    return this.request<PromptsReport>('GET', '/v1/dashboard/api/prompts', undefined, { cookie });
+  }
+
+  labelPrompt(name: string, promptHash: string, cookie?: string): Promise<{ name: string; prompt_hash: string }> {
+    return this.request('POST', '/v1/dashboard/api/prompts/labels', { name, prompt_hash: promptHash }, { cookie });
+  }
+
+  unlabelPrompt(name: string, promptHash: string, cookie?: string): Promise<{ deleted: number }> {
+    return this.request(
+      'DELETE',
+      `/v1/dashboard/api/prompts/labels/${encodeURIComponent(name)}/${encodeURIComponent(promptHash)}`,
+      undefined,
+      { cookie },
+    );
+  }
+
+  promptDiff(
+    query: { name: string; from: string; to: string },
+    cookie?: string,
+  ): Promise<PromptDiff> {
+    const params = new URLSearchParams(query);
+    return this.request<PromptDiff>('GET', `/v1/dashboard/api/prompts/diff?${params}`, undefined, { cookie });
   }
 
   purgePayloads(cookie?: string): Promise<{ purged: number }> {
@@ -950,7 +1074,7 @@ export class InferonApi {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body?: unknown,
     auth: Auth = {},
