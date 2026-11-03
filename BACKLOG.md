@@ -24,8 +24,6 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-103 | Split Performance into Runtime and Payloads | improvement | **new (2026-11-03)** — the Performance page is four pages in one: 13 KPIs and 9 cards spanning the sub-ms claim, end-to-end latency, transaction cost, a heatmap, lint findings, the pruning holdout, PII counts and operator-only cache counters. Split it into **Runtime** (claim, overhead, end-to-end, heatmap, by-model) and **Payloads** (lint rules + findings, pruning policy + holdout result, PII modes, retention/consent); move transaction cost to Spend and the process-wide cache to the operator console |
-| ITEM-105 | Fold Evals into Quality and Prompts into Datasets | improvement | **new (2026-11-03)** — the tab bar mixes views (Spend/Audit/Quality/Runtime/Datasets) with workflows (Evals/Prompts). Fold Evals into Quality (a gate is a quality question) and Prompts into Datasets (a registry is a view over the same hashes) → Overview · Spend · Audit · Quality · Datasets · Runtime · Payloads (7 tabs) |
 | ITEM-104 | Overview as an attention list, not a report index | improvement | **new (2026-11-03)** — the landing page repeats five other tabs as mini-cards (top spend, waste, quality, performance, datasets) and never says what to do. Reduce to 5 KPIs, one trend, and an **Attention** strip: the top findings by $ impact, each linking to the control that fixes it |
 | ITEM-106 | One presentation language across the reports | improvement | **new (2026-11-03)** — windows are inconsistent and unlabelled (Performance/Datasets hard-code 30 days; others have a switcher), the same metric appears on up to 5 pages with no authority, KPI rows run 3/4/6/7 up, money prints `$0.000129`, hashes truncate with no tooltip, and the heatmap has no legend. One `WindowChip`, one KPI component (value + unit + window + definition), adaptive money, `title` on truncated values, legend on the heatmap |
 | **— gated below this line —** | | | |
@@ -42,6 +40,8 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-103 | Split Performance into Runtime and Payloads | improvement | **done + archived (2026-11-03)** — `/dashboard/runtime` (claim, overhead, end-to-end, heatmap, by-model) and `/dashboard/payloads` (capture/retention, lint, pruning, PII) are two read models and two pages; transaction cost moved to Spend and the process-wide cache left the tenant surface. `/dashboard/performance` 307s to Runtime. Live: 4 sections each, no cache card, both endpoints 401 without a session |
+| ITEM-105 | Fold Evals into Quality and Prompts into Datasets | improvement | **done + archived (2026-11-03)** — Evals renders inside Quality and Prompts inside Datasets; `/dashboard/evals` and `/dashboard/prompts` 307 to those pages. Seven tabs: Overview · Spend · Audit · Quality · Datasets · Runtime · Payloads. Live: Quality shows Evals, Datasets shows the registry, tab bar has seven entries |
 | ITEM-102 | Dashboard surfaces for pruning, evals and the prompt registry | feature | **done + archived (2026-11-03)** — pruning is configurable on Routing; Evals and Prompts are tabs under Dashboard. Found and fixed a real gap: `POST /api/prune` had never been added to the router (404 in production). Live: gold set pinned, run scored 1/1, prompt labelled and rendered, prune round-trip v40/v41 left off |
 | ITEM-092 | Hot-path config cache and latency budget | improvement | **done + closed (2026-11-01)** — claim: "sub-millisecond wire latency". `proxy_us`, the hot-path cache (auth/config/route/spend/warm) with stale-while-revalidate, the `HOTPATH_CACHE=off` kill switch, cache hit/miss/invalidation/**age** counters on both `/operator/metrics` and `/dashboard/performance`, and named per-stage debug timings (`auth`, `body`, `policy`, `route`, `budget`, `chain`, `prune`). The deploy gate and the report's verdict both evaluate the **running build** (fixed 24 h window, sample floor, pure `latency::verdict`). Live: `41 requests · p50 111 µs · p95 221 µs`; 42-sample window p50 448 µs → claim met |
 | ITEM-101 | Trace insert regression + schema-width guard | bug | **done (2026-10-31)** — the ITEM-085 build listed `raw_completion_capped` twice in the trace INSERT (and had one placeholder short), so **every** trace insert failed and the batch rolled back; ITEM-088's `payload_retention_days` was `INTEGER` while the store decodes `i64`, so the hot path answered `500 budget_store_error` for every request from 2026-10-30 11:14Z. Fixed, plus unit guards that read the statement as data: no duplicate column, one placeholder per column, every column exists in `db/init`, and the retention column is `BIGINT`. Live: 200 + a persisted trace |
@@ -112,9 +112,9 @@ _Last updated: 2026-11-03 — the IA pass captured (103–106) and ranked; ITEM-
 delivered. Same form: one ranked list, gated at its bottom, then delivered
 history, then retired items._
 
-**Next pull: ITEM-103** (split Performance into Runtime and Payloads), then 105 →
-104 → 106. The four are one IA pass: they touch no backend read model except to
-split one, and each is verifiable in the browser. The gated block below still
+**Next pull: ITEM-104** (Overview as an attention list), then ITEM-106 (one
+presentation language). Both are the remainder of the IA pass; neither changes a
+read model, and each is verifiable in the browser. The gated block below still
 needs a decision rather than a build.
 
 **Gated, and why:**
