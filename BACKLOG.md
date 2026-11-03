@@ -24,9 +24,6 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-107 | Design language: line icons, restrained colour, minimalist hierarchy | improvement | **new (2026-11-03)** — the reports carry no icons, tone-tint whole KPI boxes (colour as decoration rather than highlight), and use the same visual weight for a headline number and a footnote. Apply the dashboard-design principles: one icon per section from a **line set** (slimicons, MIT, 1.5 px stroke), colour only as a highlight or an alert (never fills, never colour alone), one type scale with a clear primary/secondary split, and whitespace instead of borders. Accessible: every tone also carries an icon and a word |
-| ITEM-104 | Overview as an attention list, not a report index | improvement | **new (2026-11-03)** — the landing page repeats five other tabs as mini-cards (top spend, waste, quality, performance, datasets) and never says what to do. Reduce to 5 KPIs, one trend, and an **Attention** strip: the top findings by $ impact, each linking to the control that fixes it |
-| ITEM-106 | One presentation language across the reports | improvement | **new (2026-11-03)** — windows are inconsistent and unlabelled (Performance/Datasets hard-code 30 days; others have a switcher), the same metric appears on up to 5 pages with no authority, KPI rows run 3/4/6/7 up, money prints `$0.000129`, hashes truncate with no tooltip, and the heatmap has no legend. One `WindowChip`, one KPI component (value + unit + window + definition), adaptive money, `title` on truncated values, legend on the heatmap |
 | **— gated below this line —** | | | |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
@@ -41,6 +38,9 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-107 | Design language: line icons, restrained colour, minimalist hierarchy | improvement | **done + archived (2026-11-03)** — one icon set (`slimicons`, MIT, 1.5 px stroke) named by meaning: 16 px in every section header and 14 px beside every KPI label, decorative (`aria-hidden`). KPI cards are the neutral surface again; only a `bad`/`warn` value takes colour, and it also gets a warning glyph, so the verdict survives without colour. Table verdicts colour the number, not the cell (the old green/amber/red fills are gone). Greens/ambers moved to 700-level for 4.5:1 contrast. A single KPI component replaced `StatCard` on the operator console too |
+| ITEM-106 | One presentation language across the reports | improvement | **done + archived (2026-11-03)** — `WindowChip` is the only window control: every report reads `?days=7\|30\|90` (default 30), so Runtime/Datasets/Payloads no longer hard-code 30 days and Spend/Audit lost their private switchers. `KpiCard` is the one metric card (value, unit, window, hover definition, icon). `money()` prints two decimals from a cent up, up to six below, no trailing zeros, and `<$0.000001` instead of `$0.00` for a real cost; charts and per-million prices use it. Truncated hashes and timestamps carry `title` (datasets, quality, prompts, keys, evals, operator jobs/alerts). The heatmap legend matches `heatCellClass`, and a dot means no traffic |
+| ITEM-104 | Overview as an attention list, not a report index | improvement | **done + archived (2026-11-03)** — five KPIs (requests, spend, error rate, p95 TTFT, savings), each with its window and a definition on hover; one trend chart; an **Attention** strip that lists only actionable findings (failure first, then money by impact), each naming the control and linking to it — Routing for errors/latency/waste, Payloads for lint. The five mini-cards that restated other tabs are gone; an empty tenant keeps the onboarding state and no strip |
 | ITEM-103 | Split Performance into Runtime and Payloads | improvement | **done + archived (2026-11-03)** — `/dashboard/runtime` (claim, overhead, end-to-end, heatmap, by-model) and `/dashboard/payloads` (capture/retention, lint, pruning, PII) are two read models and two pages; transaction cost moved to Spend and the process-wide cache left the tenant surface. `/dashboard/performance` 307s to Runtime. Live: 4 sections each, no cache card, both endpoints 401 without a session |
 | ITEM-105 | Fold Evals into Quality and Prompts into Datasets | improvement | **done + archived (2026-11-03)** — Evals renders inside Quality and Prompts inside Datasets; `/dashboard/evals` and `/dashboard/prompts` 307 to those pages. Seven tabs: Overview · Spend · Audit · Quality · Datasets · Runtime · Payloads. Live: Quality shows Evals, Datasets shows the registry, tab bar has seven entries |
 | ITEM-102 | Dashboard surfaces for pruning, evals and the prompt registry | feature | **done + archived (2026-11-03)** — pruning is configurable on Routing; Evals and Prompts are tabs under Dashboard. Found and fixed a real gap: `POST /api/prune` had never been added to the router (404 in production). Live: gold set pinned, run scored 1/1, prompt labelled and rendered, prune round-trip v40/v41 left off |
@@ -109,13 +109,14 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-03 — the IA pass captured (103–106) and ranked; ITEM-102
-delivered. Same form: one ranked list, gated at its bottom, then delivered
-history, then retired items._
+_Last updated: 2026-11-03 — the dashboard IA pass (ITEM-102–107) is delivered and
+archived; the pullable region is empty. Same form: one ranked list, gated at its
+bottom, then delivered history, then retired items._
 
-**Next pull: ITEM-107** (the design language: icons, restrained colour, hierarchy),
-then ITEM-104 (Overview as an attention list) and ITEM-106 (one presentation
-language). The three are the rest of the IA pass; none changes a read model.
+**Nothing is pullable — the backlog needs replenishment.** Every open item is
+gated (below). The next move is a PO decision, not a build: either unpark ITEM-029
+(its input now exists) or capture the next slice. Until then agents must not invent
+work; see the gated notes for what each item waits on.
 
 **Gated, and why:**
 - **076 / 032** (OmniRouting trainer, PagedLoRA serving) need Slice 3 GPU infra.
