@@ -214,43 +214,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // ITEM-070 edge mode: run the proxy next to the customer's own model. The
-    // cloud stays the control plane; the local provider credential is a secret
-    // held only here.
-    let argv: Vec<String> = std::env::args().collect();
-    if argv.iter().any(|arg| arg == "--edge") {
-        let flag = |name: &str| -> Option<String> {
-            argv.iter()
-                .position(|arg| arg == name)
-                .and_then(|index| argv.get(index + 1))
-                .cloned()
-        };
-        let credential = |name: &str| -> String {
-            match inferon::edge_runtime::credential(
-                flag(name),
-                flag(&format!("{name}-file")),
-                name,
-            ) {
-                Ok(value) => value,
-                Err(message) => {
-                    eprintln!("{message}");
-                    std::process::exit(2);
-                }
-            }
-        };
-        let options = inferon::edge_runtime::EdgeOptions {
-            control_url: flag("--control-url").unwrap_or_default(),
-            node_token: credential("--node-token"),
-            provider_url: flag("--provider-url").unwrap_or_default(),
-            provider_key: credential("--provider-key"),
-            provider_kind: flag("--provider-kind")
-                .unwrap_or_else(|| "openai-compatible".to_string()),
-            port,
-            sync_interval: std::time::Duration::from_secs(30),
-        };
-        return inferon::edge_runtime::run(options).await;
-    }
-
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| DEFAULT_DATABASE_URL.to_string());
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -327,7 +290,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
         )),
         policy_store: Arc::new(inferon::policy::PostgresPolicyStore::new(pool.clone())),
-        edge_store: Arc::new(inferon::edge::PostgresEdgeNodeStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
         accounts,

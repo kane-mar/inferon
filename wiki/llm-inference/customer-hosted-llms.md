@@ -66,53 +66,38 @@ probe (`GET <base>/models`) records reachability and caches the model list.
   stays private.
 - Latency: `client → cloud → customer endpoint → model` — one proxy hop.
 
-## C — Hybrid data plane
+## Retired: the edge node (2026-11-01)
 
-Run the same Rust binary on the customer's network as an **edge**:
+An earlier design ran a stripped proxy on the customer's network ("edge node")
+that synced config from the cloud and shipped telemetry back. It is **retired**,
+and the reason is structural rather than a matter of maturity:
 
-```
-client ──> edge proxy (on-prem) ──> local model
-                 │
-                 └── outbound, batched: telemetry + config ──> cloud control plane
-```
+- Prompts never leave the node, so the cloud could only ever keep records.
+  Datasets, eval, prompt versioning, the heatmap and policy adaptation all live
+  where the traces are — none of it could run on the node.
+- The node's own controls were a **stale cloud snapshot**: spend came from the
+  last sync (never incremented locally), and of the 17 config fields the cloud
+  sent, the runtime parsed 9 and hardcoded the rest. A privacy node that cannot
+  enforce a budget or a rate limit is not a controller.
+- Everything it did, the full package does better — **inside the customer's own
+  network** — and it is the same artifact we already run: `--profile
+  self-hosted` (proxy + web + Postgres + Redis) gives them the dashboard,
+  datasets, adaptation and audit locally.
+- It was a second data plane with a different storage model, so every feature
+  had to be built twice and the node version was always the lesser one.
 
-- **Data plane (edge):** serves the OpenAI-compatible surface locally, resolves
-  the local provider directly (`base_url` never leaves the network), authenticates
-  client keys against synced key hashes, and applies model selection, routing,
-  budget, and guard locally.
-- **Control plane (cloud):** auth/sessions, the dashboard, provider/model/
-  routing/budget config, alerts, and **telemetry ingestion** to power the
-  dashboard and billing.
-- **Uplink:** only small, batched control + telemetry leaves the network — never
-  inference. This is the latency win.
-- **Enrollment:** a per-tenant edge token; the node syncs its config and pushes
-  traces under a node credential (revocable).
-
-### First slice (backbone)
-
-The cloud-side **telemetry ingest** endpoint: an edge pushes batches of trace
-records authenticated as its tenant; the cloud writes them through the existing
-sink so the dashboard/billing/alerts light up. Everything else (edge mode,
-config sync) builds on it.
-
-## Decision (2026-10-28) — three profiles, no cloud→on-prem routing
-
-There is no profile in which the cloud routes to an on-prem model and the prompt
-stays off the cloud: routing through the cloud *is* sending the prompt through
-the cloud. So the option space is three profiles, and each has a different
-customer cost:
+## Profiles today — two
 
 | Profile | Customer setup | Prompts transit cloud | Backlog |
 |---|---|---|---|
 | **Self-hosted** (full stack on their Docker) | Docker on their host | **No** | ITEM-083 delivered |
 | **Cloud + reachable endpoint** | Publish the model behind TLS | Yes (one extra hop) | ITEM-051/077/081/082 delivered |
-| **Edge node** (privacy only) | Run the node; clients talk to it | **No** (telemetry only) | ITEM-070 delivered |
 
-The **edge node is not a cloud fallback target**. A node that silently falls
-back to a cloud provider is the worst outcome available — local until it isn't —
-and it breaks the privacy promise that is the only reason to run a node. That
-proposal (ITEM-080) was dropped. The connector (option B / ITEM-084) stays
-staged until a customer refuses both a reachable endpoint and Docker.
+There is no profile in which the cloud routes to an on-prem model and the prompt
+stays off the cloud: routing through the cloud *is* sending the prompt through
+the cloud. So privacy means either the full stack on the customer's side, or the
+model stays theirs while prompts transit (the reachable endpoint). The connector
+(option B / ITEM-084) stays staged until a customer refuses both.
 
 ## Economics & performance
 

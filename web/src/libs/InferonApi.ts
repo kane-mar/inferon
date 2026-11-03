@@ -280,16 +280,6 @@ export type PromptRow = {
 
 export type ByPrompt = { prompts: PromptRow[] };
 
-/** ITEM-065: an enrolled edge node (cloud control plane). */
-export type EdgeNode = {
-  id: string;
-  name: string;
-  last_seen_at: string | null;
-  created_at: string;
-};
-
-export type EdgeNodes = { nodes: EdgeNode[] };
-
 /** ITEM-047: spend grouped by provider (period-comparable via `offset`). */
 export type ProviderSpendRow = {
   provider_id: string | null;
@@ -840,18 +830,6 @@ export class InferonApi {
 
   providers(cookie?: string): Promise<ProvidersResponse> {
     return this.request<ProvidersResponse>('GET', '/v1/dashboard/api/providers', undefined, { cookie });
-  }
-
-  edgeNodes(cookie?: string): Promise<EdgeNodes> {
-    return this.request<EdgeNodes>('GET', '/v1/dashboard/api/edge/nodes', undefined, { cookie });
-  }
-
-  createEdgeNode(name: string, cookie?: string): Promise<{ id: string; token: string }> {
-    return this.request('POST', '/v1/dashboard/api/edge/nodes', { name }, { cookie });
-  }
-
-  revokeEdgeNode(id: string, cookie?: string): Promise<{ removed: boolean }> {
-    return this.request('POST', `/v1/dashboard/api/edge/nodes/${id}/revoke`, {}, { cookie });
   }
 
   auditShares(cookie?: string): Promise<AuditShares> {

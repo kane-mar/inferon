@@ -508,90 +508,6 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         builder.body(Body::from(body.to_string())).unwrap()
     }
 
-    async fn edge_request(
-        body: &str,
-        auth: Option<&str>,
-    ) -> (axum::response::Response, mpsc::Receiver<TraceMessage>) {
-        let (tx, rx) = mpsc::channel(64);
-        let state = std::sync::Arc::new(AppState {
-            telemetry_tx: tx,
-            ..base_state("http://127.0.0.1:1/v1/chat/completions")
-        });
-        let mut builder = Request::builder()
-            .method("POST")
-            .uri("/v1/edge/traces")
-            .header("content-type", "application/json");
-        if let Some(key) = auth {
-            builder = builder.header("authorization", format!("Bearer {key}"));
-        }
-        let response = build_router(state)
-            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap();
-        (response, rx)
-    }
-
-    #[tokio::test]
-    async fn edge_traces_are_queued_dimensioned_to_the_authenticated_tenant() {
-        let body = r#"{"traces":[
-            {"model":"deepseek-flash","prompt_tokens":10,"completion_tokens":2,"total_duration_ms":30,"status_code":200,"cached_prompt_tokens":8},
-            {"model":"deepseek-v4-pro","prompt_tokens":5,"completion_tokens":1,"total_duration_ms":12,"status_code":200}
-        ]}"#;
-        let (response, mut rx) = edge_request(body, Some(CLIENT_KEY)).await;
-        assert_eq!(response.status(), StatusCode::ACCEPTED);
-        let json = json_body(response).await;
-        assert_eq!(json["accepted"], 2);
-        assert_eq!(json["dropped"], 0);
-        let first = rx.recv().await.unwrap();
-        assert_eq!(
-            first.tenant_id,
-            uuid::Uuid::parse_str(TENANT_ID).unwrap(),
-            "tenant comes from the credential, never the body"
-        );
-        assert_eq!(first.request_model, "deepseek-flash");
-        assert_eq!(first.prompt_tokens, 10);
-        assert_eq!(first.cached_prompt_tokens, Some(8));
-        assert_eq!(
-            first.upstream_cost_usd,
-            rust_decimal::Decimal::ZERO,
-            "cost is recomputed in the cloud"
-        );
-    }
-
-    #[tokio::test]
-    async fn edge_config_requires_a_node_credential() {
-        let response = build_router(test_state("http://127.0.0.1:1/v1/chat/completions"))
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/v1/edge/config")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn edge_ingest_requires_a_key() {
-        let (response, _rx) = edge_request(r#"{"traces":[]}"#, None).await;
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn edge_batches_over_the_limit_are_refused() {
-        let traces: Vec<Value> = (0..=crate::edge::MAX_EDGE_BATCH)
-            .map(|_| json!({"model": "m", "total_duration_ms": 1, "status_code": 200}))
-            .collect();
-        let body = json!({"traces": traces}).to_string();
-        let (response, _rx) = edge_request(&body, Some(CLIENT_KEY)).await;
-        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
-    }
-
-    /// The `AppState` every test needs: seeded tenant, empty in-memory stores,
-    /// a pool that is never dialled. Tests spread this and override only what
-    /// they care about (`..base_state(...)`), so a new field is added once.
     fn base_state(upstream_url: &str) -> AppState {
         AppState {
             http_client: reqwest::Client::new(),
@@ -604,7 +520,6 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: mpsc::channel::<TraceMessage>(64).0,
             operator_key: None,
             accounts: None,

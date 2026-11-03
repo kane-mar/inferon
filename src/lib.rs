@@ -9,7 +9,7 @@
 //!   the router/budget/guard/affinity/policy controls, forward upstream, trace.
 //! - **Control plane** (`dashboard`, `dashboard::operator`): the tenant and
 //!   operator HTTP surfaces.
-//! - **Ingress seams** (`auth`, `edge`): OAuth/sessions and edge-node ingest.
+//! - **Ingress seams** (`auth`): OAuth and sessions.
 //! - **Routing intelligence** (`router`, `budget`, `routing`, `guard`,
 //!   `affinity`, `policy`, `quality`, `linter`, `cost`, `usage`).
 //! - **Stores** (`tenant`, `providers`, `models`, `routing`, `budget`,
@@ -30,8 +30,6 @@ pub type StoreResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 // Control-plane surfaces.
 pub mod auth;
 pub mod dashboard;
-pub mod edge;
-pub mod edge_runtime;
 // Data plane.
 pub mod proxy;
 pub mod promptreg;
@@ -56,6 +54,7 @@ pub mod preflight;
 pub mod prune;
 pub mod quality;
 pub mod ratelimit;
+pub mod retired;
 pub mod retention;
 pub mod router;
 pub mod routing;
@@ -125,8 +124,6 @@ pub struct AppState {
     pub affinity_store: Arc<dyn affinity::AffinityStore>,
     /// ITEM-064: the tenant's active adaptive policy (versioned).
     pub policy_store: Arc<dyn policy::PolicyStore>,
-    /// ITEM-065: enrolled edge nodes (control plane).
-    pub edge_store: Arc<dyn edge::EdgeNodeStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).
@@ -142,8 +139,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/chat/completions", post(proxy_chat_completions))
         .route("/v1/messages", post(proxy_messages))
-        .route("/v1/edge/traces", post(edge::ingest))
-        .route("/v1/edge/config", get(edge::config))
         .route("/v1/quality", post(quality_signal))
         .route("/v1/lint/dismiss", post(dismiss_lint))
         .route("/v1/models", get(list_models))
@@ -236,14 +231,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/v1/dashboard/api/audit/shares/:id/revoke",
             post(dashboard::tenant_audit_share_revoke),
-        )
-        .route(
-            "/v1/dashboard/api/edge/nodes",
-            get(dashboard::tenant_edge_nodes).post(dashboard::tenant_edge_node_create),
-        )
-        .route(
-            "/v1/dashboard/api/edge/nodes/:node_id/revoke",
-            post(dashboard::tenant_edge_node_revoke),
         )
         .route("/v1/dashboard/api/quality", get(dashboard::quality))
         .route("/v1/dashboard/api/waste", get(dashboard::waste))

@@ -42,7 +42,6 @@
             hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
-            edge_store: std::sync::Arc::new(crate::edge::InMemoryEdgeNodeStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
             accounts,

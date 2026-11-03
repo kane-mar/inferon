@@ -1,7 +1,6 @@
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
-import { EdgeNodesPanel } from '@/features/dashboard/EdgeNodesPanel';
 import { ProvidersPanel } from '@/features/dashboard/ProvidersPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
@@ -27,10 +26,7 @@ export default async function ProvidersPage(props: ProvidersPageProps) {
 
   const t = await getTranslations({ locale, namespace: 'ProvidersPage' });
   const api = InferonApi.fromEnv();
-  const [data, edge] = await Promise.all([
-    api.providers(session.cookie),
-    api.edgeNodes(session.cookie),
-  ]);
+  const data = await api.providers(session.cookie);
 
   return (
     <>
@@ -41,13 +37,6 @@ export default async function ProvidersPage(props: ProvidersPageProps) {
       <Card title={t('providers')}>
         <ProvidersPanel data={data} role={data.role} />
       </Card>
-
-      <div className="mt-4">
-        <Card title={t('edge_nodes')}>
-          <p className="mb-3 text-sm text-muted-foreground">{t('edge_hint')}</p>
-          <EdgeNodesPanel data={edge} />
-        </Card>
-      </div>
     </>
   );
 }

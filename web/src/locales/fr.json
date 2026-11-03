@@ -269,24 +269,9 @@
     "test_connection": "Tester la connexion",
     "probe_ok": "Connecté — {count} modèles",
     "probe_failed": "Fournisseur injoignable",
-    "edge_nodes": "Nœuds de périphérie",
-    "edge_hint": "Exécutez le proxy à côté de votre modèle — l'inférence reste sur votre réseau ; seule la télémétrie en sort.",
     "local_note": "Un modèle sur votre propre réseau. L'inférence coûte 0 $ ici, mais le cloud doit pouvoir joindre cette URL (TLS si elle est publique). Seul le point d'accès exposé est contacté — le reste de votre réseau reste privé.",
     "key_optional": "Laisser vide si le point d'accès n'exige aucune clé",
     "local_free": "Gratuit — servi sur votre propre matériel"
-  },
-  "EdgePage": {
-    "name": "Nom",
-    "name_placeholder": "ex. bureau-gpu",
-    "enroll": "Enrôler un nœud",
-    "token_once": "Copiez ce jeton de nœud maintenant — il n'est affiché qu'une fois.",
-    "no_nodes": "Aucun nœud périphérique enrôlé.",
-    "node": "Nœud",
-    "last_seen": "Dernière activité",
-    "never": "Jamais",
-    "revoke": "Révoquer",
-    "enroll_error": "Impossible d'enrôler le nœud",
-    "revoke_error": "Impossible de révoquer le nœud"
   },
   "QualityPage": {
     "title_bar": "Qualité",

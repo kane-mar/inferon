@@ -30,7 +30,7 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
     ]);
   });
 
-  it('renders providers as a single page (edge nodes live inside it)', () => {
+  it('renders providers as a single page', () => {
     const providers = dashboardNav(false).find(item => item.href === '/dashboard/providers');
 
     expect(providers?.children).toBeUndefined();

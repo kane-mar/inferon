@@ -14,7 +14,6 @@
 
 mod audit_admin;
 mod datasets;
-mod edge_admin;
 pub mod evals;
 mod keys;
 mod members;
@@ -30,7 +29,6 @@ mod sessions;
 
 pub use audit_admin::*;
 pub use datasets::*;
-pub use edge_admin::*;
 pub use keys::*;
 pub use members::*;
 pub use operator::*;
