@@ -5,7 +5,7 @@ test.describe('Sanity', () => {
     test('should display the homepage', async ({ page }) => {
       await page.goto('/');
 
-      await expect(page.getByText('Know the')).toBeVisible();
+      await expect(page.getByText('Know what every AI request')).toBeVisible();
     });
   });
 });
