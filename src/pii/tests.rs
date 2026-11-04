@@ -145,3 +145,14 @@ fn a_large_payload_stays_linear() {
         "scanning 200 KB took {elapsed:?} — that is not a linear pass"
     );
 }
+
+#[test]
+fn multibyte_text_does_not_panic_the_byte_scanner() {
+    // A dash is three bytes. The scanner used to step one byte at a time and
+    // slice at a mid-character index, panicking the request on any em dash.
+    assert_eq!(scan("—").total(), 0);
+    assert_eq!(
+        scan("context — write to jane@example.com"),
+        counts(&[("email", 1)])
+    );
+}

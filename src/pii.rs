@@ -191,7 +191,9 @@ fn spans(text: &str) -> Vec<Span> {
             i = end;
             continue;
         }
-        i += 1;
+        // Advance by whole characters: the detectors slice at `i`, so stepping
+        // into a multibyte character would panic on any em dash in the payload.
+        i += text[i..].chars().next().map_or(1, char::len_utf8);
     }
     spans
 }
