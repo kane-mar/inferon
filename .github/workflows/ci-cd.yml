@@ -122,7 +122,7 @@ jobs:
           tar czf /tmp/durable.tgz \
             --exclude='web/node_modules' --exclude='web/.next' \
             Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile \
-            .dockerignore .env.example src scripts db web
+            .dockerignore .env.example src scripts db web README.md guides
 
       - name: Install SSH key
         if: steps.cfg.outputs.configured == 'true'

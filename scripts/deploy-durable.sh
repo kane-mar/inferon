@@ -146,7 +146,8 @@ bundle_upload() {
     bundle=$(mktemp /tmp/inferon-durable.XXXXXX)
     tar czf "$bundle" \
         --exclude='web/node_modules' --exclude='web/.next' \
-        Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example src scripts db web
+        Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile .dockerignore .env.example \
+        src scripts db web README.md guides
     scp -q -i "$SSH_KEY" -o StrictHostKeyChecking=no "$bundle" "root@$ip:/tmp/durable.tgz"
     rm -f "$bundle"
 }
