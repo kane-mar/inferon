@@ -83,8 +83,7 @@ pub(crate) async fn session_user(
     let Some(token) = crate::session::cookie_value(cookie, crate::session::SESSION_COOKIE) else {
         return Ok(None);
     };
-    let Some(user_id) =
-        crate::session::verify_session(token, &accounts.session_secret, now_secs())
+    let Some(user_id) = crate::session::verify_session(token, &accounts.session_secret, now_secs())
     else {
         return Ok(None);
     };
@@ -93,6 +92,50 @@ pub(crate) async fn session_user(
         Err(e) => {
             tracing::error!("user lookup failed: {e}");
             Err(internal("user lookup failed"))
+        }
+    }
+}
+
+/// The signed-in person behind a mutation, for the audit trail (ITEM-108).
+pub(crate) struct SessionActor {
+    pub(crate) tenant_id: uuid::Uuid,
+    pub(crate) role: String,
+    pub(crate) user_id: uuid::Uuid,
+    pub(crate) login: String,
+}
+
+impl SessionActor {
+    pub(crate) fn audit_actor(&self) -> crate::config_audit::Actor {
+        crate::config_audit::Actor {
+            id: self.user_id,
+            login: self.login.clone(),
+        }
+    }
+}
+
+/// The session's tenant, role and user in one lookup. Mutating handlers use
+/// this so an event can name the person who made the change.
+pub(crate) async fn session_actor(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<SessionActor, Response> {
+    let Some(user) = session_user(state, headers).await? else {
+        return Err(unauthorized());
+    };
+    let Some(accounts) = &state.accounts else {
+        return Err(unauthorized());
+    };
+    match accounts.users.tenant_for_user(user.id).await {
+        Ok(Some((tenant_id, role))) => Ok(SessionActor {
+            tenant_id,
+            role,
+            user_id: user.id,
+            login: user.github_login,
+        }),
+        Ok(None) => Err(unauthorized()),
+        Err(e) => {
+            tracing::error!("membership lookup failed: {e}");
+            Err(internal("membership lookup failed"))
         }
     }
 }
@@ -166,20 +209,8 @@ pub(crate) async fn session_membership(
     state: &Arc<AppState>,
     headers: &HeaderMap,
 ) -> Result<(uuid::Uuid, String), Response> {
-    let Some(user) = session_user(state, headers).await? else {
-        return Err(unauthorized());
-    };
-    let Some(accounts) = &state.accounts else {
-        return Err(unauthorized());
-    };
-    match accounts.users.tenant_for_user(user.id).await {
-        Ok(Some(membership)) => Ok(membership),
-        Ok(None) => Err(unauthorized()),
-        Err(e) => {
-            tracing::error!("membership lookup failed: {e}");
-            Err(internal("membership lookup failed"))
-        }
-    }
+    let actor = session_actor(state, headers).await?;
+    Ok((actor.tenant_id, actor.role))
 }
 
 /// Owner-gate for tenant management actions (ITEM-038/039): members can view

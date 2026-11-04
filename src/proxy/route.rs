@@ -59,10 +59,7 @@ pub(super) fn apply_provider_headers(
 /// An upstream request with the provider's auth and metadata headers. A keyless
 /// local provider sends no Authorization header at all (ITEM-082); every other
 /// kind sends its credential (Anthropic on `x-api-key`).
-pub(crate) fn provider_request(
-    client: &reqwest::Client,
-    route: &Route,
-) -> reqwest::RequestBuilder {
+pub(crate) fn provider_request(client: &reqwest::Client, route: &Route) -> reqwest::RequestBuilder {
     let mut request = client
         .post(&route.url)
         .header("Content-Type", "application/json");
@@ -88,7 +85,8 @@ pub(crate) async fn resolve_route(
     // load across them, weighted by the adaptive policy's health weights
     // (ITEM-069). A single-provider model is the old behaviour exactly.
     if let Some(model) = model {
-        if let Some(route) = balance_across_providers(state, tenant, model, surface, weights).await {
+        if let Some(route) = balance_across_providers(state, tenant, model, surface, weights).await
+        {
             return route;
         }
     }
@@ -190,11 +188,8 @@ pub(super) async fn balance_across_providers(
         })
         .collect();
     let seed = state.hotpath.next_seed(tenant.id, model);
-    let choice = crate::loadbalance::choose(
-        &candidates,
-        seed,
-        crate::loadbalance::Strategy::Weighted,
-    )?;
+    let choice =
+        crate::loadbalance::choose(&candidates, seed, crate::loadbalance::Strategy::Weighted)?;
     let provider = &eligible[choice.slot];
     let native = if providers::is_anthropic(&provider.kind) {
         Surface::Anthropic
@@ -221,9 +216,7 @@ pub(super) async fn balance_across_providers(
 /// surface the request arrived on (ITEM-050 AC5).
 pub(super) fn surface_mismatch(surface: Surface) -> Response {
     let message = match surface {
-        Surface::Anthropic => {
-            "no Anthropic provider configured — add one in Dashboard → Providers"
-        }
+        Surface::Anthropic => "no Anthropic provider configured — add one in Dashboard → Providers",
         Surface::OpenAi => {
             "no OpenAI-compatible provider configured — add one in Dashboard → Providers"
         }
@@ -253,26 +246,36 @@ pub(super) async fn read_json_body(req: Request) -> Result<(axum::body::Bytes, V
     Ok((body_bytes, payload))
 }
 
-/// The ordered, de-duplicated `(model, route)` chain to attempt: the primary
-/// (after any router/budget override), then the tenant's fallbacks, dropping
-/// models the tenant disabled (ITEM-044). Each entry carries the provider that
-/// owns it, so a fallback to another provider's model hits the right upstream.
+/// One attempt in the chain: the model, its resolved route, and the failures
+/// that may send the request here (ITEM-109).
+#[derive(Clone)]
+pub(crate) struct ChainStep {
+    pub(crate) model: String,
+    pub(crate) route: Route,
+    pub(crate) triggers: Vec<routing::FallbackTrigger>,
+}
+
+/// The ordered, de-duplicated chain to attempt: the primary (after any
+/// router/budget override), then the tenant's fallback steps, dropping models
+/// the tenant disabled (ITEM-044). Each entry carries the provider that owns
+/// it, so a fallback to another provider's model hits the right upstream.
 /// Always contains at least the primary.
 pub(super) async fn build_model_chain(
     state: &Arc<AppState>,
     tenant: &Tenant,
     route: &Route,
     primary: String,
-    fallbacks: Vec<String>,
+    fallbacks: Vec<routing::FallbackStep>,
     weights: Option<&std::collections::BTreeMap<String, f64>>,
-) -> Vec<(String, Route)> {
+) -> Vec<ChainStep> {
     let mut seen = std::collections::HashSet::new();
     let mut chain = Vec::new();
-    for model in std::iter::once(primary.clone()).chain(fallbacks) {
-        if !seen.insert(model.clone()) {
+    let entry = routing::FallbackStep::retryable(primary.clone());
+    for step in std::iter::once(entry).chain(fallbacks) {
+        if !seen.insert(step.model.clone()) {
             continue;
         }
-        let decision = if model == primary {
+        let decision = if step.model == primary {
             // The primary was already checked by `ensure_model_enabled`.
             crate::hotpath::Decision {
                 route: route.clone(),
@@ -281,7 +284,7 @@ pub(super) async fn build_model_chain(
         } else {
             state
                 .hotpath
-                .route(state, tenant, &model, Surface::OpenAi, weights)
+                .route(state, tenant, &step.model, Surface::OpenAi, weights)
                 .await
                 .unwrap_or_else(|_| crate::hotpath::Decision {
                     route: route.clone(),
@@ -291,10 +294,18 @@ pub(super) async fn build_model_chain(
         if decision.disabled {
             continue;
         }
-        chain.push((model, decision.route));
+        chain.push(ChainStep {
+            model: step.model,
+            route: decision.route,
+            triggers: step.triggers,
+        });
     }
     if chain.is_empty() {
-        chain.push((primary, route.clone()));
+        chain.push(ChainStep {
+            model: primary,
+            route: route.clone(),
+            triggers: routing::FallbackTrigger::ALL.to_vec(),
+        });
     }
     chain
 }
@@ -307,7 +318,7 @@ pub(super) struct ModelPlan {
     /// The model the chain starts from (after any override/affinity) — recorded
     /// as the `from_model` of a fallback event.
     pub(super) primary: String,
-    pub(super) chain: Vec<(String, Route)>,
+    pub(super) chain: Vec<ChainStep>,
     /// ITEM-091: the tenant's pruning policy, read with the rest of the policy.
     pub(super) prune: Option<crate::prune::PrunePolicy>,
 }
@@ -349,22 +360,28 @@ pub(super) async fn plan_models(
     // ITEM-016: the budget breaker wins over the router and rejects before any
     // upstream call; ITEM-046/081: otherwise the router may downshift.
     let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
-    let chosen = match budget::check_budget(state, tenant_id, &meta.raw_prompt, policy_threshold)
-        .await
-    {
-        Ok(chosen) => chosen,
-        Err(resp) => {
-            trace_error(state, meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
-            return Err(resp);
-        }
-    };
+    let chosen =
+        match budget::check_budget(state, tenant_id, &meta.raw_prompt, policy_threshold).await {
+            Ok(chosen) => chosen,
+            Err(resp) => {
+                trace_error(state, meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
+                return Err(resp);
+            }
+        };
     stages.mark("budget");
     let primary = override_primary(state, route.provider_id, meta, chosen).await;
     // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.
     let primary = prefer_warm(state, tenant_id, meta, primary).await;
     let fallbacks = state.hotpath.fallbacks(state, tenant_id).await;
-    let chain =
-        build_model_chain(state, tenant, &route, primary.clone(), fallbacks, policy_weights).await;
+    let chain = build_model_chain(
+        state,
+        tenant,
+        &route,
+        primary.clone(),
+        fallbacks,
+        policy_weights,
+    )
+    .await;
     stages.mark("chain");
     Ok(ModelPlan {
         route,
@@ -432,5 +449,3 @@ pub(super) async fn prefer_warm(
         _ => primary,
     }
 }
-
-

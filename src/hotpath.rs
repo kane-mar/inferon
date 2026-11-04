@@ -82,7 +82,7 @@ struct TenantEntry {
     /// the spend cache when read (`spend` must not be 5 s stale).
     budget: Option<TenantBudget>,
     policy: Option<Policy>,
-    fallbacks: Vec<String>,
+    fallbacks: Vec<crate::routing::FallbackStep>,
     spend: Option<(i64, Instant)>,
     routes: HashMap<String, Decision>,
     warm: HashMap<String, (Option<WarmTarget>, Instant)>,
@@ -696,7 +696,7 @@ impl HotPath {
         }
     }
 
-    pub async fn fallbacks(&self, state: &Arc<AppState>, tenant_id: Uuid) -> Vec<String> {
+    pub async fn fallbacks(&self, state: &Arc<AppState>, tenant_id: Uuid) -> Vec<crate::routing::FallbackStep> {
         match self.refresh(state, tenant_id).await {
             Ok(entry) => entry
                 .lock()

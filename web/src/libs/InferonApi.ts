@@ -583,10 +583,49 @@ export type PromptDiff = {
   changes: { kind: 'same' | 'added' | 'removed'; text: string }[];
 };
 
+/** ITEM-109: why a fallback step may be used. */
+export type FallbackTrigger = 'transport' | 'rate_limited' | 'server_error' | 'guard';
+
+export type RoutingStep = {
+  model: string;
+  triggers: FallbackTrigger[];
+};
+
+/** ITEM-108: the settings an audit event can name. */
+export type ConfigSetting
+  = | 'budget_limit_cents'
+    | 'cheap_fallback_model'
+    | 'guard_enabled'
+    | 'router_enabled'
+    | 'router_threshold'
+    | 'capture_payloads'
+    | 'payload_retention_days'
+    | 'lint_enabled'
+    | 'lint_rules'
+    | 'translate_surfaces'
+    | 'rpm_limit'
+    | 'tpm_limit'
+    | 'pii_detection'
+    | 'pii_redact_storage'
+    | 'pii_redact_wire'
+    | 'fallbacks'
+    | 'tier_pairs'
+    | 'prune';
+
+/** ITEM-108: one owner-only control-plane change. */
+export type ConfigAuditRecord = {
+  actor_login: string;
+  setting: ConfigSetting;
+  before: unknown;
+  after: unknown;
+  at: string;
+};
+
 export type RoutingResponse = {
-  fallbacks: string[];
+  fallbacks: RoutingStep[];
   tier_pairs: ActiveTierPair[];
   role: Role;
+  audit: ConfigAuditRecord[];
 };
 
 export type TenantConfig = {
@@ -1013,7 +1052,7 @@ export class InferonApi {
     return this.request<RoutingResponse>('GET', '/v1/dashboard/api/routing', undefined, { cookie });
   }
 
-  setRouting(fallbacks: string[], cookie?: string): Promise<{ fallbacks: string[] }> {
+  setRouting(fallbacks: RoutingStep[], cookie?: string): Promise<{ fallbacks: RoutingStep[] }> {
     return this.request('POST', '/v1/dashboard/api/routing', { fallbacks }, { cookie });
   }
 

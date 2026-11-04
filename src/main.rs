@@ -290,6 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
         )),
         policy_store: Arc::new(inferon::policy::PostgresPolicyStore::new(pool.clone())),
+        config_audit: Arc::new(inferon::config_audit::PostgresConfigAuditStore::new(pool.clone())),
         telemetry_tx,
         operator_key: std::env::var("OPERATOR_API_KEY").ok().filter(|k| !k.is_empty()),
         accounts,

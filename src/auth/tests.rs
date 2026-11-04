@@ -282,6 +282,7 @@
             hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            config_audit: std::sync::Arc::new(crate::config_audit::InMemoryConfigAuditStore::default()),
             telemetry_tx: tx,
             operator_key: None,
             accounts,

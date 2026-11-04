@@ -31,16 +31,14 @@ pub(super) async fn forward_buffered(
     // ITEM-094: the trace (usage, outcome) is read from the provider's own
     // shape; the client gets the shape it asked for — the opposite surface.
     let bytes = match meta.translate_to {
-        Some(Surface::OpenAi) => {
-            translated_body(&bytes, Surface::Anthropic).unwrap_or(bytes)
-        }
+        Some(Surface::OpenAi) => translated_body(&bytes, Surface::Anthropic).unwrap_or(bytes),
         Some(Surface::Anthropic) => translated_body(&bytes, Surface::OpenAi).unwrap_or(bytes),
         None => bytes,
     };
     let usage = parse_usage(&response_json);
     let outcome = outcome_for_json(status.as_u16(), &response_json);
-    let error_class = (!status.is_success())
-        .then(|| ErrorClass::from_upstream_status(status.as_u16()));
+    let error_class =
+        (!status.is_success()).then(|| ErrorClass::from_upstream_status(status.as_u16()));
     let total_ms = started.elapsed().as_millis() as i64;
     // Non-streaming ttft mirrors total duration; error responses have no ttft.
     let ttft_ms = status.is_success().then_some(total_ms);
@@ -71,7 +69,10 @@ pub(super) async fn forward_buffered(
 
 /// ITEM-094: translate a buffered upstream body to the client surface. Errors
 /// are translated too, so a provider failure arrives in the caller's shape.
-pub(super) fn translated_body(bytes: &axum::body::Bytes, target: Surface) -> Option<axum::body::Bytes> {
+pub(super) fn translated_body(
+    bytes: &axum::body::Bytes,
+    target: Surface,
+) -> Option<axum::body::Bytes> {
     let value: Value = serde_json::from_slice(bytes).ok()?;
     let translated = if value.get("error").is_some() && value.get("choices").is_none() {
         match target {
@@ -425,13 +426,22 @@ pub(super) fn stream_response(
 /// response is served to the client and the request's single trace records
 /// the guard event. If the replay itself fails the request answers loudly
 /// with a clean 502 (AC4) — never a silent drop.
+/// What a guard fallback needs from the routing chain (ITEM-109).
+pub(super) struct GuardContext<'a> {
+    /// The served step's route — the built-in replay uses it.
+    pub(super) route: &'a Route,
+    /// The full chain and the step that served, for guard-triggered replays.
+    pub(super) chain: &'a [ChainStep],
+    pub(super) served: usize,
+}
+
 pub(super) async fn guarded_stream_response(
     state: &Arc<AppState>,
     meta: RequestMeta,
     tenant_id: Uuid,
     started: Instant,
     upstream: reqwest::Response,
-    route: &Route,
+    context: GuardContext<'_>,
     tx: mpsc::Sender<TraceMessage>,
 ) -> Response {
     let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
@@ -441,8 +451,13 @@ pub(super) async fn guarded_stream_response(
             tracing::error!("guarded upstream body read failed: {e}");
             // 025: a cheap stream that dies before any bytes is the
             // "connection crash" class — fall back, don't surface it.
-            return fallback_to_frontier(&mut guard_emit, state, route, GuardReason::UpstreamFailure)
-                .await;
+            return guard_fallback(
+                &mut guard_emit,
+                state,
+                &context,
+                GuardReason::UpstreamFailure,
+            )
+            .await;
         }
     };
 
@@ -465,118 +480,192 @@ pub(super) async fn guarded_stream_response(
         }
         Err(reason) => {
             tracing::warn!(
-                "guard rejected a cheap-tier response: {} (reason {}) — replaying on the frontier",
+                "guard rejected a cheap-tier response: {} (reason {}) — replaying",
                 tenant_id,
                 reason.label()
             );
-            fallback_to_frontier(&mut guard_emit, state, route, reason).await
+            guard_fallback(&mut guard_emit, state, &context, reason).await
         }
     }
 }
 
-/// ITEM-025: transparent fallback after the guard discards a cheap response.
-/// Replays the ORIGINAL prompt (`meta.raw_prompt`, pre-router/budget
-/// downgrade) on the tenant's frontier model — their own key, same upstream —
-/// and serves the replacement response. Exactly one trace is emitted for the
-/// request (BufferedGuard is one-shot): on success it records the fallback
-/// guard event and the trace's model is retargeted to the model that served
-/// (the cost basis); when the replay itself fails the request answers a loud
-/// clean 502 and the trace records `fallback_failed` + the reason (AC3/AC4).
-pub(super) async fn fallback_to_frontier(
+/// One model the guard may replay the original prompt to.
+struct ReplayTarget<'a> {
+    model: String,
+    route: &'a Route,
+    /// `Some` when this is a tenant chain step (recorded on the trace);
+    /// `None` for the built-in frontier replay.
+    step: Option<usize>,
+}
+
+/// Where a failed guard may replay, in order (ITEM-109). A tenant opts in by
+/// marking a fallback step with the `guard` trigger; without one the pre-109
+/// built-in frontier replay stands.
+fn replay_targets<'a>(
+    original: &serde_json::Value,
+    route: &'a Route,
+    chain: &'a [ChainStep],
+    served: usize,
+) -> Vec<ReplayTarget<'a>> {
+    let triggers: Vec<&[routing::FallbackTrigger]> =
+        chain.iter().map(|step| step.triggers.as_slice()).collect();
+    let targets: Vec<ReplayTarget<'a>> =
+        routing::all_handling(&triggers, served, routing::FallbackTrigger::Guard)
+            .into_iter()
+            .map(|index| ReplayTarget {
+                model: chain[index].model.clone(),
+                route: &chain[index].route,
+                step: Some(index),
+            })
+            .collect();
+    if targets.is_empty() {
+        return vec![ReplayTarget {
+            model: guard::fallback_model(original),
+            route,
+            step: None,
+        }];
+    }
+    targets
+}
+
+struct ReplayFailure {
+    model: String,
+    detail: String,
+    class: ErrorClass,
+    message: &'static str,
+}
+
+/// ITEM-025/109: transparent fallback after the guard discards a cheap
+/// response. Tries every chain step marked with the `guard` trigger in order
+/// (or the built-in frontier replay when none is), serving the first valid
+/// replacement. Exactly one trace is emitted for the request; when every
+/// replay fails the request answers a loud clean 502 (AC4).
+pub(super) async fn guard_fallback(
     guard_emit: &mut BufferedGuard,
     state: &AppState,
-    route: &Route,
+    context: &GuardContext<'_>,
     reason: GuardReason,
 ) -> Response {
-    let frontier = guard::fallback_model(&guard_emit.meta.raw_prompt);
-    // ITEM-067: the replay to the frontier is normalized the same way — a single
-    // DeepSeek deployment cannot accept json_schema at all.
-    let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
-        && !providers::supports_json_schema(&route.kind, &frontier);
-    let replay_body = match budget::forward_body(&guard_emit.meta.raw_prompt, &frontier, downgrade) {
-        Ok(body) => body,
-        Err(e) => {
-            tracing::error!("guard fallback payload reserialization failed: {e}");
-            guard_emit.emit(Usage::default(), false, Outcome::Error, Some(ErrorClass::Inferon5xx));
-            return json_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "serialization_error",
-                "failed to reserialize the request payload",
-            );
-        }
-    };
-    let replay = provider_request(&state.http_client, route)
-        .body(replay_body)
-        .send()
-        .await;
     let guarded_model = guard_emit.meta.model.clone();
-    match replay {
-        Err(e) => {
-            tracing::error!("guard frontier replay failed: {e}");
-            let event =
-                guard::guard_event("fallback_failed", reason, &guarded_model, Some("transport error"));
-            guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(
-                Usage::default(),
-                false,
-                Outcome::Error,
-                Some(ErrorClass::from_transport(&e)),
-            );
-            json_error(
-                StatusCode::BAD_GATEWAY,
-                "guard_fallback_error",
-                "frontier fallback request failed",
-            )
-        }
-        Ok(res) if !res.status().is_success() => {
-            let detail = format!("http {}", res.status().as_u16());
-            tracing::warn!("guard frontier replay rejected: {detail}");
-            let event =
-                guard::guard_event("fallback_failed", reason, &guarded_model, Some(&detail));
-            guard_emit.note_guard(Some(&frontier), event);
-            guard_emit.emit(Usage::default(), false, Outcome::Error, Some(ErrorClass::Guard));
-            json_error(
-                StatusCode::BAD_GATEWAY,
-                "guard_fallback_error",
-                "frontier fallback was rejected",
-            )
-        }
-        Ok(res) => {
-            // Note the event BEFORE buffering the replay so a mid-replay
-            // client abort (Drop) still records the guard event (AC3).
-            let event = guard::guard_event("fallback", reason, &guarded_model, None);
-            guard_emit.note_guard(Some(&frontier), event);
-            let bytes = match res.bytes().await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    tracing::error!("guard frontier body read failed: {e}");
-                    guard_emit.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::Transport));
-                    return json_error(
-                        StatusCode::BAD_GATEWAY,
-                        "guard_fallback_error",
-                        "frontier fallback body read failed",
+    let replays = replay_targets(
+        &guard_emit.meta.raw_prompt,
+        context.route,
+        context.chain,
+        context.served,
+    );
+    let mut last_failure: Option<ReplayFailure> = None;
+
+    for replay in replays {
+        // ITEM-067: the replay is normalized per target — a single DeepSeek
+        // deployment cannot accept json_schema at all.
+        let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
+            && !providers::supports_json_schema(&replay.route.kind, &replay.model);
+        let body = match wire_body(
+            &guard_emit.meta.raw_prompt,
+            replay.route,
+            &replay.model,
+            downgrade,
+        ) {
+            Ok(body) => body,
+            Err(response) => {
+                guard_emit.emit(
+                    Usage::default(),
+                    false,
+                    Outcome::Error,
+                    Some(ErrorClass::Inferon5xx),
+                );
+                return response;
+            }
+        };
+        let attempt = provider_request(&state.http_client, replay.route)
+            .body(body)
+            .send()
+            .await;
+        match attempt {
+            Err(e) => {
+                tracing::error!("guard replay to {} failed: {e}", replay.model);
+                last_failure = Some(ReplayFailure {
+                    model: replay.model,
+                    detail: "transport error".to_string(),
+                    class: ErrorClass::from_transport(&e),
+                    message: "frontier fallback request failed",
+                });
+            }
+            Ok(res) if !res.status().is_success() => {
+                let detail = format!("http {}", res.status().as_u16());
+                tracing::warn!("guard replay to {} rejected: {detail}", replay.model);
+                last_failure = Some(ReplayFailure {
+                    model: replay.model,
+                    detail,
+                    class: ErrorClass::Guard,
+                    message: "frontier fallback was rejected",
+                });
+            }
+            Ok(res) => {
+                // Note the event BEFORE buffering the replay so a mid-replay
+                // client abort (Drop) still records the guard event (AC3).
+                let event = guard::guard_event("fallback", reason, &guarded_model, None);
+                guard_emit.note_guard(Some(&replay.model), event);
+                if let Some(step) = replay.step {
+                    guard_emit.meta.routing_event = Some(json!({
+                        "from_model": guarded_model,
+                        "to_model": replay.model,
+                        "reason": "guard",
+                        "step": step,
+                    }));
+                }
+                let bytes = match res.bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        tracing::error!("guard replay body read failed: {e}");
+                        guard_emit.emit(
+                            Usage::default(),
+                            true,
+                            Outcome::Truncated,
+                            Some(ErrorClass::Transport),
+                        );
+                        return json_error(
+                            StatusCode::BAD_GATEWAY,
+                            "guard_fallback_error",
+                            "frontier fallback body read failed",
+                        );
+                    }
+                };
+                let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+                // ITEM-067 AC4: never serve an invalid replay silently — record a
+                // `fallback_invalid` event when the replay also violates the schema.
+                let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
+                if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
+                    guard_emit.note_guard(
+                        Some(&replay.model),
+                        guard::guard_event("fallback_invalid", reason, &guarded_model, None),
                     );
                 }
-            };
-            let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
-            // ITEM-067 AC4: never serve an invalid replay silently — record a
-            // `fallback_invalid` event when the frontier also violates the schema.
-            let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
-            if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
-                guard_emit.note_guard(
-                    Some(&frontier),
-                    guard::guard_event("fallback_invalid", reason, &guarded_model, None),
-                );
+                guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
+                let mut response = Response::new(Body::from(bytes));
+                *response.status_mut() = StatusCode::OK;
+                response
+                    .headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+                return decorate(response, &guard_emit.meta);
             }
-            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
-            let mut response = Response::new(Body::from(bytes));
-            *response.status_mut() = StatusCode::OK;
-            response
-                .headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            decorate(response, &guard_emit.meta)
         }
     }
+
+    let failure = last_failure.expect("there is always at least one replay target");
+    let event = guard::guard_event(
+        "fallback_failed",
+        reason,
+        &guarded_model,
+        Some(&failure.detail),
+    );
+    guard_emit.note_guard(Some(&failure.model), event);
+    guard_emit.emit(Usage::default(), false, Outcome::Error, Some(failure.class));
+    json_error(
+        StatusCode::BAD_GATEWAY,
+        "guard_fallback_error",
+        failure.message,
+    )
 }
 
 /// Drop-guarded trace emitter for the buffered (non-streamed-to-client)
@@ -637,7 +726,13 @@ impl BufferedGuard {
         *self.completion.borrow_mut() = crate::capture::from_sse_bytes(bytes);
     }
 
-    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome, error_class: Option<ErrorClass>) {
+    fn emit(
+        &self,
+        usage: Usage,
+        truncated: bool,
+        outcome: Outcome,
+        error_class: Option<ErrorClass>,
+    ) {
         if self.emitted.replace(true) {
             return;
         }
@@ -678,7 +773,12 @@ impl Drop for BufferedGuard {
     fn drop(&mut self) {
         if !self.emitted.get() {
             tracing::debug!("guarded request dropped before flush; recording truncated trace");
-            self.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::ClientAbort));
+            self.emit(
+                Usage::default(),
+                true,
+                Outcome::Truncated,
+                Some(ErrorClass::ClientAbort),
+            );
         }
     }
 }
@@ -740,7 +840,13 @@ impl StreamEmit {
 
     /// Emit the trace unless one was already sent. `truncated` marks a stream
     /// that ended before the upstream finished (mid-stream error).
-    fn emit(&self, usage: Usage, truncated: bool, outcome: Outcome, error_class: Option<ErrorClass>) {
+    fn emit(
+        &self,
+        usage: Usage,
+        truncated: bool,
+        outcome: Outcome,
+        error_class: Option<ErrorClass>,
+    ) {
         if self.emitted.replace(true) {
             return;
         }
@@ -772,7 +878,12 @@ impl Drop for StreamEmit {
             // the very end by the provider) never arrived, so token counts are
             // unknown — record zeroes and flag the trace as truncated.
             tracing::debug!("stream dropped before completion; recording truncated trace");
-            self.emit(Usage::default(), true, Outcome::Truncated, Some(ErrorClass::ClientAbort));
+            self.emit(
+                Usage::default(),
+                true,
+                Outcome::Truncated,
+                Some(ErrorClass::ClientAbort),
+            );
         }
     }
 }

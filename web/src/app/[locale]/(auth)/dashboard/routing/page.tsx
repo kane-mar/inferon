@@ -13,6 +13,22 @@ type RoutingPageProps = {
   params: Promise<{ locale: string }>;
 };
 
+/** A change value as the table shows it: never `[object Object]`. */
+const auditValue = (value: unknown, yes: string, no: string): string => {
+  if (value == null) {
+    return '—';
+  }
+  if (typeof value === 'boolean') {
+    return value ? yes : no;
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return JSON.stringify(value);
+};
+
+const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
+
 /**
  * Fallback & routing rules (ITEM-045): an ordered chain of models tried when the
  * primary request fails retryably (transport error, 429, 5xx). An empty chain
@@ -67,6 +83,77 @@ export default async function RoutingPage(props: RoutingPageProps) {
           <ControlsPanel data={config} modelIds={modelIds} />
         </Card>
       </div>
+
+      {data.role === 'owner' && (
+        <div className="mt-4">
+          <Card title={t('audit')} icon="lock">
+            <p className="mb-3 text-sm text-muted-foreground">{t('audit_help')}</p>
+            {data.audit.length === 0
+              ? <p className="text-sm text-muted-foreground">{t('audit_empty')}</p>
+              : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className={HEAD}>{t('audit_when')}</th>
+                          <th className={HEAD}>{t('audit_actor')}</th>
+                          <th className={HEAD}>{t('audit_setting')}</th>
+                          <th className={HEAD}>{t('audit_change')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.audit.map((entry) => {
+                          const before = auditValue(entry.before, t('on'), t('off'));
+                          const after = auditValue(entry.after, t('on'), t('off'));
+                          return (
+                            <tr
+                              key={`${entry.at}-${entry.setting}-${entry.actor_login}-${JSON.stringify(entry.after)}`}
+                              className="
+                                border-b
+                                last:border-0
+                              "
+                            >
+                              <td className="
+                                py-2 font-mono text-xs text-muted-foreground
+                              "
+                              >
+                                <span title={entry.at}>
+                                  {entry.at.slice(0, 16).replace('T', ' ')}
+                                </span>
+                              </td>
+                              <td className="py-2 font-mono text-xs">{entry.actor_login}</td>
+                              <td className="py-2">{t(`setting_${entry.setting}`)}</td>
+                              <td className="py-2">
+                                <span
+                                  className="
+                                    inline-block max-w-96 truncate align-bottom
+                                    font-mono text-xs text-muted-foreground
+                                  "
+                                  title={before}
+                                >
+                                  {before}
+                                </span>
+                                <span className="px-1 text-muted-foreground">→</span>
+                                <span
+                                  className="
+                                    inline-block max-w-96 truncate align-bottom
+                                    font-mono text-xs
+                                  "
+                                  title={after}
+                                >
+                                  {after}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+          </Card>
+        </div>
+      )}
     </>
   );
 }

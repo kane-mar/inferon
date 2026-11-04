@@ -11,7 +11,7 @@ use crate::guard::GuardReason;
 use crate::quality::{outcome_for_json, outcome_for_sse, Outcome};
 use crate::usage::{
     system_prompt_hash, system_prompt_hash_anthropic, usage_from_anthropic_json,
-    usage_from_anthropic_sse_bytes, usage_from_sse_bytes, usage_from_json, Usage,
+    usage_from_anthropic_sse_bytes, usage_from_json, usage_from_sse_bytes, Usage,
 };
 use crate::{
     authenticate, budget, dashboard, guard, json_error, providers, routing, sha256_hex, AppState,
@@ -111,14 +111,19 @@ pub(crate) async fn list_models(State(state): State<Arc<AppState>>, req: Request
         if let Ok(Some(provider)) = state.provider_store.resolve_for(tenant.id, None).await {
             match dashboard::fetch_provider_models(&state, &provider).await {
                 Ok(fetched) => {
-                    let _ = state.provider_store.record_models(provider.id, &fetched).await;
+                    let _ = state
+                        .provider_store
+                        .record_models(provider.id, &fetched)
+                        .await;
                     ids.extend(fetched);
                 }
-                Err(e) => tracing::warn!("model discovery failed for provider {}: {e}", provider.id),
+                Err(e) => {
+                    tracing::warn!("model discovery failed for provider {}: {e}", provider.id)
+                }
             }
         } else if let Some(key) = tenant.upstream_openai_key.as_deref() {
             let shared = crate::providers::ResolvedProvider {
-            last_check_ok: None,
+                last_check_ok: None,
                 id: Uuid::nil(),
                 kind: "openai".to_string(),
                 base_url: dashboard::upstream_base_url(&state.upstream_url),
@@ -261,9 +266,17 @@ pub(crate) async fn proxy_chat_completions(
         "hot-path stages"
     );
     let mut upstream: Option<reqwest::Response> = None;
-    for index in 0..allowed.len() {
-        let (model, attempt_route) = (&allowed[index].0, &allowed[index].1);
-        let model = model.clone();
+    // ITEM-109: a step declares which failures may send the request to it, so a
+    // 429 can skip a 5xx-only step instead of ending the chain.
+    let triggers: Vec<&[routing::FallbackTrigger]> = allowed
+        .iter()
+        .map(|step| step.triggers.as_slice())
+        .collect();
+    let mut index = 0;
+    while index < allowed.len() {
+        let step = &allowed[index];
+        let model = step.model.clone();
+        let attempt_route = &step.route;
         // ITEM-067: the target's wire-format capability is per attempt, so a
         // fallback to a provider that honours json_schema keeps the contract.
         let downgrade_schema = guard::request_schema(&meta.raw_prompt).is_some()
@@ -282,30 +295,38 @@ pub(crate) async fn proxy_chat_completions(
                 .send()
                 .await
         };
-        let is_last = index + 1 == allowed.len();
         match attempt {
             Ok(response) => {
                 let status = response.status();
-                let reason = routing::fallback_reason(status.as_u16());
-                if status.is_success() || is_last || reason.is_none() {
+                let next = routing::fallback_reason(status.as_u16()).and_then(|reason| {
+                    let trigger = routing::FallbackTrigger::from(reason);
+                    routing::next_handling(&triggers, index, trigger)
+                });
+                let Some(next_index) = next else {
                     meta.model = model;
                     meta.translate_to = attempt_route.translate;
                     upstream = Some(response);
                     break;
-                }
-                let next = allowed[index + 1].0.clone();
+                };
+                let next_model = allowed[next_index].model.clone();
                 tracing::warn!(
-                    "routing fallback: {model} -> {next} (HTTP {})",
+                    "routing fallback: {model} -> {next_model} (HTTP {}, step {next_index})",
                     status.as_u16()
                 );
                 routing_event = Some(json!({
                     "from_model": primary,
-                    "to_model": next,
-                    "reason": reason.expect("retryable").label(),
+                    "to_model": next_model,
+                    "reason": routing::fallback_reason(status.as_u16())
+                        .expect("next step implies a retryable failure")
+                        .label(),
+                    "step": next_index,
                 }));
+                index = next_index;
             }
             Err(e) => {
-                if is_last {
+                let next =
+                    routing::next_handling(&triggers, index, routing::FallbackTrigger::Transport);
+                let Some(next_index) = next else {
                     tracing::error!("upstream request failed: {e}");
                     trace_error(
                         &state,
@@ -320,24 +341,38 @@ pub(crate) async fn proxy_chat_completions(
                         "upstream_error",
                         "upstream request failed",
                     );
-                }
-                let next = allowed[index + 1].0.clone();
-                tracing::warn!("routing fallback (transport): {model} -> {next}");
+                };
+                let next_model = allowed[next_index].model.clone();
+                tracing::warn!(
+                    "routing fallback (transport): {model} -> {next_model} (step {next_index})"
+                );
                 routing_event = Some(json!({
                     "from_model": primary,
-                    "to_model": next,
+                    "to_model": next_model,
                     "reason": routing::FallbackReason::Transport.label(),
+                    "step": next_index,
                 }));
+                index = next_index;
             }
         }
     }
     meta.routing_event = routing_event;
     let upstream = upstream.expect("the chain always has at least one model");
+    let served_index = index;
 
     let status = upstream.status();
     if !status.is_success() {
         // Forward the upstream error as-is (keep its content-type); still trace.
-        return forward_buffered(&state, &meta, tenant_id, started, upstream, None, usage_from_json).await;
+        return forward_buffered(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            upstream,
+            None,
+            usage_from_json,
+        )
+        .await;
     }
     if is_stream {
         // ITEM-023 (guard): requests with a JSON-schema contract served by a
@@ -354,7 +389,11 @@ pub(crate) async fn proxy_chat_completions(
                 tenant_id,
                 started,
                 upstream,
-                &route,
+                GuardContext {
+                    route: &route,
+                    chain: &allowed,
+                    served: served_index,
+                },
                 state.telemetry_tx.clone(),
             )
             .await
@@ -371,7 +410,16 @@ pub(crate) async fn proxy_chat_completions(
         }
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));
-        forward_buffered(&state, &meta, tenant_id, started, upstream, json_content_type, usage_from_json).await
+        forward_buffered(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            upstream,
+            json_content_type,
+            usage_from_json,
+        )
+        .await
     }
 }
 
@@ -473,7 +521,14 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
     // and bypassed here; only the hard monthly cap still applies.
     if let Err(resp) = budget::check_cap(&state, tenant_id).await {
-        trace_error(&state, &meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
+        trace_error(
+            &state,
+            &meta,
+            tenant_id,
+            started,
+            429,
+            ErrorClass::Inferon4xx,
+        );
         return resp;
     }
 
@@ -715,4 +770,3 @@ pub(crate) async fn dismiss_lint(
         }
     }
 }
-

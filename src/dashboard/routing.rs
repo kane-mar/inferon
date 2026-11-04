@@ -2,10 +2,35 @@
 
 use super::*;
 use crate::router::{PairIssue, TierPair};
+use crate::routing::{FallbackStep, StepIssue};
 
 /// The most pairs a tenant may declare — the router keeps the first match, so a
 /// long list is only ever a typo hazard.
 const MAX_TIER_PAIRS: usize = 8;
+
+/// The most fallback steps a chain may carry (ITEM-045).
+const MAX_STEPS: usize = 8;
+
+/// How many audit events the routing page reads (ITEM-108).
+const AUDIT_LIMIT: usize = 20;
+
+fn step_refusal(issue: StepIssue) -> Response {
+    let (kind, message) = match issue {
+        StepIssue::EmptyModel => (
+            "fallback_empty_model",
+            "every fallback step needs a model".to_string(),
+        ),
+        StepIssue::EmptyTriggers => (
+            "fallback_empty_triggers",
+            "every fallback step needs at least one trigger".to_string(),
+        ),
+        StepIssue::DuplicateModel(model) => (
+            "fallback_duplicate_model",
+            format!("`{model}` appears more than once in the chain"),
+        ),
+    };
+    crate::json_error(StatusCode::BAD_REQUEST, kind, &message)
+}
 
 /// GET /v1/dashboard/api/routing — the tenant's ordered fallback chain and its
 /// tier pairs, each marked active only when both models can be routed to now.
@@ -27,11 +52,44 @@ pub async fn tenant_routing(State(state): State<Arc<AppState>>, headers: HeaderM
         Ok(catalog) => catalog,
         Err(resp) => return resp,
     };
+    // ITEM-108: the audit trail is owner information.
+    let audit = if role == "owner" {
+        state
+            .config_audit
+            .recent(tenant_id, AUDIT_LIMIT)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!("config audit read failed: {e}");
+                Vec::new()
+            })
+    } else {
+        Vec::new()
+    };
     json_ok(json!({
         "fallbacks": fallbacks,
         "tier_pairs": pair_json(&pairs, &catalog),
         "role": role,
+        "audit": audit,
     }))
+}
+
+/// Append the audit events for a successful mutation. A failed audit write is
+/// logged, never surfaced: it must not undo a change that already applied.
+async fn record_changes(
+    state: &Arc<AppState>,
+    actor: &SessionActor,
+    changes: Vec<crate::config_audit::Change>,
+) {
+    if changes.is_empty() {
+        return;
+    }
+    if let Err(e) = state
+        .config_audit
+        .record(actor.tenant_id, &actor.audit_actor(), &changes)
+        .await
+    {
+        tracing::error!("config audit write failed: {e}");
+    }
 }
 
 /// POST /v1/dashboard/api/routing (owner-only) — set the ordered chain. The
@@ -41,31 +99,50 @@ pub async fn tenant_routing_set(
     headers: HeaderMap,
     Json(body): Json<RoutingBody>,
 ) -> Response {
-    let (tenant_id, role) = match session_membership(&state, &headers).await {
-        Ok(membership) => membership,
+    let actor = match session_actor(&state, &headers).await {
+        Ok(actor) => actor,
         Err(resp) => return resp,
     };
-    if let Err(resp) = owner_only(&role) {
+    if let Err(resp) = owner_only(&actor.role) {
         return resp;
     }
-    let mut chain: Vec<String> = Vec::new();
-    for model in body.fallbacks.into_iter().take(8) {
-        let model = model.trim().to_string();
-        if model.is_empty() || chain.contains(&model) {
-            continue;
-        }
-        if model_is_disabled(&state, tenant_id, &model).await {
+    let tenant_id = actor.tenant_id;
+    let before = match state.routing_store.fallbacks(tenant_id).await {
+        Ok(steps) => steps,
+        Err(e) => return internal(e.to_string()),
+    };
+    let chain: Vec<FallbackStep> = body
+        .fallbacks
+        .into_iter()
+        .take(MAX_STEPS)
+        .map(|step| FallbackStep {
+            model: step.model.trim().to_string(),
+            triggers: step.triggers,
+        })
+        .collect();
+    for step in &chain {
+        if model_is_disabled(&state, tenant_id, &step.model).await {
             return crate::json_error(
                 StatusCode::BAD_REQUEST,
                 "model_disabled",
                 "a fallback model is disabled for your tenant",
             );
         }
-        chain.push(model);
+    }
+    if let Err(issue) = crate::routing::validate_steps(&chain) {
+        return step_refusal(issue);
     }
     match state.routing_store.set_fallbacks(tenant_id, &chain).await {
         Ok(()) => {
             state.hotpath.invalidate(tenant_id);
+            record_changes(
+                &state,
+                &actor,
+                crate::config_audit::change("fallbacks", &before, &chain)
+                    .into_iter()
+                    .collect(),
+            )
+            .await;
             json_ok(json!({ "fallbacks": chain }))
         }
         Err(e) => internal(e.to_string()),
@@ -80,13 +157,18 @@ pub async fn tenant_tier_pairs_set(
     headers: HeaderMap,
     Json(body): Json<TierPairsBody>,
 ) -> Response {
-    let (tenant_id, role) = match session_membership(&state, &headers).await {
-        Ok(membership) => membership,
+    let actor = match session_actor(&state, &headers).await {
+        Ok(actor) => actor,
         Err(resp) => return resp,
     };
-    if let Err(resp) = owner_only(&role) {
+    if let Err(resp) = owner_only(&actor.role) {
         return resp;
     }
+    let tenant_id = actor.tenant_id;
+    let before = match state.budget_store.budget_for(tenant_id).await {
+        Ok(budget) => budget.map(|budget| budget.tier_pairs).unwrap_or_default(),
+        Err(e) => return internal(e.to_string()),
+    };
     if body.tier_pairs.len() > MAX_TIER_PAIRS {
         return crate::json_error(
             StatusCode::BAD_REQUEST,
@@ -112,6 +194,14 @@ pub async fn tenant_tier_pairs_set(
     match state.budget_store.set_tier_pairs(tenant_id, &pairs).await {
         Ok(()) => {
             state.hotpath.invalidate(tenant_id);
+            record_changes(
+                &state,
+                &actor,
+                crate::config_audit::change("tier_pairs", &before, &pairs)
+                    .into_iter()
+                    .collect(),
+            )
+            .await;
             json_ok(json!({ "tier_pairs": pair_json(&pairs, &catalog) }))
         }
         Err(e) => internal(e.to_string()),
@@ -225,9 +315,10 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         .as_ref()
         .map_or((0, 0), |budget| (budget.rpm_limit, budget.tpm_limit));
     // ITEM-096: detection is on by default; redaction is opt-in per mode.
-    let lint_rules = config
-        .as_ref()
-        .map_or_else(|| crate::preflight::Rules::default().names(), |budget| budget.lint_rules.clone());
+    let lint_rules = config.as_ref().map_or_else(
+        || crate::preflight::Rules::default().names(),
+        |budget| budget.lint_rules.clone(),
+    );
     let pii = config.as_ref().map_or((true, false, false), |budget| {
         (
             budget.pii_detection,
@@ -235,25 +326,35 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
             budget.pii_redact_wire,
         )
     });
-    let (limit, spent, cheap, guard, router_enabled, router_threshold, capture, retention, lint, translate) =
-        match config {
-            Some(budget) => (
-                budget.limit_cents,
-                budget.spent_cents,
-                budget.cheap_fallback_model,
-                budget.guard_enabled,
-                budget.router_enabled,
-                budget.router_threshold,
-                budget.capture_payloads,
-                budget.payload_retention_days,
-                budget.lint_enabled,
-                budget.translate_surfaces,
-            ),
-            // Unconfigured: the router/guard are on by default (ITEM-015/027),
-            // payloads are captured for 30 days (ITEM-088) and the pre-flight
-            // lint runs (ITEM-090).
-            None => (0, 0, None, true, true, 0.35, true, 30, true, true),
-        };
+    let (
+        limit,
+        spent,
+        cheap,
+        guard,
+        router_enabled,
+        router_threshold,
+        capture,
+        retention,
+        lint,
+        translate,
+    ) = match config {
+        Some(budget) => (
+            budget.limit_cents,
+            budget.spent_cents,
+            budget.cheap_fallback_model,
+            budget.guard_enabled,
+            budget.router_enabled,
+            budget.router_threshold,
+            budget.capture_payloads,
+            budget.payload_retention_days,
+            budget.lint_enabled,
+            budget.translate_surfaces,
+        ),
+        // Unconfigured: the router/guard are on by default (ITEM-015/027),
+        // payloads are captured for 30 days (ITEM-088) and the pre-flight
+        // lint runs (ITEM-090).
+        None => (0, 0, None, true, true, 0.35, true, 30, true, true),
+    };
     json_ok(json!({
         "budget_limit_cents": limit,
         "current_spend_cents": spent,
@@ -293,21 +394,31 @@ pub async fn tenant_prune_set(
     headers: HeaderMap,
     Json(body): Json<crate::prune::PrunePolicy>,
 ) -> Response {
-    let (tenant_id, role) = match session_membership(&state, &headers).await {
-        Ok(membership) => membership,
+    let actor = match session_actor(&state, &headers).await {
+        Ok(actor) => actor,
         Err(resp) => return resp,
     };
-    if let Err(resp) = owner_only(&role) {
+    if let Err(resp) = owner_only(&actor.role) {
         return resp;
     }
+    let tenant_id = actor.tenant_id;
     let current = match state.policy_store.active(tenant_id).await {
         Ok(policy) => policy,
         Err(e) => return internal(e.to_string()),
     };
+    let before = current.as_ref().and_then(|policy| policy.prune.clone());
     let next = crate::policy::prune_policy_from(current.as_ref(), body);
     match state.policy_store.publish(tenant_id, next).await {
         Ok(published) => {
             state.hotpath.invalidate(tenant_id);
+            record_changes(
+                &state,
+                &actor,
+                crate::config_audit::change("prune", &before, &published.prune)
+                    .into_iter()
+                    .collect(),
+            )
+            .await;
             json_ok(json!({ "version": published.version, "prune": published.prune }))
         }
         Err(e) => internal(e.to_string()),
@@ -320,13 +431,18 @@ pub async fn tenant_config_set(
     headers: HeaderMap,
     Json(body): Json<ConfigBody>,
 ) -> Response {
-    let (tenant_id, role) = match session_membership(&state, &headers).await {
-        Ok(membership) => membership,
+    let actor = match session_actor(&state, &headers).await {
+        Ok(actor) => actor,
         Err(resp) => return resp,
     };
-    if let Err(resp) = owner_only(&role) {
+    if let Err(resp) = owner_only(&actor.role) {
         return resp;
     }
+    let tenant_id = actor.tenant_id;
+    let before = match state.budget_store.budget_for(tenant_id).await {
+        Ok(budget) => budget.unwrap_or_else(crate::budget::TenantBudget::unconfigured),
+        Err(e) => return internal(e.to_string()),
+    };
     let update = crate::budget::ConfigUpdate {
         budget_limit_cents: body.budget_limit_cents.max(0),
         cheap_fallback_model: body
@@ -351,6 +467,12 @@ pub async fn tenant_config_set(
     match state.budget_store.update_config(tenant_id, &update).await {
         Ok(()) => {
             state.hotpath.invalidate(tenant_id);
+            record_changes(
+                &state,
+                &actor,
+                crate::config_audit::config_changes(&before, &update),
+            )
+            .await;
             json_ok(json!({ "updated": true }))
         }
         Err(e) => internal(e.to_string()),
@@ -359,7 +481,7 @@ pub async fn tenant_config_set(
 
 #[derive(serde::Deserialize)]
 pub struct RoutingBody {
-    fallbacks: Vec<String>,
+    fallbacks: Vec<FallbackStep>,
 }
 
 #[derive(serde::Deserialize)]
@@ -401,4 +523,3 @@ pub struct ConfigBody {
     #[serde(default)]
     pii_redact_wire: bool,
 }
-

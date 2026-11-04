@@ -520,6 +520,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            config_audit: std::sync::Arc::new(crate::config_audit::InMemoryConfigAuditStore::default()),
             telemetry_tx: mpsc::channel::<TraceMessage>(64).0,
             operator_key: None,
             accounts: None,
@@ -1307,7 +1308,148 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         assert_eq!(event["to_model"], "deepseek-chat");
     }
 
-    fn dummy_trace() -> TraceMessage {
+    #[tokio::test]
+async fn a_429_skips_a_step_that_only_handles_5xx() {
+    let tenant = seeded_tenant();
+    let (tx, mut rx) = mpsc::channel(8);
+    let state = std::sync::Arc::new(AppState {
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_steps(
+            tenant.id,
+            &[
+                crate::routing::FallbackStep::new(
+                    "deepseek-chat",
+                    &[crate::routing::FallbackTrigger::ServerError],
+                ),
+                crate::routing::FallbackStep::new(
+                    "gpt-4o-mini",
+                    &[crate::routing::FallbackTrigger::RateLimited],
+                ),
+            ],
+        )),
+        telemetry_tx: tx,
+        ..base_state(&mock_upstream().await)
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            "{\"model\":\"rate\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let trace = rx.recv().await.expect("a trace was emitted");
+    assert_eq!(
+        trace.request_model, "gpt-4o-mini",
+        "the 429 skipped the 5xx-only step"
+    );
+    let event = trace.routing_event.expect("a routing event is recorded");
+    assert_eq!(event["reason"], "upstream_429");
+    assert_eq!(event["to_model"], "gpt-4o-mini");
+    assert_eq!(event["step"], 2);
+}
+
+#[tokio::test]
+async fn a_5xx_takes_the_first_step_that_handles_it() {
+    let tenant = seeded_tenant();
+    let (tx, mut rx) = mpsc::channel(8);
+    let state = std::sync::Arc::new(AppState {
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_steps(
+            tenant.id,
+            &[crate::routing::FallbackStep::new(
+                "deepseek-chat",
+                &[crate::routing::FallbackTrigger::ServerError],
+            )],
+        )),
+        telemetry_tx: tx,
+        ..base_state(&mock_upstream().await)
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            "{\"model\":\"fail\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let trace = rx.recv().await.expect("a trace was emitted");
+    assert_eq!(trace.request_model, "deepseek-chat");
+    let event = trace.routing_event.expect("a routing event is recorded");
+    assert_eq!(event["reason"], "upstream_5xx");
+    assert_eq!(event["step"], 1);
+}
+
+#[tokio::test]
+async fn a_guard_failure_replays_to_a_step_marked_for_the_guard() {
+    let tenant = seeded_tenant();
+    let (tx, mut rx) = mpsc::channel(8);
+    let state = std::sync::Arc::new(AppState {
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_steps(
+            tenant.id,
+            &[crate::routing::FallbackStep::new(
+                "deepseek-chat",
+                &[crate::routing::FallbackTrigger::Guard],
+            )],
+        )),
+        telemetry_tx: tx,
+        ..base_state(&mock_upstream().await)
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            &guarded_stream_body("gpt-4o-mini", "wrong-shape"),
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let trace = rx.recv().await.expect("exactly one trace");
+    assert_eq!(
+        trace.request_model, "deepseek-chat",
+        "the guard replayed to the chain step, not the built-in frontier"
+    );
+    let event = trace.routing_event.expect("the guard step is recorded");
+    assert_eq!(event["reason"], "guard");
+    assert_eq!(event["step"], 1);
+    assert_eq!(event["to_model"], "deepseek-chat");
+    let guard = trace.guard_event.expect("guard event recorded");
+    assert_eq!(guard["outcome"], "fallback_invalid");
+}
+
+#[tokio::test]
+async fn a_chain_that_does_not_handle_the_failure_serves_it() {
+    let tenant = seeded_tenant();
+    let (tx, mut rx) = mpsc::channel(8);
+    let state = std::sync::Arc::new(AppState {
+        routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_steps(
+            tenant.id,
+            &[crate::routing::FallbackStep::new(
+                "deepseek-chat",
+                &[crate::routing::FallbackTrigger::ServerError],
+            )],
+        )),
+        telemetry_tx: tx,
+        ..base_state(&mock_upstream().await)
+    });
+    let response = build_router(state)
+        .oneshot(chat_request_builder(
+            "{\"model\":\"rate\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+            Some(CLIENT_KEY),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        "no step handles a 429, so the upstream error stands"
+    );
+    let trace = rx.recv().await.expect("a trace was emitted");
+    assert_eq!(trace.request_model, "rate");
+    assert!(
+        trace.routing_event.is_none(),
+        "no fallback happened, so no routing event"
+    );
+}
+
+fn dummy_trace() -> TraceMessage {
         TraceMessage {
             id: uuid::Uuid::new_v4(),
             tenant_id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),

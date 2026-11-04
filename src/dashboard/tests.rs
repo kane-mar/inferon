@@ -42,6 +42,7 @@
             hotpath: std::sync::Arc::new(crate::hotpath::HotPath::new()),
             affinity_store: std::sync::Arc::new(crate::affinity::InMemoryAffinityStore::default()),
             policy_store: std::sync::Arc::new(crate::policy::InMemoryPolicyStore::default()),
+            config_audit: std::sync::Arc::new(crate::config_audit::InMemoryConfigAuditStore::default()),
             telemetry_tx: tx,
             operator_key: Some("op-secret".to_string()),
             accounts,
@@ -1538,7 +1539,313 @@ async fn a_member_cannot_change_tier_pairs() {
     assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 }
 
-    // --- ITEM-082: attaching a keyless local provider -----------------------
+    // --- ITEM-108/109: audit trail and per-step fallback triggers ----------
+
+#[tokio::test]
+async fn an_owner_saves_per_step_fallback_triggers() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat", "gpt-4o-mini"]).await;
+    let router = crate::build_router(state);
+
+    let saved = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/routing",
+                &token,
+                r#"{"fallbacks":[{"model":"deepseek-chat","triggers":["server_error"]},{"model":"gpt-4o-mini","triggers":["rate_limited","guard"]}]}"#,
+            ))
+            .await
+            .unwrap();
+    assert_eq!(saved.status(), axum::http::StatusCode::OK);
+
+    let listed = router
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    assert_eq!(listed["fallbacks"][0]["model"], "deepseek-chat");
+    assert_eq!(
+        listed["fallbacks"][0]["triggers"],
+        serde_json::json!(["server_error"])
+    );
+    assert_eq!(
+        listed["fallbacks"][1]["triggers"],
+        serde_json::json!(["rate_limited", "guard"])
+    );
+}
+
+#[tokio::test]
+async fn a_legacy_chain_body_saves_as_retryable_steps() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let router = crate::build_router(state);
+
+    let saved = router
+        .clone()
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing",
+            &token,
+            r#"{"fallbacks":["deepseek-chat"]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), axum::http::StatusCode::OK);
+
+    let listed = router
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    assert_eq!(
+        listed["fallbacks"][0]["triggers"],
+        serde_json::json!(["transport", "rate_limited", "server_error"]),
+        "a bare model keeps the old behaviour and never opts into the guard"
+    );
+}
+
+#[tokio::test]
+async fn a_step_with_no_triggers_is_refused() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let response = crate::build_router(state)
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing",
+            &token,
+            r#"{"fallbacks":[{"model":"deepseek-chat","triggers":[]}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = json_of(response).await;
+    assert_eq!(body["error"]["type"], "fallback_empty_triggers");
+}
+
+#[tokio::test]
+async fn a_duplicate_fallback_model_is_refused() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let response = crate::build_router(state)
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/routing",
+                &token,
+                r#"{"fallbacks":[{"model":"deepseek-chat","triggers":["guard"]},{"model":"deepseek-chat","triggers":["transport"]}]}"#,
+            ))
+            .await
+            .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+    let body = json_of(response).await;
+    assert_eq!(body["error"]["type"], "fallback_duplicate_model");
+}
+
+#[tokio::test]
+async fn a_member_cannot_change_the_chain() {
+    let (state, token) = tenant_role_session("member").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let response = crate::build_router(state)
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing",
+            &token,
+            r#"{"fallbacks":[{"model":"deepseek-chat","triggers":["guard"]}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_chain_step_with_an_unknown_trigger_is_refused() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let response = crate::build_router(state)
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing",
+            &token,
+            r#"{"fallbacks":[{"model":"deepseek-chat","triggers":["nonsense"]}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "the trigger vocabulary is closed"
+    );
+}
+
+#[tokio::test]
+async fn a_config_change_is_audited_with_the_actor() {
+    let (state, token) = tenant_role_session("owner").await;
+    let router = crate::build_router(state);
+
+    let saved = router
+            .clone()
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/config",
+                &token,
+                r#"{"budget_limit_cents":2500,"cheap_fallback_model":null,"guard_enabled":false,"router_enabled":true,"router_threshold":0.35}"#,
+            ))
+            .await
+            .unwrap();
+    assert_eq!(saved.status(), axum::http::StatusCode::OK);
+
+    let listed = router
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    let audit = listed["audit"].as_array().expect("audit array");
+    assert_eq!(audit.len(), 2, "only the two edited fields");
+    assert_eq!(audit[0]["actor_login"], "t11");
+    assert_eq!(audit[0]["setting"], "guard_enabled", "newest first");
+    assert_eq!(audit[0]["before"], true);
+    assert_eq!(audit[0]["after"], false);
+    assert_eq!(audit[1]["setting"], "budget_limit_cents");
+    assert_eq!(audit[1]["after"], 2500);
+}
+
+#[tokio::test]
+async fn an_unchanged_save_writes_no_event() {
+    let (state, token) = tenant_role_session("owner").await;
+    let response = crate::build_router(state.clone())
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/config",
+                &token,
+                r#"{"budget_limit_cents":0,"cheap_fallback_model":null,"guard_enabled":true,"router_enabled":true,"router_threshold":0.35}"#,
+            ))
+            .await
+            .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+    let tenant = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+    assert!(state
+        .config_audit
+        .recent(tenant, 10)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn a_refused_change_writes_no_event() {
+    let (state, token) = tenant_role_session("member").await;
+    let response = crate::build_router(state.clone())
+            .oneshot(post_with_cookie(
+                "/v1/dashboard/api/config",
+                &token,
+                r#"{"budget_limit_cents":2500,"cheap_fallback_model":null,"guard_enabled":false,"router_enabled":true,"router_threshold":0.35}"#,
+            ))
+            .await
+            .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
+
+    let tenant = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+    assert!(state
+        .config_audit
+        .recent(tenant, 10)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn a_chain_change_is_audited_with_before_and_after() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["deepseek-chat"]).await;
+    let router = crate::build_router(state);
+
+    let saved = router
+        .clone()
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing",
+            &token,
+            r#"{"fallbacks":[{"model":"deepseek-chat","triggers":["guard"]}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), axum::http::StatusCode::OK);
+
+    let listed = router
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    let audit = listed["audit"].as_array().expect("audit array");
+    assert_eq!(audit[0]["setting"], "fallbacks");
+    assert_eq!(audit[0]["before"], serde_json::json!([]));
+    assert_eq!(audit[0]["after"][0]["model"], "deepseek-chat");
+    assert_eq!(
+        audit[0]["after"][0]["triggers"],
+        serde_json::json!(["guard"])
+    );
+}
+
+#[tokio::test]
+async fn a_member_does_not_see_the_audit_trail() {
+    let (state, token) = tenant_role_session("member").await;
+    let tenant = uuid::Uuid::parse_str(SEEDED_TENANT).unwrap();
+    state
+        .config_audit
+        .record(
+            tenant,
+            &crate::config_audit::Actor {
+                id: uuid::Uuid::new_v4(),
+                login: "owner-elsewhere".to_string(),
+            },
+            &[crate::config_audit::change("guard_enabled", &true, &false).expect("change")],
+        )
+        .await
+        .unwrap();
+
+    let listed = crate::build_router(state)
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    assert_eq!(listed["audit"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn tier_pair_and_prune_changes_are_audited() {
+    let (state, token) = tenant_role_session("owner").await;
+    seed_models(&state, &["gpt-4o", "qwen3:8b"]).await;
+    let router = crate::build_router(state);
+
+    let pairs = router
+        .clone()
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/routing/tier-pairs",
+            &token,
+            r#"{"tier_pairs":[{"frontier":"gpt-4o","cheap":"qwen3:8b"}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(pairs.status(), axum::http::StatusCode::OK);
+
+    let prune = router
+        .clone()
+        .oneshot(post_with_cookie(
+            "/v1/dashboard/api/prune",
+            &token,
+            r#"{"enabled":true,"drop_duplicate_turns":true,"max_prompt_tokens":null,"holdout_percent":10}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(prune.status(), axum::http::StatusCode::OK);
+
+    let listed = router
+        .oneshot(request_with_cookie("/v1/dashboard/api/routing", &token))
+        .await
+        .unwrap();
+    let listed = json_of(listed).await;
+    let settings: Vec<&str> = listed["audit"]
+        .as_array()
+        .expect("audit array")
+        .iter()
+        .map(|entry| entry["setting"].as_str().expect("setting"))
+        .collect();
+    assert_eq!(settings, vec!["prune", "tier_pairs"], "newest first");
+}
+
+// --- ITEM-082: attaching a keyless local provider -----------------------
 
     #[tokio::test]
     async fn an_owner_attaches_a_keyless_local_provider() {

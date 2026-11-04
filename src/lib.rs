@@ -39,6 +39,7 @@ pub mod audit;
 pub mod alerts;
 pub mod budget;
 pub mod capture;
+pub mod config_audit;
 pub mod cost;
 pub mod datasets;
 pub mod evolution;
@@ -124,6 +125,8 @@ pub struct AppState {
     pub affinity_store: Arc<dyn affinity::AffinityStore>,
     /// ITEM-064: the tenant's active adaptive policy (versioned).
     pub policy_store: Arc<dyn policy::PolicyStore>,
+    /// ITEM-108: append-only audit of owner-only control-plane changes.
+    pub config_audit: Arc<dyn config_audit::ConfigAuditStore>,
     pub telemetry_tx: mpsc::Sender<TraceMessage>,
     /// Operator credential (env `OPERATOR_API_KEY`): grants the platform-wide
     /// dashboard views. `None` disables operator access entirely (ITEM-013).

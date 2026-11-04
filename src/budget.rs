@@ -50,6 +50,32 @@ pub struct TenantBudget {
     pub pii_redact_wire: bool,
 }
 
+/// The effective defaults for a tenant with no configuration row: router and
+/// guard on, payloads captured for 30 days, lint on, PII detection on.
+impl TenantBudget {
+    pub fn unconfigured() -> Self {
+        Self {
+            limit_cents: 0,
+            spent_cents: 0,
+            cheap_fallback_model: None,
+            guard_enabled: true,
+            router_enabled: true,
+            router_threshold: crate::router::DOWNGRADE_THRESHOLD,
+            tier_pairs: Vec::new(),
+            capture_payloads: true,
+            payload_retention_days: 30,
+            lint_enabled: true,
+            lint_rules: crate::preflight::Rules::default().names(),
+            translate_surfaces: true,
+            rpm_limit: 0,
+            tpm_limit: 0,
+            pii_detection: true,
+            pii_redact_storage: false,
+            pii_redact_wire: false,
+        }
+    }
+}
+
 /// ITEM-046: the tenant's routing/budget controls, as submitted from the UI.
 #[derive(Clone, Debug)]
 pub struct ConfigUpdate {
@@ -73,6 +99,31 @@ pub struct ConfigUpdate {
     pub pii_detection: bool,
     pub pii_redact_storage: bool,
     pub pii_redact_wire: bool,
+}
+
+/// The unconfigured values of every control — the baseline a UI save starts
+/// from and the "before" side of an audit event.
+impl Default for ConfigUpdate {
+    fn default() -> Self {
+        let defaults = TenantBudget::unconfigured();
+        Self {
+            budget_limit_cents: defaults.limit_cents,
+            cheap_fallback_model: defaults.cheap_fallback_model,
+            guard_enabled: defaults.guard_enabled,
+            router_enabled: defaults.router_enabled,
+            router_threshold: defaults.router_threshold,
+            capture_payloads: defaults.capture_payloads,
+            payload_retention_days: defaults.payload_retention_days,
+            lint_enabled: defaults.lint_enabled,
+            lint_rules: defaults.lint_rules,
+            translate_surfaces: defaults.translate_surfaces,
+            rpm_limit: defaults.rpm_limit,
+            tpm_limit: defaults.tpm_limit,
+            pii_detection: defaults.pii_detection,
+            pii_redact_storage: defaults.pii_redact_storage,
+            pii_redact_wire: defaults.pii_redact_wire,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +239,9 @@ impl From<ConfigRow> for TenantBudget {
             payload_retention_days: row.payload_retention_days,
             lint_enabled: row.lint_enabled,
             // NULL = every rule (pre-052 rows read this way).
-            lint_rules: row.lint_rules.unwrap_or_else(|| crate::preflight::Rules::default().names()),
+            lint_rules: row
+                .lint_rules
+                .unwrap_or_else(|| crate::preflight::Rules::default().names()),
             translate_surfaces: row.translate_surfaces,
             rpm_limit: row.rpm_limit,
             tpm_limit: row.tpm_limit,
@@ -252,7 +305,9 @@ impl InMemoryBudgetStore {
     }
 
     fn rows(&self) -> std::sync::MutexGuard<'_, HashMap<Uuid, TenantBudget>> {
-        self.budgets.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.budgets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -305,7 +360,10 @@ impl BudgetStore for InMemoryBudgetStore {
         &self,
         tenant_id: Uuid,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(self.rows().get(&tenant_id).map_or(true, |b| b.guard_enabled))
+        Ok(self
+            .rows()
+            .get(&tenant_id)
+            .map_or(true, |b| b.guard_enabled))
     }
 
     async fn set_tier_pairs(
