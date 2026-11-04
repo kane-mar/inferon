@@ -1,5 +1,3 @@
-import { money } from './money';
-
 /**
  * Shared presentation atoms for the report pages, so they read the same way.
  * Pure formatters only — the one component lives in `ReportStatus`.
@@ -14,13 +12,12 @@ export const us = (value: number | null): string =>
 export const ms = (value: number | null): string =>
   value == null ? '—' : `${Math.round(value).toLocaleString('en-US')} ms`;
 
-export const rate = (value: number | null): string =>
-  value == null ? '—' : `${(value * 100).toFixed(1)}%`;
+/** A 0..1 share as a percent. `digits` is the rounding the caller needs. */
+export const pct = (value: number | null | undefined, digits = 1): string =>
+  value == null ? '—' : `${(value * 100).toFixed(digits)}%`;
 
-export const integer = (value: number): string => value.toLocaleString('en-US');
-
-/** A cost, at the precision that matters (ITEM-106). */
-export const usd = (value: string | null): string => money(value);
+/** A hash, short enough for a table; the caller puts the full value in `title`. */
+export const shortHash = (hash: string, length = 10): string => hash.slice(0, length);
 
 /** Scanned share of the window's traffic, or "—" with no traffic. */
 export const coverage = (scanned: number, total: number): string =>

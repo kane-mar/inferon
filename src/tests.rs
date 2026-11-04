@@ -218,7 +218,10 @@
                             // Cheap lie: well-formed JSON that violates the
                             // answer schema ({"other":1}, missing required
                             // "answer") — must be discarded, never forwarded.
-                            payload["messages"][0]["content"].as_str() == Some("wrong-shape")
+                            matches!(
+                                payload["messages"][0]["content"].as_str(),
+                                Some("wrong-shape" | "guard-skip")
+                            )
                         } => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -254,6 +257,16 @@
                                 .body(axum::body::Body::from_stream(body))
                                 .unwrap()
                         }
+                        Some("deepseek-chat") if {
+                            // The first guard-marked chain step rejects the
+                            // replay, so the guard must try the next one.
+                            payload["messages"][0]["content"].as_str() == Some("guard-skip")
+                        } => {
+                            axum::response::Response::builder()
+                                .status(500)
+                                .body(Body::from("guard replay rejected"))
+                                .unwrap()
+                        }
                         Some("deepseek-v4-pro") if {
                             // Fallback failure (ITEM-025 AC4): the frontier
                             // replay itself answers 5xx — loud and clean.
@@ -268,7 +281,7 @@
                             // Default frontier replay (cheap original escalated
                             // to the deployment frontier): honours the contract.
                             let marker = payload["messages"][0]["content"].as_str();
-                            matches!(marker, Some("wrong-shape" | "truncated"))
+                            matches!(marker, Some("wrong-shape" | "truncated" | "guard-skip"))
                         } => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -298,7 +311,7 @@
                             // Frontier replay when the tenant's original request
                             // (pre-downgrade) was gpt-4o: honours the contract.
                             let marker = payload["messages"][0]["content"].as_str();
-                            matches!(marker, Some("wrong-shape" | "truncated"))
+                            matches!(marker, Some("wrong-shape" | "truncated" | "guard-skip"))
                         } => {
                             axum::response::Response::builder()
                                 .header("content-type", "text/event-stream")
@@ -1449,7 +1462,50 @@ async fn a_chain_that_does_not_handle_the_failure_serves_it() {
     );
 }
 
-fn dummy_trace() -> TraceMessage {
+    #[tokio::test]
+    async fn a_guard_replay_tries_the_next_guard_step_when_the_first_fails() {
+        let tenant = seeded_tenant();
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            routing_store: std::sync::Arc::new(
+                crate::routing::InMemoryRoutingStore::with_steps(
+                    tenant.id,
+                    &[
+                        crate::routing::FallbackStep::new(
+                            "deepseek-chat",
+                            &[crate::routing::FallbackTrigger::Guard],
+                        ),
+                        crate::routing::FallbackStep::new(
+                            "gpt-4o",
+                            &[crate::routing::FallbackTrigger::Guard],
+                        ),
+                    ],
+                ),
+            ),
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                &guarded_stream_body("gpt-4o-mini", "guard-skip"),
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let trace = rx.recv().await.expect("exactly one trace");
+        assert_eq!(
+            trace.request_model, "gpt-4o",
+            "the first guard step failed, the second served"
+        );
+        let event = trace.routing_event.expect("the guard step is recorded");
+        assert_eq!(event["reason"], "guard");
+        assert_eq!(event["step"], 2);
+        let guard = trace.guard_event.expect("guard event recorded");
+        assert_eq!(guard["outcome"], "fallback");
+    }
+
+    fn dummy_trace() -> TraceMessage {
         TraceMessage {
             id: uuid::Uuid::new_v4(),
             tenant_id: uuid::Uuid::parse_str(TENANT_ID).unwrap(),

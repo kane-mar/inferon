@@ -2,10 +2,12 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
-import { coverage, integer, rate, usd } from '@/features/dashboard/reportFormat';
+import { money } from '@/features/dashboard/money';
+import { coverage, pct } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { formatInt } from '@/libs/dashboardMetrics';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
@@ -82,22 +84,22 @@ export default async function PayloadsPage(props: {
           window={days}
           definition={t('lint_coverage_help')}
           hint={t('lint_scanned', {
-            scanned: integer(lint.preflight.scanned),
-            total: integer(data.requests),
+            scanned: formatInt(lint.preflight.scanned),
+            total: formatInt(data.requests),
           })}
         />
         <KpiCard
           label={t('lint_findings')}
           icon="warning"
-          value={integer(lint.preflight.findings)}
+          value={formatInt(lint.preflight.findings)}
           window={days}
           definition={t('lint_findings_help')}
-          hint={usd(lint.preflight.wasted_usd)}
+          hint={money(lint.preflight.wasted_usd)}
         />
         <KpiCard
           label={t('prune_removed')}
           icon="prune"
-          value={integer(pruning.rewritten)}
+          value={formatInt(pruning.rewritten)}
           window={days}
           definition={t('prune_removed_help')}
           hint={pruning.policy?.enabled ? t('prune_on') : t('prune_off')}
@@ -143,13 +145,13 @@ export default async function PayloadsPage(props: {
           />
           <State
             label={t('dismissed')}
-            value={integer(lint.preflight.dismissed)}
+            value={formatInt(lint.preflight.dismissed)}
           />
           <State
             label={t('batch')}
             value={t('batch_values', {
-              checked: integer(lint.batch.checked),
-              flagged: integer(lint.batch.flagged),
+              checked: formatInt(lint.batch.checked),
+              flagged: formatInt(lint.batch.flagged),
             })}
           />
           {Object.keys(lint.preflight.by_kind).length > 0 && (
@@ -164,7 +166,7 @@ export default async function PayloadsPage(props: {
                 >
                   {kind}
                   {' · '}
-                  {integer(count)}
+                  {formatInt(count)}
                 </span>
               ))}
             </div>
@@ -183,14 +185,14 @@ export default async function PayloadsPage(props: {
                     label={t('budget')}
                     value={pruning.policy.max_prompt_tokens == null
                       ? t('no_budget')
-                      : integer(pruning.policy.max_prompt_tokens)}
+                      : formatInt(pruning.policy.max_prompt_tokens)}
                   />
                   <State
                     label={t('pruned_ok')}
-                    value={rate(pruning.pruned_ok_rate)}
+                    value={pct(pruning.pruned_ok_rate)}
                     tone="good"
                   />
-                  <State label={t('holdout_ok')} value={rate(pruning.holdout_ok_rate)} />
+                  <State label={t('holdout_ok')} value={pct(pruning.holdout_ok_rate)} />
                   {pruning.delta != null && (
                     <State
                       label={t('delta')}
@@ -199,7 +201,7 @@ export default async function PayloadsPage(props: {
                   )}
                   <State
                     label={t('saved')}
-                    value={`${integer(pruning.tokens_saved_est)} tok · ${usd(pruning.usd_saved_est)}`}
+                    value={`${formatInt(pruning.tokens_saved_est)} tok · ${money(pruning.usd_saved_est)}`}
                   />
                 </>
               )}
@@ -235,8 +237,8 @@ export default async function PayloadsPage(props: {
           <State
             label={t('matches')}
             value={t('matches_value', {
-              matches: integer(pii.matches),
-              scanned: integer(pii.scanned),
+              matches: formatInt(pii.matches),
+              scanned: formatInt(pii.scanned),
             })}
           />
           {Object.keys(pii.by_class).length > 0 && (
@@ -251,7 +253,7 @@ export default async function PayloadsPage(props: {
                 >
                   {piiClass}
                   {' · '}
-                  {integer(count)}
+                  {formatInt(count)}
                 </span>
               ))}
             </div>

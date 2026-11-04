@@ -8,7 +8,7 @@ export const CHART_METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft
 /**
  * Numeric value of a daily point for a chart metric. `cost` is converted to a
  * number **only** to position it on an axis; the displayed money value always
- * comes from the string via `formatUsd`.
+ * comes from the string via `money`.
  */
 export const chartValue = (point: TimeseriesPoint, metric: ChartMetric): number | null => {
   switch (metric) {
@@ -45,7 +45,7 @@ export const deltaPct = (
 /**
  * Percent change between two decimal **strings**. The values become numbers
  * only to form a *ratio*; the money amounts themselves are never rendered from
- * these numbers — they stay strings via `formatUsd`.
+ * these numbers — they stay strings via `money`.
  */
 export const moneyDeltaPct = (current: string, previous: string): number | null =>
   deltaPct(Number(current), Number(previous));
@@ -79,7 +79,7 @@ export const spiked = (
   return before > 0.01 && now >= before * factor;
 };
 
-/** Exact cents → integer-safe decimal string (`formatUsd` adds the symbol). */
+/** Exact cents → integer-safe decimal string (`money` adds the symbol). */
 export const centsToUsd = (cents: number): string => {
   const sign = cents < 0 ? '-' : '';
   const abs = Math.abs(Math.round(cents));

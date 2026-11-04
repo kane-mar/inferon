@@ -304,7 +304,7 @@ pub(super) async fn build_model_chain(
         chain.push(ChainStep {
             model: primary,
             route: route.clone(),
-            triggers: routing::FallbackTrigger::ALL.to_vec(),
+            triggers: routing::FallbackTrigger::RETRYABLE.to_vec(),
         });
     }
     chain

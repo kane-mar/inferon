@@ -8,7 +8,7 @@
  *
  * Monetary values stay **strings** end to end (the proxy renders decimals as
  * strings so no float ever touches a cost — ITEM-019 AC3); format them with
- * `formatUsd`, never `parseFloat`.
+ * the dashboard's `money()` helper, never `parseFloat`.
  */
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -1128,22 +1128,3 @@ export class InferonApi {
     return payload as T;
   }
 }
-
-/**
- * Render a decimal cost string (or cents-style string) in the UI without ever
- * going through a float. Mirrors the dashboard shell's `usd()` helper.
- */
-export const formatUsd = (value: string): string => {
-  const negative = value.startsWith('-');
-  const unsigned = negative ? value.slice(1) : value;
-  const [rawWhole = '', rawFraction] = unsigned.split('.');
-  const whole = rawWhole === '' ? '0' : rawWhole;
-  const fraction = (rawFraction ?? '').replace(/0+$/, '');
-
-  if (whole === '0' && fraction === '') {
-    return `${negative ? '-' : ''}$0.00`;
-  }
-  // Thousands separators on the integer part only — never inside the fraction.
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return `${negative ? '-' : ''}$${grouped}${fraction ? `.${fraction}` : ''}`;
-};

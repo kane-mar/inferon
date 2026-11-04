@@ -1,12 +1,16 @@
 import type { IconName } from './Icon';
 import type { Tone } from '@/libs/reportTone';
 import { trend } from '@/libs/dashboardMetrics';
-import { kpiCardClass, kpiDeltaClass, kpiSubtleClass, kpiValueClass, toneGlyph } from '@/libs/reportTone';
+import {
+  KPI_CARD,
+  KPI_SUBTLE,
+  kpiDeltaClass,
+  kpiValueClass,
+  toneGlyph,
+  toneGlyphClass,
+} from '@/libs/reportTone';
 import { cn } from '@/utils/Helpers';
 import { Icon } from './Icon';
-
-const SEVERE = 'text-destructive';
-const WARNING = 'text-amber-700 dark:text-amber-400';
 
 /**
  * The one metric card every report uses (ITEM-106): a value with its unit and
@@ -40,7 +44,7 @@ export const KpiCard = (props: {
       : ((props.goodWhen ?? 'up') === 'up') === (direction === 'up');
 
   return (
-    <div className={kpiCardClass(props.tone)} title={props.definition ?? props.hint}>
+    <div className={KPI_CARD} title={props.definition ?? props.hint}>
       <div className="flex items-baseline justify-between gap-2">
         <div
           className={cn(
@@ -48,7 +52,7 @@ export const KpiCard = (props: {
               flex items-center gap-1.5 font-mono text-xs font-medium
               tracking-wide uppercase
             `,
-            kpiSubtleClass(props.tone),
+            KPI_SUBTLE,
           )}
         >
           {props.icon && (
@@ -57,7 +61,7 @@ export const KpiCard = (props: {
           {props.label}
         </div>
         {props.window != null && (
-          <span className={cn('font-mono text-[10px] tracking-wide uppercase', kpiSubtleClass(props.tone))}>
+          <span className={cn('font-mono text-[10px] tracking-wide uppercase', KPI_SUBTLE)}>
             {props.window}
             d
           </span>
@@ -68,12 +72,12 @@ export const KpiCard = (props: {
           <Icon
             name={toneGlyph(props.tone)!}
             size={16}
-            className={props.tone === 'bad' ? SEVERE : WARNING}
+            className={toneGlyphClass(props.tone)}
           />
         )}
         <span className={kpiValueClass(props.tone)}>{props.value}</span>
         {props.unit && (
-          <span className={cn('text-sm', kpiSubtleClass(props.tone))}>{props.unit}</span>
+          <span className={cn('text-sm', KPI_SUBTLE)}>{props.unit}</span>
         )}
         {delta != null && direction !== 'flat' && (
           <span
@@ -86,7 +90,7 @@ export const KpiCard = (props: {
         )}
       </div>
       {props.hint && (
-        <div className={cn('mt-1 text-xs', kpiSubtleClass(props.tone))}>{props.hint}</div>
+        <div className={cn('mt-1 text-xs', KPI_SUBTLE)}>{props.hint}</div>
       )}
     </div>
   );

@@ -5,17 +5,13 @@ import { DatasetPurge } from '@/features/dashboard/DatasetPurge';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { PromptsPanel } from '@/features/dashboard/PromptsPanel';
+import { CELL, HEAD, shortHash } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { formatInt } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
-
-const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
-const CELL = 'px-3 py-2 text-sm tabular-nums';
-
-const integer = (value: number) => value.toLocaleString('en-US');
-const short = (hash: string) => hash.slice(0, 10);
 
 /** The per-cluster JSONL download (owner-only, session cookie). */
 const exportHref = (
@@ -83,14 +79,14 @@ export default async function DatasetsPage(props: {
         <KpiCard
           label={t('examples')}
           icon="layers"
-          value={integer(examples)}
+          value={formatInt(examples)}
           window={days}
           hint={t('examples_help')}
         />
         <KpiCard
           label={t('clusters')}
           icon="datasets"
-          value={integer(clusters.length)}
+          value={formatInt(clusters.length)}
           window={days}
           definition={t('clusters_help')}
         />
@@ -104,7 +100,7 @@ export default async function DatasetsPage(props: {
         <KpiCard
           label={t('excluded')}
           icon="warning"
-          value={integer(excluded)}
+          value={formatInt(excluded)}
           window={days}
           goodWhen="down"
           definition={t('excluded_help')}
@@ -148,7 +144,7 @@ export default async function DatasetsPage(props: {
                       font-mono text-xs
                     `}
                     >
-                      <span title={cluster.prompt_hash}>{short(cluster.prompt_hash)}</span>
+                      <span title={cluster.prompt_hash}>{shortHash(cluster.prompt_hash)}</span>
                     </td>
                     <td className={`
                       ${CELL}
@@ -157,16 +153,16 @@ export default async function DatasetsPage(props: {
                     >
                       {cluster.model}
                     </td>
-                    <td className={CELL}>{integer(cluster.requests)}</td>
-                    <td className={CELL}>{integer(cluster.qualified)}</td>
+                    <td className={CELL}>{formatInt(cluster.requests)}</td>
+                    <td className={CELL}>{formatInt(cluster.qualified)}</td>
                     <td className={`
                       ${CELL}
                       font-medium
                     `}
                     >
-                      {integer(cluster.distinct_examples)}
+                      {formatInt(cluster.distinct_examples)}
                     </td>
-                    <td className={CELL}>{integer(cluster.excluded)}</td>
+                    <td className={CELL}>{formatInt(cluster.excluded)}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {Object.entries(cluster.excluded_by_reason)
                         .map(([reason, count]) => `${reason}: ${count}`)

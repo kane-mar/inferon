@@ -26,11 +26,8 @@ import {
 import { attention } from '@/libs/dashboardOverview';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
-import { metricTone, THRESHOLDS } from '@/libs/reportTone';
+import { metricTone, THRESHOLDS, toneGlyphClass } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
-
-const SEVERE = 'text-destructive';
-const WARNING = 'text-amber-700 dark:text-amber-400';
 
 const CHART_METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
 
@@ -231,9 +228,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
                       <Icon
                         name="warning"
                         size={16}
-                        className={finding.severity === 0
-                          ? SEVERE
-                          : WARNING}
+                        className={toneGlyphClass(finding.severity === 0 ? 'bad' : 'warn')}
                       />
                       {t(`attention_${finding.kind}`)}
                     </span>

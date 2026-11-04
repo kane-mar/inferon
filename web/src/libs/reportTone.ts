@@ -21,8 +21,7 @@ export type MetricSpec = {
  * (and the icon beside it), never a filled card: five coloured boxes is
  * decoration, and the eye stops telling "notable" from "normal".
  */
-export const kpiCardClass = (_tone?: Tone): string =>
-  'rounded-lg border bg-card p-4 text-card-foreground';
+export const KPI_CARD = 'rounded-lg border bg-card p-4 text-card-foreground';
 
 /**
  * The value's colour: a warning or a failure stands out; a healthy number is the
@@ -53,7 +52,19 @@ export const toneGlyph = (tone: Tone | undefined): 'warning' | 'ok' | undefined 
 };
 
 /** The label and hint inside a KPI box: muted, always. */
-export const kpiSubtleClass = (_tone?: Tone): string => 'text-muted-foreground';
+export const KPI_SUBTLE = 'text-muted-foreground';
+
+/** The verdict glyph beside the value: the same ink, never a separate palette. */
+export const toneGlyphClass = (tone: Tone | undefined): string => {
+  switch (tone) {
+    case 'bad':
+      return 'text-destructive';
+    case 'warn':
+      return 'text-amber-700 dark:text-amber-400';
+    default:
+      return '';
+  }
+};
 
 /**
  * The delta beside the value: green/red where colour is free (a plain box), and

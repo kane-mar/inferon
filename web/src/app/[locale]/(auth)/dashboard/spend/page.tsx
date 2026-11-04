@@ -7,7 +7,7 @@ import { Card } from '@/features/dashboard/Card';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
-import { CELL, integer, HEAD as REPORT_HEAD, usd } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD as REPORT_HEAD } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
 import { WindowChip } from '@/features/dashboard/WindowChip';
@@ -252,21 +252,21 @@ export default async function SpendReportPage(props: {
             <KpiCard
               label={heading('transactions_p50')}
               icon="latency"
-              value={usd(sessions.distribution.p50_cost_usd)}
+              value={money(sessions.distribution.p50_cost_usd)}
               window={days}
               definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_p95')}
               icon="latency"
-              value={usd(sessions.distribution.p95_cost_usd)}
+              value={money(sessions.distribution.p95_cost_usd)}
               window={days}
               definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_count')}
               icon="activity"
-              value={integer(sessions.distribution.sessions)}
+              value={formatInt(sessions.distribution.sessions)}
               window={days}
               definition={heading('transactions_help')}
             />
@@ -300,10 +300,10 @@ export default async function SpendReportPage(props: {
                       >
                         {row.session}
                       </td>
-                      <td className={CELL}>{integer(row.turns)}</td>
-                      <td className={CELL}>{integer(row.models)}</td>
+                      <td className={CELL}>{formatInt(row.turns)}</td>
+                      <td className={CELL}>{formatInt(row.models)}</td>
                       <td className={CELL}>{money(row.cost_usd)}</td>
-                      <td className={CELL}>{integer(row.errors)}</td>
+                      <td className={CELL}>{formatInt(row.errors)}</td>
                     </tr>
                   ))}
                 </tbody>

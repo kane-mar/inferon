@@ -6,15 +6,15 @@ import {
   CELL,
   HEAD,
   heatCellClass,
-  integer,
   ms,
-  rate,
+  pct,
   us,
 } from '@/features/dashboard/reportFormat';
 import { Status } from '@/features/dashboard/ReportStatus';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { formatInt } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
@@ -80,7 +80,7 @@ export default async function RuntimePage(props: {
         <KpiCard
           label={t('under_1ms')}
           icon="ok"
-          value={rate(overhead.under_1ms_rate)}
+          value={pct(overhead.under_1ms_rate)}
           window={days}
           definition={t('under_1ms_help')}
           tone={metricTone(overhead.under_1ms_rate, THRESHOLDS.under1msRate)}
@@ -88,7 +88,7 @@ export default async function RuntimePage(props: {
         <KpiCard
           label={t('samples')}
           icon="activity"
-          value={integer(overhead.samples)}
+          value={formatInt(overhead.samples)}
           unit={t('requests')}
           window={days}
           definition={t('samples_help')}
@@ -109,7 +109,7 @@ export default async function RuntimePage(props: {
             <p className="text-xs text-muted-foreground">
               {t('claim_window', {
                 hours: contract.window_hours,
-                samples: integer(contract.samples),
+                samples: formatInt(contract.samples),
                 observed: us(contract.observed_p50_us),
               })}
             </p>
@@ -166,7 +166,7 @@ export default async function RuntimePage(props: {
             <KpiCard
               label={t('proxy_share')}
               icon="cost"
-              value={rate(latency.proxy_share)}
+              value={pct(latency.proxy_share)}
               window={days}
               hint={t('proxy_share_help')}
             />
@@ -316,7 +316,7 @@ export default async function RuntimePage(props: {
                     >
                       {row.model}
                     </td>
-                    <td className={CELL}>{integer(row.requests)}</td>
+                    <td className={CELL}>{formatInt(row.requests)}</td>
                     <td className={CELL}>{us(row.proxy_p50_us)}</td>
                     <td className={CELL}>{us(row.proxy_p95_us)}</td>
                     <td className={CELL}>{ms(row.total_p50_ms)}</td>

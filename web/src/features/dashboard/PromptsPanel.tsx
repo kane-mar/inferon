@@ -9,9 +9,7 @@ import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
 import { money } from './money';
-
-const pct = (value: number | null) => (value == null ? '—' : `${(value * 100).toFixed(0)}%`);
-const short = (hash: string) => hash.slice(0, 10);
+import { pct, shortHash } from './reportFormat';
 
 /** The three diff kinds, and how each reads. */
 const DIFF_CLASS: Record<PromptDiff['changes'][number]['kind'], string> = {
@@ -153,10 +151,10 @@ export const PromptsPanel = (props: {
                         "
                       >
                         <td className="py-2 font-mono text-xs">
-                          <span title={version.prompt_hash}>{short(version.prompt_hash)}</span>
+                          <span title={version.prompt_hash}>{shortHash(version.prompt_hash)}</span>
                         </td>
                         <td className="py-2 tabular-nums">{version.requests}</td>
-                        <td className="py-2 tabular-nums">{pct(version.ok_rate)}</td>
+                        <td className="py-2 tabular-nums">{pct(version.ok_rate, 0)}</td>
                         <td className="py-2 tabular-nums">{version.thumbs_down}</td>
                         <td className="py-2 font-mono text-xs">{money(version.spend_usd)}</td>
                         <td className="py-2 text-xs text-muted-foreground">
@@ -217,7 +215,7 @@ export const PromptsPanel = (props: {
                         <option value="">—</option>
                         {versions.map(version => (
                           <option key={version.prompt_hash} value={version.prompt_hash}>
-                            {short(version.prompt_hash)}
+                            {shortHash(version.prompt_hash)}
                             {' · '}
                             {version.first_seen.slice(0, 10)}
                           </option>

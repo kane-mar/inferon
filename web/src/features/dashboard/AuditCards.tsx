@@ -2,6 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import { formatInt } from '@/libs/dashboardMetrics';
 import { Finding } from './Finding';
 import { money } from './money';
+import { pct } from './reportFormat';
 
 /** A waste flag as both the dashboard and the public report expose it. */
 export type WasteEntry = {
@@ -34,9 +35,6 @@ export type AuditData = {
     topFailure?: [string, number];
   };
 };
-
-const pct = (value: number | null): string =>
-  (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
 /**
  * The six named findings, shared by the tenant's live page and the read-only

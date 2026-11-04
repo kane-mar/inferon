@@ -546,7 +546,6 @@ pub(super) async fn guard_fallback(
     context: &GuardContext<'_>,
     reason: GuardReason,
 ) -> Response {
-    let guarded_model = guard_emit.meta.model.clone();
     let replays = replay_targets(
         &guard_emit.meta.raw_prompt,
         context.route,
@@ -556,99 +555,9 @@ pub(super) async fn guard_fallback(
     let mut last_failure: Option<ReplayFailure> = None;
 
     for replay in replays {
-        // ITEM-067: the replay is normalized per target — a single DeepSeek
-        // deployment cannot accept json_schema at all.
-        let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
-            && !providers::supports_json_schema(&replay.route.kind, &replay.model);
-        let body = match wire_body(
-            &guard_emit.meta.raw_prompt,
-            replay.route,
-            &replay.model,
-            downgrade,
-        ) {
-            Ok(body) => body,
-            Err(response) => {
-                guard_emit.emit(
-                    Usage::default(),
-                    false,
-                    Outcome::Error,
-                    Some(ErrorClass::Inferon5xx),
-                );
-                return response;
-            }
-        };
-        let attempt = provider_request(&state.http_client, replay.route)
-            .body(body)
-            .send()
-            .await;
-        match attempt {
-            Err(e) => {
-                tracing::error!("guard replay to {} failed: {e}", replay.model);
-                last_failure = Some(ReplayFailure {
-                    model: replay.model,
-                    detail: "transport error".to_string(),
-                    class: ErrorClass::from_transport(&e),
-                    message: "frontier fallback request failed",
-                });
-            }
-            Ok(res) if !res.status().is_success() => {
-                let detail = format!("http {}", res.status().as_u16());
-                tracing::warn!("guard replay to {} rejected: {detail}", replay.model);
-                last_failure = Some(ReplayFailure {
-                    model: replay.model,
-                    detail,
-                    class: ErrorClass::Guard,
-                    message: "frontier fallback was rejected",
-                });
-            }
-            Ok(res) => {
-                // Note the event BEFORE buffering the replay so a mid-replay
-                // client abort (Drop) still records the guard event (AC3).
-                let event = guard::guard_event("fallback", reason, &guarded_model, None);
-                guard_emit.note_guard(Some(&replay.model), event);
-                if let Some(step) = replay.step {
-                    guard_emit.meta.routing_event = Some(json!({
-                        "from_model": guarded_model,
-                        "to_model": replay.model,
-                        "reason": "guard",
-                        "step": step,
-                    }));
-                }
-                let bytes = match res.bytes().await {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        tracing::error!("guard replay body read failed: {e}");
-                        guard_emit.emit(
-                            Usage::default(),
-                            true,
-                            Outcome::Truncated,
-                            Some(ErrorClass::Transport),
-                        );
-                        return json_error(
-                            StatusCode::BAD_GATEWAY,
-                            "guard_fallback_error",
-                            "frontier fallback body read failed",
-                        );
-                    }
-                };
-                let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
-                // ITEM-067 AC4: never serve an invalid replay silently — record a
-                // `fallback_invalid` event when the replay also violates the schema.
-                let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
-                if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
-                    guard_emit.note_guard(
-                        Some(&replay.model),
-                        guard::guard_event("fallback_invalid", reason, &guarded_model, None),
-                    );
-                }
-                guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
-                let mut response = Response::new(Body::from(bytes));
-                *response.status_mut() = StatusCode::OK;
-                response
-                    .headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-                return decorate(response, &guard_emit.meta);
-            }
+        match replay_once(guard_emit, state, replay, reason).await {
+            Ok(response) => return response,
+            Err(failure) => last_failure = Some(failure),
         }
     }
 
@@ -656,7 +565,7 @@ pub(super) async fn guard_fallback(
     let event = guard::guard_event(
         "fallback_failed",
         reason,
-        &guarded_model,
+        &guard_emit.meta.model.clone(),
         Some(&failure.detail),
     );
     guard_emit.note_guard(Some(&failure.model), event);
@@ -666,6 +575,112 @@ pub(super) async fn guard_fallback(
         "guard_fallback_error",
         failure.message,
     )
+}
+
+/// Try one replay target. `Err` means "this target failed, the guard may try
+/// the next"; an `Ok` response is terminal (served, or the typed error the
+/// request must answer with).
+async fn replay_once(
+    guard_emit: &mut BufferedGuard,
+    state: &AppState,
+    replay: ReplayTarget<'_>,
+    reason: GuardReason,
+) -> Result<Response, ReplayFailure> {
+    let guarded_model = guard_emit.meta.model.clone();
+    // ITEM-067: the replay is normalized per target — a single DeepSeek
+    // deployment cannot accept json_schema at all.
+    let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
+        && !providers::supports_json_schema(&replay.route.kind, &replay.model);
+    let body = match wire_body(
+        &guard_emit.meta.raw_prompt,
+        replay.route,
+        &replay.model,
+        downgrade,
+    ) {
+        Ok(body) => body,
+        Err(response) => {
+            guard_emit.emit(
+                Usage::default(),
+                false,
+                Outcome::Error,
+                Some(ErrorClass::Inferon5xx),
+            );
+            return Ok(response);
+        }
+    };
+    let attempt = provider_request(&state.http_client, replay.route)
+        .body(body)
+        .send()
+        .await;
+    let response = match attempt {
+        Err(e) => {
+            tracing::error!("guard replay to {} failed: {e}", replay.model);
+            return Err(ReplayFailure {
+                model: replay.model,
+                detail: "transport error".to_string(),
+                class: ErrorClass::from_transport(&e),
+                message: "frontier fallback request failed",
+            });
+        }
+        Ok(res) if !res.status().is_success() => {
+            let detail = format!("http {}", res.status().as_u16());
+            tracing::warn!("guard replay to {} rejected: {detail}", replay.model);
+            return Err(ReplayFailure {
+                model: replay.model,
+                detail,
+                class: ErrorClass::Guard,
+                message: "frontier fallback was rejected",
+            });
+        }
+        Ok(res) => res,
+    };
+
+    // Note the event BEFORE buffering the replay so a mid-replay client abort
+    // (Drop) still records the guard event (AC3).
+    let event = guard::guard_event("fallback", reason, &guarded_model, None);
+    guard_emit.note_guard(Some(&replay.model), event);
+    if let Some(step) = replay.step {
+        guard_emit.meta.routing_event = Some(json!({
+            "from_model": guarded_model,
+            "to_model": replay.model,
+            "reason": "guard",
+            "step": step,
+        }));
+    }
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            tracing::error!("guard replay body read failed: {e}");
+            guard_emit.emit(
+                Usage::default(),
+                true,
+                Outcome::Truncated,
+                Some(ErrorClass::Transport),
+            );
+            return Ok(json_error(
+                StatusCode::BAD_GATEWAY,
+                "guard_fallback_error",
+                "frontier fallback body read failed",
+            ));
+        }
+    };
+    let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+    // ITEM-067 AC4: never serve an invalid replay silently — record a
+    // `fallback_invalid` event when the replay also violates the schema.
+    let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
+    if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
+        guard_emit.note_guard(
+            Some(&replay.model),
+            guard::guard_event("fallback_invalid", reason, &guarded_model, None),
+        );
+    }
+    guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+    Ok(decorate(response, &guard_emit.meta))
 }
 
 /// Drop-guarded trace emitter for the buffered (non-streamed-to-client)

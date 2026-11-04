@@ -1,6 +1,6 @@
 import type { FetchLike } from './InferonApi';
 import { describe, expect, it, vi } from 'vitest';
-import { formatUsd, InferonApi, InferonApiError } from './InferonApi';
+import { InferonApi, InferonApiError } from './InferonApi';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -203,23 +203,6 @@ describe('InferonApi — operator views', () => {
 
     expect(url).toBe('http://proxy:8080/v1/dashboard/api/operator/tenants?days=7');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer sk-op');
-  });
-});
-
-describe('formatUsd — decimal strings, never floats', () => {
-  it.each([
-    ['0.000007', '$0.000007'],
-    ['0.001234', '$0.001234'],
-    ['0', '$0.00'],
-    ['0.000000', '$0.00'],
-    ['0.001230', '$0.00123'],
-    ['12.000000', '$12'],
-    ['', '$0.00'],
-    ['1234.50', '$1,234.5'],
-    ['-0.5', '-$0.5'],
-    ['1.6e-5', '$1.6e-5'],
-  ])('formats %s as %s', (input, expected) => {
-    expect(formatUsd(input)).toBe(expected);
   });
 });
 

@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
+import { pct } from './reportFormat';
 
 const when = (value: string) => value.slice(0, 16).replace('T', ' ');
-const pct = (value: number | null) => (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
 /** The gate's verdict, coloured by what it means. */
 const VERDICT_CLASS: Record<EvalVerdict['verdict'], string> = {

@@ -113,12 +113,13 @@ impl SessionActor {
     }
 }
 
-/// The session's tenant, role and user in one lookup. Mutating handlers use
-/// this so an event can name the person who made the change.
-pub(crate) async fn session_actor(
+/// The session user and their membership in one lookup. Both the scope read
+/// and the audit write need the same three facts; neither should look them up
+/// twice or clone what it does not use.
+async fn session_identity(
     state: &Arc<AppState>,
     headers: &HeaderMap,
-) -> Result<SessionActor, Response> {
+) -> Result<(crate::auth::User, uuid::Uuid, String), Response> {
     let Some(user) = session_user(state, headers).await? else {
         return Err(unauthorized());
     };
@@ -126,18 +127,27 @@ pub(crate) async fn session_actor(
         return Err(unauthorized());
     };
     match accounts.users.tenant_for_user(user.id).await {
-        Ok(Some((tenant_id, role))) => Ok(SessionActor {
-            tenant_id,
-            role,
-            user_id: user.id,
-            login: user.github_login,
-        }),
+        Ok(Some((tenant_id, role))) => Ok((user, tenant_id, role)),
         Ok(None) => Err(unauthorized()),
         Err(e) => {
             tracing::error!("membership lookup failed: {e}");
             Err(internal("membership lookup failed"))
         }
     }
+}
+
+/// The session's tenant, role and user for a mutating handler.
+pub(crate) async fn session_actor(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+) -> Result<SessionActor, Response> {
+    let (user, tenant_id, role) = session_identity(state, headers).await?;
+    Ok(SessionActor {
+        tenant_id,
+        role,
+        user_id: user.id,
+        login: user.github_login,
+    })
 }
 
 /// Session-based resolution (ITEM-036 AC2): a signed-in owner/member reaches
@@ -209,8 +219,8 @@ pub(crate) async fn session_membership(
     state: &Arc<AppState>,
     headers: &HeaderMap,
 ) -> Result<(uuid::Uuid, String), Response> {
-    let actor = session_actor(state, headers).await?;
-    Ok((actor.tenant_id, actor.role))
+    let (_, tenant_id, role) = session_identity(state, headers).await?;
+    Ok((tenant_id, role))
 }
 
 /// Owner-gate for tenant management actions (ITEM-038/039): members can view

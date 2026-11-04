@@ -3,18 +3,13 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { EvalsPanel } from '@/features/dashboard/EvalsPanel';
 import { KpiCard } from '@/features/dashboard/KpiCard';
+import { CELL, HEAD, pct, shortHash } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS, toneText } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
-
-const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
-const CELL = 'px-3 py-2 text-sm tabular-nums';
-
-const pct = (value: number | null): string =>
-  (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
 /** The per-model success cell, coloured by the same thresholds as the KPI. */
 const successClass = (rate: number | null): string =>
@@ -226,7 +221,7 @@ export default async function QualityPage(props: {
                     `}
                     >
                       <span title={prompt.system_prompt_hash}>
-                        {prompt.system_prompt_hash.slice(0, 12)}
+                        {shortHash(prompt.system_prompt_hash, 12)}
                       </span>
                     </td>
                     <td className={CELL}>{prompt.requests}</td>

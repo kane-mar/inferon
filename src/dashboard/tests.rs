@@ -1539,7 +1539,28 @@ async fn a_member_cannot_change_tier_pairs() {
     assert_eq!(response.status(), axum::http::StatusCode::FORBIDDEN);
 }
 
-    // --- ITEM-108/109: audit trail and per-step fallback triggers ----------
+    #[tokio::test]
+async fn an_unconfigured_tenant_reads_the_documented_defaults() {
+    let (state, token) = tenant_role_session("owner").await;
+    let config = crate::build_router(state)
+        .oneshot(request_with_cookie("/v1/dashboard/api/config", &token))
+        .await
+        .unwrap();
+    let config = json_of(config).await;
+
+    assert_eq!(config["budget_limit_cents"], 0);
+    assert_eq!(config["guard_enabled"], true);
+    assert_eq!(config["router_enabled"], true);
+    assert_eq!(config["router_threshold"], 0.35);
+    assert_eq!(config["capture_payloads"], true);
+    assert_eq!(config["payload_retention_days"], 30);
+    assert_eq!(config["lint_enabled"], true);
+    assert_eq!(config["translate_surfaces"], true);
+    assert_eq!(config["pii_detection"], true);
+    assert_eq!(config["role"], "owner");
+}
+
+// --- ITEM-108/109: audit trail and per-step fallback triggers ----------
 
 #[tokio::test]
 async fn an_owner_saves_per_step_fallback_triggers() {

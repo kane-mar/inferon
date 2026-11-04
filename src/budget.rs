@@ -101,31 +101,6 @@ pub struct ConfigUpdate {
     pub pii_redact_wire: bool,
 }
 
-/// The unconfigured values of every control — the baseline a UI save starts
-/// from and the "before" side of an audit event.
-impl Default for ConfigUpdate {
-    fn default() -> Self {
-        let defaults = TenantBudget::unconfigured();
-        Self {
-            budget_limit_cents: defaults.limit_cents,
-            cheap_fallback_model: defaults.cheap_fallback_model,
-            guard_enabled: defaults.guard_enabled,
-            router_enabled: defaults.router_enabled,
-            router_threshold: defaults.router_threshold,
-            capture_payloads: defaults.capture_payloads,
-            payload_retention_days: defaults.payload_retention_days,
-            lint_enabled: defaults.lint_enabled,
-            lint_rules: defaults.lint_rules,
-            translate_surfaces: defaults.translate_surfaces,
-            rpm_limit: defaults.rpm_limit,
-            tpm_limit: defaults.tpm_limit,
-            pii_detection: defaults.pii_detection,
-            pii_redact_storage: defaults.pii_redact_storage,
-            pii_redact_wire: defaults.pii_redact_wire,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BudgetVerdict {
     Allow,

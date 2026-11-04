@@ -11,7 +11,7 @@ const DECIMAL = /^-?\d*(?:\.\d*)?$/;
  *
  * A dashboard that prints `$0.00037708` on every row is noise; one that prints
  * `$0.00` for a real cost is a lie. This is presentation only — the exact
- * decimal string is what the API returns and `formatUsd` still prints verbatim.
+ * decimal string is what the API returns; this is the one presentation of it.
  */
 export const money = (value: string | number | null | undefined): string => {
   if (value == null) {

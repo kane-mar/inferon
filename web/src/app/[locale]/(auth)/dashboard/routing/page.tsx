@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
 import { PrunePanel } from '@/features/dashboard/PrunePanel';
+import { HEAD } from '@/features/dashboard/reportFormat';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
 import { TierPairsPanel } from '@/features/dashboard/TierPairsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -26,8 +27,6 @@ const auditValue = (value: unknown, yes: string, no: string): string => {
   }
   return JSON.stringify(value);
 };
-
-const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
 
 /**
  * Fallback & routing rules (ITEM-045): an ordered chain of models tried when the

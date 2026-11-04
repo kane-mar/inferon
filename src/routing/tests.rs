@@ -13,22 +13,14 @@ fn only_retryable_failures_trigger_a_fallback() {
 }
 
 #[test]
-fn a_step_handles_only_the_triggers_it_declares() {
-    let step = FallbackStep::new("deepseek-flash", &[FallbackTrigger::RateLimited]);
-
-    assert!(step.handles(FallbackTrigger::RateLimited));
-    assert!(!step.handles(FallbackTrigger::ServerError));
-    assert!(!step.handles(FallbackTrigger::Guard));
-}
-
-#[test]
 fn a_step_with_no_triggers_keeps_the_old_behaviour() {
     let step = FallbackStep::retryable("deepseek-flash");
 
-    for trigger in FallbackTrigger::RETRYABLE {
-        assert!(step.handles(trigger), "retryable trigger {trigger:?}");
-    }
-    assert!(!step.handles(FallbackTrigger::Guard), "guard is opt-in");
+    assert_eq!(
+        step.triggers,
+        FallbackTrigger::RETRYABLE.to_vec(),
+        "the guard is opt-in"
+    );
 }
 
 #[test]
@@ -108,11 +100,12 @@ fn validation_refuses_empty_models_empty_triggers_and_duplicates() {
 
 #[test]
 fn next_handling_skips_steps_that_do_not_handle_the_failure() {
-    let triggers = vec![
-        FallbackTrigger::ALL.to_vec(),
+    let triggers = [
+        FallbackTrigger::RETRYABLE.to_vec(),
         vec![FallbackTrigger::ServerError],
         vec![FallbackTrigger::RateLimited],
     ];
+    let triggers: Vec<&[FallbackTrigger]> = triggers.iter().map(Vec::as_slice).collect();
 
     assert_eq!(
         next_handling(&triggers, 0, FallbackTrigger::RateLimited),
@@ -136,12 +129,13 @@ fn next_handling_skips_steps_that_do_not_handle_the_failure() {
 
 #[test]
 fn all_handling_lists_every_matching_step_in_order() {
-    let triggers = vec![
-        FallbackTrigger::ALL.to_vec(),
+    let triggers = [
+        FallbackTrigger::RETRYABLE.to_vec(),
         vec![FallbackTrigger::Guard],
         vec![FallbackTrigger::ServerError],
         vec![FallbackTrigger::Guard],
     ];
+    let triggers: Vec<&[FallbackTrigger]> = triggers.iter().map(Vec::as_slice).collect();
 
     assert_eq!(
         all_handling(&triggers, 0, FallbackTrigger::Guard),

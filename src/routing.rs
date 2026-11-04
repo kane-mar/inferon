@@ -40,13 +40,6 @@ pub enum FallbackTrigger {
 }
 
 impl FallbackTrigger {
-    /// Every trigger, including the guard — for a step that is always eligible.
-    pub const ALL: [Self; 4] = [
-        Self::Transport,
-        Self::RateLimited,
-        Self::ServerError,
-        Self::Guard,
-    ];
     /// The retryable upstream failures, without the guard — what a legacy chain
     /// (a bare list of models) means.
     pub const RETRYABLE: [Self; 3] = [Self::Transport, Self::RateLimited, Self::ServerError];
@@ -80,10 +73,6 @@ impl FallbackStep {
     /// The pre-109 behaviour: every retryable upstream failure, no guard.
     pub fn retryable(model: impl Into<String>) -> Self {
         Self::new(model, &FallbackTrigger::RETRYABLE)
-    }
-
-    pub fn handles(&self, trigger: FallbackTrigger) -> bool {
-        self.triggers.contains(&trigger)
     }
 
     /// A stored step with no triggers predates the field: treat it as the old
@@ -186,23 +175,23 @@ pub fn validate_steps(steps: &[FallbackStep]) -> Result<(), StepIssue> {
 
 /// The first step after `from` that handles `trigger` — steps that do not are
 /// skipped, so a 429 can pass a 5xx-only step instead of stopping the chain.
-pub fn next_handling<T: AsRef<[FallbackTrigger]>>(
-    triggers: &[T],
+pub fn next_handling(
+    triggers: &[&[FallbackTrigger]],
     from: usize,
     trigger: FallbackTrigger,
 ) -> Option<usize> {
-    (from + 1..triggers.len()).find(|&index| triggers[index].as_ref().contains(&trigger))
+    (from + 1..triggers.len()).find(|&index| triggers[index].contains(&trigger))
 }
 
 /// Every step after `from` that handles `trigger`, in chain order. The guard
 /// replays through these; the HTTP fallback takes the first.
-pub fn all_handling<T: AsRef<[FallbackTrigger]>>(
-    triggers: &[T],
+pub fn all_handling(
+    triggers: &[&[FallbackTrigger]],
     from: usize,
     trigger: FallbackTrigger,
 ) -> Vec<usize> {
     (from + 1..triggers.len())
-        .filter(|&index| triggers[index].as_ref().contains(&trigger))
+        .filter(|&index| triggers[index].contains(&trigger))
         .collect()
 }
 

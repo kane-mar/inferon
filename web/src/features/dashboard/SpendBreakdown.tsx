@@ -9,6 +9,7 @@ import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { cn } from '@/utils/Helpers';
 import { money } from './money';
+import { pct } from './reportFormat';
 
 export type SpendBreakdownRow = {
   /** key_id / provider_id — `null` for a legacy/shared row (not editable). */
@@ -32,9 +33,6 @@ const COMPACT_INPUT = `
   w-24 rounded-md border bg-background px-2 py-1 font-mono text-xs outline-none
   focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
 `;
-
-const pctOrDash = (value: number | null | undefined): string =>
-  (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
 
 const msOrDash = (value: number | null | undefined): string =>
   (value == null ? '—' : `${Math.round(value)}ms`);
@@ -253,7 +251,7 @@ export const SpendBreakdown = (props: {
               <td className="py-2 text-right tabular-nums">{formatInt(row.requests)}</td>
               {props.kind === 'provider' && (
                 <>
-                  <td className="py-2 text-right tabular-nums">{pctOrDash(row.errorRate)}</td>
+                  <td className="py-2 text-right tabular-nums">{pct(row.errorRate)}</td>
                   <td className="py-2 text-right tabular-nums">{msOrDash(row.p95Ms)}</td>
                 </>
               )}

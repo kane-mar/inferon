@@ -27,7 +27,7 @@ pub struct Change {
 }
 
 /// A stored event, as the dashboard reads it back.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct AuditRecord {
     pub actor_login: String,
     pub setting: String,

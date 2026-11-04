@@ -120,6 +120,9 @@ pub async fn tenant_routing_set(
             triggers: step.triggers,
         })
         .collect();
+    if let Err(issue) = crate::routing::validate_steps(&chain) {
+        return step_refusal(issue);
+    }
     for step in &chain {
         if model_is_disabled(&state, tenant_id, &step.model).await {
             return crate::json_error(
@@ -128,9 +131,6 @@ pub async fn tenant_routing_set(
                 "a fallback model is disabled for your tenant",
             );
         }
-    }
-    if let Err(issue) = crate::routing::validate_steps(&chain) {
-        return step_refusal(issue);
     }
     match state.routing_store.set_fallbacks(tenant_id, &chain).await {
         Ok(()) => {
@@ -307,71 +307,30 @@ pub async fn tenant_config(State(state): State<Arc<AppState>>, headers: HeaderMa
         Ok(membership) => membership,
         Err(resp) => return resp,
     };
-    let config = match state.budget_store.budget_for(tenant_id).await {
-        Ok(config) => config,
+    // One shape for "configured" and "never configured": the defaults live in
+    // the budget module, so the read path cannot drift from the audit baseline.
+    let budget = match state.budget_store.budget_for(tenant_id).await {
+        Ok(Some(budget)) => budget,
+        Ok(None) => crate::budget::TenantBudget::unconfigured(),
         Err(e) => return internal(e.to_string()),
     };
-    let rate_limits = config
-        .as_ref()
-        .map_or((0, 0), |budget| (budget.rpm_limit, budget.tpm_limit));
-    // ITEM-096: detection is on by default; redaction is opt-in per mode.
-    let lint_rules = config.as_ref().map_or_else(
-        || crate::preflight::Rules::default().names(),
-        |budget| budget.lint_rules.clone(),
-    );
-    let pii = config.as_ref().map_or((true, false, false), |budget| {
-        (
-            budget.pii_detection,
-            budget.pii_redact_storage,
-            budget.pii_redact_wire,
-        )
-    });
-    let (
-        limit,
-        spent,
-        cheap,
-        guard,
-        router_enabled,
-        router_threshold,
-        capture,
-        retention,
-        lint,
-        translate,
-    ) = match config {
-        Some(budget) => (
-            budget.limit_cents,
-            budget.spent_cents,
-            budget.cheap_fallback_model,
-            budget.guard_enabled,
-            budget.router_enabled,
-            budget.router_threshold,
-            budget.capture_payloads,
-            budget.payload_retention_days,
-            budget.lint_enabled,
-            budget.translate_surfaces,
-        ),
-        // Unconfigured: the router/guard are on by default (ITEM-015/027),
-        // payloads are captured for 30 days (ITEM-088) and the pre-flight
-        // lint runs (ITEM-090).
-        None => (0, 0, None, true, true, 0.35, true, 30, true, true),
-    };
     json_ok(json!({
-        "budget_limit_cents": limit,
-        "current_spend_cents": spent,
-        "cheap_fallback_model": cheap,
-        "guard_enabled": guard,
-        "router_enabled": router_enabled,
-        "router_threshold": router_threshold,
-        "capture_payloads": capture,
-        "payload_retention_days": retention,
-        "lint_enabled": lint,
-        "lint_rules": lint_rules,
-        "translate_surfaces": translate,
-        "rpm_limit": rate_limits.0,
-        "tpm_limit": rate_limits.1,
-        "pii_detection": pii.0,
-        "pii_redact_storage": pii.1,
-        "pii_redact_wire": pii.2,
+        "budget_limit_cents": budget.limit_cents,
+        "current_spend_cents": budget.spent_cents,
+        "cheap_fallback_model": budget.cheap_fallback_model,
+        "guard_enabled": budget.guard_enabled,
+        "router_enabled": budget.router_enabled,
+        "router_threshold": budget.router_threshold,
+        "capture_payloads": budget.capture_payloads,
+        "payload_retention_days": budget.payload_retention_days,
+        "lint_enabled": budget.lint_enabled,
+        "lint_rules": budget.lint_rules,
+        "translate_surfaces": budget.translate_surfaces,
+        "rpm_limit": budget.rpm_limit,
+        "tpm_limit": budget.tpm_limit,
+        "pii_detection": budget.pii_detection,
+        "pii_redact_storage": budget.pii_redact_storage,
+        "pii_redact_wire": budget.pii_redact_wire,
         "prune": state
             .policy_store
             .active(tenant_id)
