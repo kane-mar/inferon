@@ -24,8 +24,6 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-108 | Audit trail for control-plane changes | feature | **new (2026-11-04, review)** — ITEM-046 closed with "audit trail deferred" but never captured it. No config write records its actor: a two-owner tenant cannot tell who raised the cap or turned the guard off (`tenant_policies` versions the adaptive loop only). Append-only events (actor, setting, old/new, at) for every owner-only mutation, shown on Routing; secrets never logged |
-| ITEM-109 | Per-step fallback triggers | feature | **new (2026-11-04, review)** — ITEM-045 closed with "per-step triggers + guard trigger deferred" but never captured it. Every step triggers on the same set (transport/429/5xx) and the guard keeps a private frontier replay, so a chain cannot say "step 2 only on 5xx". Per-step trigger sets, legacy chain compatibility, guard as a chain trigger, trigger recorded on `routing_event` |
 | **— gated below this line —** | | | |
 | ITEM-076 | OmniRouting: adapter training, gold-set gate and hot swap | feature | **slice 1 done (2026-10-26)** — job lifecycle (`claim`/`set_state`, exclusive) + `Trainer`/`Gate`/`Promoter` seams + `process_one` (6 tests). Remains, gated on Slice 3 infra: the real trainer, gold-set corpus and `load_lora_adapter` promoter |
 | ITEM-032 | OmniRouting: multi-tenant PagedLoRA serving | feature | **staged** — unpark = backlog order; GPU economics err to most performant model (PO 2026-09-05) |
@@ -40,6 +38,8 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-108 | Audit trail for control-plane changes | feature | **done + archived (2026-11-04)** — `config_audit` (migration 054) is append-only: actor id + login snapshot, setting, before/after JSONB, time. Every owner mutation that edits a control records the fields that actually changed — config (budget, fallback model, guard, router, capture/retention, lint/rules, translation, RPM/TPM, PII modes), fallback chain, tier pairs and pruning. The batch is one transaction; a failed audit write is logged and never undoes the change. `GET /api/routing` returns the last 20 events to owners only, and `/dashboard/routing` renders **Recent changes** (actor, localized setting, before → after). Secrets never enter the table. Live: an owner save wrote two events and the page rendered them |
+| ITEM-109 | Per-step fallback triggers | feature | **done + archived (2026-11-04)** — each chain step declares transport / 429 / 5xx / guard. A failing attempt advances to the next step that handles its class (a 429 skips a 5xx-only step); an exhausted chain serves the upstream error. `routing_event` gains the step index. A step marked `guard` receives the schema guard's replay (in order, trying the next if one fails); with no guard step the built-in frontier replay is unchanged. Legacy bare-model chains read as the retryable set and never opt into the guard. Validation refuses an empty set, a duplicate model and an unknown trigger at the API and in both stores. `/dashboard/routing` edits the triggers per step, owner-only, en/fr. Tests: domain/store + proxy + dashboard |
 | ITEM-107 | Design language: line icons, restrained colour, minimalist hierarchy | improvement | **done + archived (2026-11-03)** — one icon set (`slimicons`, MIT, 1.5 px stroke) named by meaning: 16 px in every section header and 14 px beside every KPI label, decorative (`aria-hidden`). KPI cards are the neutral surface again; only a `bad`/`warn` value takes colour, and it also gets a warning glyph, so the verdict survives without colour. Table verdicts colour the number, not the cell (the old green/amber/red fills are gone). Greens/ambers moved to 700-level for 4.5:1 contrast. A single KPI component replaced `StatCard` on the operator console too. Live: all 8 report pages 200 with a session, icons present |
 | ITEM-106 | One presentation language across the reports | improvement | **done + archived (2026-11-03)** — `WindowChip` is the only window control: every report reads `?days=7\|30\|90` (default 30), so Runtime/Datasets/Payloads no longer hard-code 30 days and Spend/Audit lost their private switchers. `KpiCard` is the one metric card (value, unit, window, hover definition, icon). `money()` prints two decimals from a cent up, up to six below, no trailing zeros, and `<$0.000001` instead of `$0.00` for a real cost; charts and per-million prices use it. Truncated hashes and timestamps carry `title` (datasets, quality, prompts, keys, evals, operator jobs/alerts). The heatmap legend matches `heatCellClass`, and a dot means no traffic. Live: `Last` chip on all 8 pages, legend + tint classes rendered, no 7-decimal money, 4 full-hash titles on Datasets |
 | ITEM-104 | Overview as an attention list, not a report index | improvement | **done + archived (2026-11-03)** — five KPIs (requests, spend, error rate, p95 TTFT, savings), each with its window and a definition on hover; one trend chart; an **Attention** strip that lists only actionable findings (failure first, then money by impact), each naming the control and linking to it — Routing for errors/latency/waste, Payloads for lint. The five mini-cards that restated other tabs are gone; an empty tenant keeps the onboarding state and no strip. Live: five KPIs + Needs attention on the landing page |
@@ -96,8 +96,8 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 | ITEM-049 | Own the app shell — retire the template, one operator console | tech-debt | **done (2026-10-06)** — Inferon-owned `features/shell/` (header/nav/footer/page primitives); `templates/`, `Centered*`, `(center)` group and the `/` flourish gone; one operator console (Next), backend JSON-only |
 | ITEM-048 | SDK onboarding flow ("connect your SDK") | feature | **done (2026-10-06)** — `/dashboard/onboarding`: mint key → base URL → snippets (tenant model) → first-request detection; links to providers (models live there now) |
 | ITEM-047 | Dashboard — provider/model/key spend & limits | improvement | **done (2026-10-06)** — spend by provider/model/key/prompt with period deltas + inline spike badge; per-key/per-provider monthly limits (owner UI) with ITEM-020 alerts; onboarding empty state |
-| ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). deferred scope (audit trail) captured as ITEM-108 on the 2026-11-04 review |
-| ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; deferred scope (per-step triggers + guard trigger) captured as ITEM-109 on the 2026-11-04 review |
+| ITEM-046 | Routing policy & budget controls (UI) | feature | **done (2026-10-06)** — `/dashboard/routing` controls: budget cap + cheap fallback, guard toggle, router toggle + threshold, live spend-vs-cap at a glance; owner-only writes, applied on the next request (no redeploy). deferred scope (audit trail) delivered as ITEM-108 (2026-11-04) |
+| ITEM-045 | Fallback & routing rules | feature | **done (2026-10-06)** — ordered per-tenant fallback chain on retryable failures (429/5xx/transport), traced + configured at `/dashboard/routing`; deferred scope (per-step triggers + guard trigger) delivered as ITEM-109 (2026-11-04) |
 | ITEM-043 | Provider provisioning (bring your own provider) | feature | **done (2026-10-06)** — encrypted provider creds (`deepseek`/`openai`/`openai-compatible`), proxy resolution, `/dashboard/providers` add/list/test/**rotate**, optional org/headers, last-updated; native Anthropic re-scoped to ITEM-050 |
 
 ### Retired
@@ -111,16 +111,14 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-04 — backlog review: delivered item files 085–100 moved
-to the archive, and two explicitly deferred scopes that had never been captured
-(ITEM-045's per-step triggers, ITEM-046's audit trail) are now ITEM-108/109.
-Same form: one ranked list, gated at its bottom, then delivered history, then
-retired items._
+_Last updated: 2026-11-04 — the two untracked deferred scopes from the review
+(ITEM-045's per-step triggers, ITEM-046's audit trail) are delivered and
+archived as ITEM-108/109. The pullable region is empty again. Same form: one
+ranked list, gated at its bottom, then delivered history, then retired items._
 
-**Next pull: ITEM-108** (the control-plane audit trail), then ITEM-109 (per-step
-fallback triggers). Both are small, unblocked, and close trust/parity gaps the
-delivered items knowingly left open. After them the pullable region is empty
-again and the next move is the PO's gated-block decision (below).
+**Nothing is pullable.** Every open item is gated (below). The next move is a PO
+decision, not a build: unpark ITEM-029 (its input exists via ITEM-089) or capture
+the next slice. Until then agents must not invent work.
 
 **PO action (not a build item):** the goal's first clause — put it in front of
 **real external developers** — has no open item. ITEM-018 closed on dogfooding

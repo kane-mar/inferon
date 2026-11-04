@@ -26,8 +26,9 @@ config writes.
    and time; the log cannot be edited or deleted from the UI.
 4. Secrets never enter the log: provider credentials, webhook URLs and API keys
    are recorded as "changed", never by value.
-5. A config write and its event are one transaction — a failed write leaves no
-   event, and an event never exists for a write that did not apply.
+5. An event is written only after the mutation applies. The audit batch is one
+   transaction; a failed audit write is logged and never undoes the change
+   (audit is observability, not a lock).
 6. Migration is additive and does not backfill a fake actor for existing rows;
    the page says "before the audit trail" for older state.
 7. Tests: store round-trip, event on every mutation, no event on a rejected
@@ -43,3 +44,23 @@ config writes.
 
 **Source:** 2026-11-04 backlog review — deferred scope of ITEM-046 found
 untracked (daily/2026-10-06).
+
+## Delivered (2026-11-04)
+
+- `config_audit` (migration 054) is append-only: tenant, actor id + login
+  snapshot, setting, before/after JSONB, timestamp; index on `(tenant, time)`.
+- `ConfigAuditStore` seam with Postgres and in-memory implementations. The
+  Postgres batch is one transaction; an empty change set is a no-op.
+- `config_changes` diffs every field `POST /api/config` can edit (budget, cheap
+  fallback, guard, router, capture/retention, lint/rules, translation, RPM/TPM,
+  PII modes) and emits only what changed.
+- Wired into the four owner mutations: config (multi-field diff), fallback chain,
+  tier pairs and context pruning. Each event names the session user.
+- `GET /api/routing` returns the last 20 events for owners; members get `[]`.
+- `/dashboard/routing` renders **Recent changes** (owner-only): when, actor,
+  localized setting, before → after (truncated with a title).
+- Secrets never enter the table: provider/API-key/credential mutations are out
+  of scope and the covered settings carry no secret.
+- Tests: 5 domain/store + 6 dashboard (actor, newest-first, unchanged save, rejected
+  write, chain diff, tier-pair + prune, member cannot read). Rust 537 green,
+  clippy clean.

@@ -42,3 +42,22 @@ keeps its private frontier replay (`fallback_invalid`), so a tenant cannot say
 
 **Source:** 2026-11-04 backlog review — deferred scope of ITEM-045 found
 untracked (daily/2026-10-06).
+
+## Delivered (2026-11-04)
+
+- `FallbackStep { model, triggers }` in `routing.rs`, with `FallbackTrigger` =
+  transport | rate_limited | server_error | guard. Legacy bare-model chains and
+  empty stored trigger lists read as the pre-109 retryable set (never guard).
+- Validation refuses an empty model, an empty trigger set and a duplicate model,
+  at the API **and** in both stores; the API also rejects an unknown trigger
+  (422 from the closed enum).
+- The proxy chain carries each step's triggers and skips steps that do not
+  handle the failure (`next_handling`), so a 429 can pass a 5xx-only step.
+  `routing_event` gains `step` (the index that served).
+- The guard replays through the first step marked `guard` (and then the next if
+  one fails); without such a step the built-in frontier replay is unchanged.
+- `/dashboard/routing` edits the triggers per step (chips, owner-only, en/fr);
+  a new step defaults to the retryable set.
+- Tests: 12 domain/store + 5 dashboard/proxy (legacy compatibility, skip, 5xx,
+  guard replay, exhausted chain, unknown trigger, store validation). Rust 537
+  green, clippy clean.
