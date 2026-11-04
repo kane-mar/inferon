@@ -81,16 +81,35 @@ pub(crate) fn stored<T>(result: Result<T, sqlx::Error>) -> Result<T, Response> {
     result.map_err(db_err)
 }
 
-pub(crate) async fn query_summary(
+fn empty_summary() -> SummaryRow {
+    (
+        0,
+        Decimal::ZERO,
+        0,
+        0,
+        0,
+        None,
+        None,
+        None,
+        None,
+        0,
+        Decimal::ZERO,
+        0,
+        Decimal::ZERO,
+        Decimal::ZERO,
+        Decimal::ZERO,
+        0,
+    )
+}
+
+async fn summary_totals(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
-    window: &Window,
-    scope_label: &str,
-) -> Result<Response, Response> {
-    let days = window.days();
-    let offset = window.offset();
-    let row: Option<SummaryRow> =
-        stored(sqlx::query_as(
+    days: i64,
+    offset: i64,
+) -> Result<SummaryRow, Response> {
+    let row: Option<SummaryRow> = stored(
+        sqlx::query_as(
             "SELECT COUNT(*),
                     COALESCE(SUM(upstream_cost_usd), 0),
                     COUNT(*) FILTER (WHERE status_code >= 400),
@@ -116,8 +135,87 @@ pub(crate) async fn query_summary(
         .bind(days)
         .bind(offset)
         .fetch_optional(&state.db)
-        .await)?;
+        .await,
+    )?;
+    Ok(row.unwrap_or_else(empty_summary))
+}
 
+async fn summary_latency(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+    offset: i64,
+) -> Result<LatencyRow, Response> {
+    stored(
+        sqlx::query_as(
+            "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_ms)::float8,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_ms)::float8
+         FROM traces
+         WHERE ($1::uuid IS NULL OR tenant_id = $1)
+           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+           AND created_at < NOW() - ($3 * INTERVAL '1 day')",
+        )
+        .bind(tenant)
+        .bind(days)
+        .bind(offset)
+        .fetch_one(&state.db)
+        .await,
+    )
+}
+
+/// ITEM-057: the failure taxonomy, grouped by class (null = no failure).
+async fn error_classes(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+    offset: i64,
+) -> Result<serde_json::Map<String, Value>, Response> {
+    let rows: Vec<(String, i64)> = stored(
+        sqlx::query_as(
+            "SELECT error_class, COUNT(*)
+             FROM traces
+             WHERE error_class IS NOT NULL
+               AND ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+               AND created_at < NOW() - ($3 * INTERVAL '1 day')
+             GROUP BY error_class ORDER BY 2 DESC",
+        )
+        .bind(tenant)
+        .bind(days)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await,
+    )?;
+    Ok(rows.into_iter().map(|(class, count)| (class, json!(count))).collect())
+}
+
+/// Unit economics computed server-side so no float ever touches a cost.
+fn average_cost(total: Decimal, requests: i64) -> Decimal {
+    if requests > 0 {
+        (total / Decimal::from(requests)).round_dp(8)
+    } else {
+        Decimal::ZERO
+    }
+}
+
+fn cache_hit_rate(cached_tokens: i64, prompt_tokens: i64) -> Option<f64> {
+    (prompt_tokens > 0).then(|| cached_tokens as f64 / prompt_tokens as f64)
+}
+
+pub(crate) async fn query_summary(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+    scope_label: &str,
+) -> Result<Response, Response> {
+    let days = window.days();
+    let offset = window.offset();
     let (
         requests,
         total_cost,
@@ -135,24 +233,7 @@ pub(crate) async fn query_summary(
         router_savings,
         fallback_savings,
         cache_affinity_requests,
-    ) = row.unwrap_or((
-        0,
-        Decimal::ZERO,
-        0,
-        0,
-        0,
-        None,
-        None,
-        None,
-        None,
-        0,
-        Decimal::ZERO,
-        0,
-        Decimal::ZERO,
-        Decimal::ZERO,
-        Decimal::ZERO,
-        0,
-    ));
+    ) = summary_totals(state, tenant, days, offset).await?;
     // ITEM-056: tail latency percentiles (NULL when there are no samples).
     let (
         ttft_p50_ms,
@@ -163,55 +244,10 @@ pub(crate) async fn query_summary(
         duration_p99_ms,
         proxy_p50_ms,
         proxy_p95_ms,
-    ): LatencyRow = stored(sqlx::query_as(
-        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
-                percentile_cont(0.99) WITHIN GROUP (ORDER BY time_to_first_token_ms)::float8,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
-                percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_ms)::float8,
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_ms)::float8
-         FROM traces
-         WHERE ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
-           AND created_at < NOW() - ($3 * INTERVAL '1 day')",
-    )
-    .bind(tenant)
-    .bind(days)
-    .bind(offset)
-    .fetch_one(&state.db)
-    .await)?;
-    // ITEM-057: the failure taxonomy, grouped by class (null = no failure).
-    let by_class: Vec<(String, i64)> = stored(sqlx::query_as(
-        "SELECT error_class, COUNT(*)
-         FROM traces
-         WHERE error_class IS NOT NULL
-           AND ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
-           AND created_at < NOW() - ($3 * INTERVAL '1 day')
-         GROUP BY error_class ORDER BY 2 DESC",
-    )
-    .bind(tenant)
-    .bind(days)
-    .bind(offset)
-    .fetch_all(&state.db)
-    .await)?;
-    let errors_by_class: serde_json::Map<String, Value> = by_class
-        .into_iter()
-        .map(|(class, count)| (class, json!(count)))
-        .collect();
-    // Unit economics computed server-side so no float ever touches a cost.
-    let avg_cost = if requests > 0 {
-        (total_cost / Decimal::from(requests)).round_dp(8)
-    } else {
-        Decimal::ZERO
-    };
-    let cache_hit_rate = if prompt_tokens > 0 {
-        Some(cached_tokens as f64 / prompt_tokens as f64)
-    } else {
-        None
-    };
+    ) = summary_latency(state, tenant, days, offset).await?;
+    let errors_by_class = error_classes(state, tenant, days, offset).await?;
+    let avg_cost = average_cost(total_cost, requests);
+    let cache_hit_rate = cache_hit_rate(cached_tokens, prompt_tokens);
     Ok(json_ok(json!({
         "scope": scope_label,
         "tenant_id": tenant.map(|t| t.to_string()),
@@ -615,15 +651,14 @@ pub(crate) fn rate(part: i64, total: i64) -> Option<f64> {
     (total > 0).then(|| part as f64 / total as f64)
 }
 
-async fn query_quality(
+async fn quality_totals(
     state: &Arc<AppState>,
     tenant: Option<uuid::Uuid>,
-    window: &Window,
-) -> Result<Response, Response> {
-    let days = window.days();
-    // Overall totals: derived outcomes + guard fallbacks + unclassified history.
-    let totals: Option<QualityTotalsRow> = stored(sqlx::query_as(
-        "SELECT COUNT(*),
+    days: i64,
+) -> Result<QualityTotalsRow, Response> {
+    let totals: Option<QualityTotalsRow> = stored(
+        sqlx::query_as(
+            "SELECT COUNT(*),
                 COUNT(*) FILTER (WHERE outcome = 'ok'),
                 COUNT(*) FILTER (WHERE outcome = 'empty'),
                 COUNT(*) FILTER (WHERE outcome = 'refused'),
@@ -631,109 +666,128 @@ async fn query_quality(
                 COUNT(*) FILTER (WHERE outcome = 'truncated'),
                 COUNT(*) FILTER (WHERE guard_event->>'outcome' = 'fallback'),
                 COUNT(*) FILTER (WHERE outcome IS NULL)
-         FROM traces
-         WHERE ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
-    )
-    .bind(tenant)
-    .bind(days)
-    .fetch_optional(&state.db)
-    .await)?;
-    let (requests, ok, empty, refused, errors, truncated, guard_fallback, unclassified) =
-        totals.unwrap_or((0, 0, 0, 0, 0, 0, 0, 0));
+             FROM traces
+             WHERE ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+        )
+        .bind(tenant)
+        .bind(days)
+        .fetch_optional(&state.db)
+        .await,
+    )?;
+    Ok(totals.unwrap_or_default())
+}
 
-    let thumbs: (i64, i64) = stored(sqlx::query_as(
-        "SELECT COUNT(*) FILTER (WHERE signal = 'up'),
+async fn quality_thumbs(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+) -> Result<(i64, i64), Response> {
+    stored(
+        sqlx::query_as(
+            "SELECT COUNT(*) FILTER (WHERE signal = 'up'),
                 COUNT(*) FILTER (WHERE signal = 'down')
-         FROM trace_quality
-         WHERE ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+             FROM trace_quality
+             WHERE ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - ($2 * INTERVAL '1 day')",
+        )
+        .bind(tenant)
+        .bind(days)
+        .fetch_one(&state.db)
+        .await,
     )
-    .bind(tenant)
-    .bind(days)
-    .fetch_one(&state.db)
-    .await)?;
+}
 
-    let models: Vec<(String, i64, i64, i64, i64, i64, i64)> = stored(sqlx::query_as(
-        "SELECT t.request_model, COUNT(*),
+async fn quality_models(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+) -> Result<Vec<Value>, Response> {
+    let rows: Vec<(String, i64, i64, i64, i64, i64, i64)> = stored(
+        sqlx::query_as(
+            "SELECT t.request_model, COUNT(*),
                 COUNT(*) FILTER (WHERE t.outcome = 'ok'),
                 COUNT(*) FILTER (WHERE t.outcome = 'empty'),
                 COUNT(*) FILTER (WHERE t.outcome = 'error'),
                 COUNT(*) FILTER (WHERE q.signal = 'up'),
                 COUNT(*) FILTER (WHERE q.signal = 'down')
-         FROM traces t
-         LEFT JOIN trace_quality q ON q.trace_id = t.id
-         WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
-           AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
-         GROUP BY t.request_model ORDER BY 2 DESC",
-    )
-    .bind(tenant)
-    .bind(days)
-    .fetch_all(&state.db)
-    .await)?;
+             FROM traces t
+             LEFT JOIN trace_quality q ON q.trace_id = t.id
+             WHERE ($1::uuid IS NULL OR t.tenant_id = $1)
+               AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
+             GROUP BY t.request_model ORDER BY 2 DESC",
+        )
+        .bind(tenant)
+        .bind(days)
+        .fetch_all(&state.db)
+        .await,
+    )?;
+    Ok(rows
+        .into_iter()
+        .map(|(model, requests, ok, empty, errors, up, down)| {
+            json!({
+                "model": model,
+                "requests": requests,
+                "ok": ok,
+                "empty": empty,
+                "errors": errors,
+                "thumbs_up": up,
+                "thumbs_down": down,
+                "success_rate": rate(ok, requests),
+            })
+        })
+        .collect())
+}
 
-    let prompts: Vec<(String, i64, i64, i64, i64)> = stored(sqlx::query_as(
-        "SELECT system_prompt_hash, COUNT(*),
+async fn quality_prompts(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+) -> Result<Vec<Value>, Response> {
+    let rows: Vec<(String, i64, i64, i64, i64)> = stored(
+        sqlx::query_as(
+            "SELECT system_prompt_hash, COUNT(*),
                 COUNT(*) FILTER (WHERE outcome = 'ok'),
                 COUNT(*) FILTER (WHERE outcome = 'empty'),
                 COUNT(*) FILTER (WHERE outcome = 'error')
-         FROM traces
-         WHERE system_prompt_hash IS NOT NULL
-           AND ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
-         GROUP BY system_prompt_hash ORDER BY 2 DESC LIMIT 20",
-    )
-    .bind(tenant)
-    .bind(days)
-    .fetch_all(&state.db)
-    .await)?;
-
-    // ITEM-057: the failure taxonomy, grouped by class.
-    let by_class: Vec<(String, i64)> = stored(sqlx::query_as(
-        "SELECT error_class, COUNT(*)
-         FROM traces
-         WHERE error_class IS NOT NULL
-           AND ($1::uuid IS NULL OR tenant_id = $1)
-           AND created_at >= NOW() - ($2 * INTERVAL '1 day')
-         GROUP BY error_class ORDER BY 2 DESC",
-    )
-    .bind(tenant)
-    .bind(days)
-    .fetch_all(&state.db)
-    .await)?;
-    let errors_by_class: serde_json::Map<String, Value> = by_class
+             FROM traces
+             WHERE system_prompt_hash IS NOT NULL
+               AND ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - ($2 * INTERVAL '1 day')
+             GROUP BY system_prompt_hash ORDER BY 2 DESC LIMIT 20",
+        )
+        .bind(tenant)
+        .bind(days)
+        .fetch_all(&state.db)
+        .await,
+    )?;
+    Ok(rows
         .into_iter()
-        .map(|(class, count)| (class, json!(count)))
-        .collect();
-
-    let model_rows: Vec<Value> = models
-        .into_iter()
-        .map(|(model, reqs, model_ok, model_empty, model_errors, up, down)| {
-            json!({
-                "model": model,
-                "requests": reqs,
-                "ok": model_ok,
-                "empty": model_empty,
-                "errors": model_errors,
-                "thumbs_up": up,
-                "thumbs_down": down,
-                "success_rate": rate(model_ok, reqs),
-            })
-        })
-        .collect();
-    let prompt_rows: Vec<Value> = prompts
-        .into_iter()
-        .map(|(hash, reqs, prompt_ok, prompt_empty, prompt_errors)| {
+        .map(|(hash, requests, ok, empty, errors)| {
             json!({
                 "system_prompt_hash": hash,
-                "requests": reqs,
-                "ok": prompt_ok,
-                "empty": prompt_empty,
-                "errors": prompt_errors,
-                "success_rate": rate(prompt_ok, reqs),
+                "requests": requests,
+                "ok": ok,
+                "empty": empty,
+                "errors": errors,
+                "success_rate": rate(ok, requests),
             })
         })
-        .collect();
+        .collect())
+}
+
+async fn query_quality(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    window: &Window,
+) -> Result<Response, Response> {
+    let days = window.days();
+    let (requests, ok, empty, refused, errors, truncated, guard_fallback, unclassified) =
+        quality_totals(state, tenant, days).await?;
+    let thumbs = quality_thumbs(state, tenant, days).await?;
+    let model_rows = quality_models(state, tenant, days).await?;
+    let prompt_rows = quality_prompts(state, tenant, days).await?;
+    let errors_by_class = error_classes(state, tenant, days, 0).await?;
 
     Ok(json_ok(json!({
         "window_days": days,
@@ -945,4 +999,32 @@ pub(crate) async fn query_guard(
         "by_reason": reasons,
         "negative_samples": negative_samples,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn average_cost_is_zero_without_requests() {
+        assert_eq!(average_cost(Decimal::from(5), 0), Decimal::ZERO);
+    }
+
+    #[test]
+    fn average_cost_divides_and_rounds_to_eight_places() {
+        assert_eq!(
+            average_cost(Decimal::from(1), 3),
+            Decimal::from_str_exact("0.33333333").unwrap()
+        );
+    }
+
+    #[test]
+    fn cache_hit_rate_is_none_without_prompt_tokens() {
+        assert_eq!(cache_hit_rate(0, 0), None);
+    }
+
+    #[test]
+    fn cache_hit_rate_is_the_cached_share() {
+        assert_eq!(cache_hit_rate(250, 1_000), Some(0.25));
+    }
 }

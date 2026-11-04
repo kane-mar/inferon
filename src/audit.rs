@@ -206,34 +206,43 @@ impl AuditShareStore for InMemoryAuditShareStore {
     }
 }
 
-/// The six-finding read model behind a shared link. Aggregates only: no prompt,
-/// key or completion ever leaves this function.
-pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, String> {
-    let window = "created_at >= NOW() - ($2 * INTERVAL '1 day')";
+/// `(requests, errors, cost, savings, router, fallback, cache, truncated,
+/// affinity)` — the report's headline aggregate.
+type AuditSummary = (i64, i64, Decimal, Decimal, Decimal, Decimal, Decimal, i64, i64);
 
-    let summary: (i64, i64, Decimal, Decimal, Decimal, Decimal, Decimal, i64, i64) = sqlx::query_as(
-        &format!(
-            "SELECT count(*)::bigint,
-                    count(*) FILTER (WHERE status_code >= 400)::bigint,
-                    COALESCE(SUM(upstream_cost_usd), 0),
-                    COALESCE(SUM(savings_usd), 0),
-                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'router'), 0),
-                    COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'fallback'), 0),
-                    COALESCE(SUM(cache_savings_usd), 0),
-                    count(*) FILTER (WHERE truncated)::bigint,
-                    count(*) FILTER (WHERE cache_affinity IS NOT NULL)::bigint
-               FROM traces
-              WHERE tenant_id = $1 AND {window}"
-        ),
-    )
+/// `(flag, model, suggested, requests, prompt, completion, spend)` from the
+/// batch linter, grouped so each row's own suggestion prices the saving.
+type WasteRow = (String, String, String, i64, i64, i64, Decimal);
+
+const WINDOW_FILTER: &str = "created_at >= NOW() - ($2 * INTERVAL '1 day')";
+
+async fn summary(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<AuditSummary, String> {
+    sqlx::query_as(&format!(
+        "SELECT count(*)::bigint,
+                count(*) FILTER (WHERE status_code >= 400)::bigint,
+                COALESCE(SUM(upstream_cost_usd), 0),
+                COALESCE(SUM(savings_usd), 0),
+                COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'router'), 0),
+                COALESCE(SUM(savings_usd) FILTER (WHERE savings_kind = 'fallback'), 0),
+                COALESCE(SUM(cache_savings_usd), 0),
+                count(*) FILTER (WHERE truncated)::bigint,
+                count(*) FILTER (WHERE cache_affinity IS NOT NULL)::bigint
+           FROM traces
+          WHERE tenant_id = $1 AND {WINDOW_FILTER}"
+    ))
     .bind(tenant_id)
     .bind(days)
     .fetch_one(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    // Grouped by the model pair so the estimate uses each row's own suggestion.
-    let waste: Vec<(String, String, String, i64, i64, i64, Decimal)> = sqlx::query_as(&format!(
+async fn waste_rows(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<Vec<WasteRow>, String> {
+    sqlx::query_as(&format!(
         "SELECT flag, request_model,
                 COALESCE(waste_detected->>'suggested_model', '') AS suggested,
                 count(*)::bigint, COALESCE(SUM(prompt_tokens), 0)::bigint,
@@ -244,17 +253,21 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
               ('over_provisioned', waste_detected->>'over_provisioned'),
               ('model_misuse', waste_detected->>'model_misuse'),
               ('cache_miss', waste_detected->>'cache_miss_system_prompt')) AS f(flag, fired)
-          WHERE tenant_id = $1 AND {window} AND f.fired = 'true'
+          WHERE tenant_id = $1 AND {WINDOW_FILTER} AND f.fired = 'true'
           GROUP BY flag, request_model, suggested"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let mut waste_out = serde_json::Map::new();
-    for (flag, model, suggested, requests, prompt, completion, spend) in waste {
+/// Aggregate the grouped waste rows into the six-finding shape. A cache miss
+/// and an empty suggestion are spend-only: there is no cheaper model to price.
+fn waste_json(rows: Vec<WasteRow>) -> Value {
+    let mut waste = serde_json::Map::new();
+    for (flag, model, suggested, requests, prompt, completion, spend) in rows {
         let savings = if flag == "cache_miss" || suggested.is_empty() {
             Decimal::ZERO
         } else {
@@ -266,9 +279,9 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
                 0,
             )
         };
-        let entry = waste_out.entry(flag).or_insert_with(|| {
-            json!({"requests": 0, "spend_usd": "0", "savings_est_usd": "0"})
-        });
+        let entry = waste
+            .entry(flag)
+            .or_insert_with(|| json!({"requests": 0, "spend_usd": "0", "savings_est_usd": "0"}));
         let prior_requests = entry["requests"].as_i64().unwrap_or(0);
         let prior_spend = decimal_from(entry["spend_usd"].as_str());
         let prior_savings = decimal_from(entry["savings_est_usd"].as_str());
@@ -276,44 +289,69 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
         entry["spend_usd"] = json!((prior_spend + spend).to_string());
         entry["savings_est_usd"] = json!((prior_savings + savings).to_string());
     }
+    Value::Object(waste)
+}
 
-    let top_model: Option<(String, Decimal)> = sqlx::query_as(&format!(
+async fn top_model(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<Option<(String, Decimal)>, String> {
+    sqlx::query_as(&format!(
         "SELECT request_model, COALESCE(SUM(upstream_cost_usd), 0)
            FROM traces
-          WHERE tenant_id = $1 AND {window}
+          WHERE tenant_id = $1 AND {WINDOW_FILTER}
           GROUP BY 1 ORDER BY 2 DESC LIMIT 1"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_optional(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let top_provider: Option<(String, Decimal)> = sqlx::query_as(&format!(
+async fn top_provider(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<Option<(String, Decimal)>, String> {
+    sqlx::query_as(&format!(
         "SELECT COALESCE(p.name, 'Shared platform key'), COALESCE(SUM(t.upstream_cost_usd), 0)
            FROM traces t LEFT JOIN providers p ON p.id = t.provider_id
-          WHERE t.tenant_id = $1 AND t.{window}
+          WHERE t.tenant_id = $1 AND t.{WINDOW_FILTER}
           GROUP BY 1 ORDER BY 2 DESC LIMIT 1"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_optional(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let top_key: Option<(String, Decimal)> = sqlx::query_as(&format!(
+async fn top_key(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<Option<(String, Decimal)>, String> {
+    sqlx::query_as(&format!(
         "SELECT COALESCE(k.label, 'Unknown key'), COALESCE(SUM(t.upstream_cost_usd), 0)
            FROM traces t LEFT JOIN api_keys k ON k.id = t.api_key_id
-          WHERE t.tenant_id = $1 AND t.{window}
+          WHERE t.tenant_id = $1 AND t.{WINDOW_FILTER}
           GROUP BY 1 ORDER BY 2 DESC LIMIT 1"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_optional(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let quality: (i64, i64, i64, i64) = sqlx::query_as(&format!(
+async fn quality(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<(i64, i64, i64, i64), String> {
+    sqlx::query_as(&format!(
         "SELECT count(*)::bigint,
                 count(*) FILTER (WHERE status_code >= 400)::bigint,
                 count(*) FILTER (WHERE truncated)::bigint,
@@ -321,26 +359,45 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
                     WHERE guard_event->>'outcome' IN ('fallback', 'fallback_failed')
                 )::bigint
            FROM traces
-          WHERE tenant_id = $1 AND {window}"
+          WHERE tenant_id = $1 AND {WINDOW_FILTER}"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_one(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
-    let errors: Vec<(String, i64)> = sqlx::query_as(&format!(
+async fn errors(
+    pool: &PgPool,
+    tenant_id: Uuid,
+    days: i64,
+) -> Result<Vec<(String, i64)>, String> {
+    sqlx::query_as(&format!(
         "SELECT error_class, count(*)::bigint
            FROM traces
-          WHERE tenant_id = $1 AND {window} AND error_class IS NOT NULL
+          WHERE tenant_id = $1 AND {WINDOW_FILTER} AND error_class IS NOT NULL
           GROUP BY 1 ORDER BY 2 DESC"
     ))
     .bind(tenant_id)
     .bind(days)
     .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
 
+/// The six-finding read model behind a shared link. Aggregates only: no prompt,
+/// key or completion ever leaves this function.
+pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, String> {
+    let summary = summary(pool, tenant_id, days).await?;
+    let waste = waste_json(waste_rows(pool, tenant_id, days).await?);
+    let top = json!({
+        "model": top_model(pool, tenant_id, days).await?.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
+        "provider": top_provider(pool, tenant_id, days).await?.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
+        "key": top_key(pool, tenant_id, days).await?.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
+    });
+    let quality = quality(pool, tenant_id, days).await?;
+    let errors = errors(pool, tenant_id, days).await?;
     let rate = |part: i64, total: i64| -> Option<f64> {
         (total > 0).then(|| part as f64 / total as f64)
     };
@@ -358,12 +415,8 @@ pub async fn report(pool: &PgPool, tenant_id: Uuid, days: i64) -> Result<Value, 
             "truncated": summary.7,
             "cache_affinity_requests": summary.8,
         },
-        "waste": Value::Object(waste_out),
-        "top": {
-            "model": top_model.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
-            "provider": top_provider.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
-            "key": top_key.map(|(name, cost)| json!({"name": name, "cost_usd": cost.to_string()})),
-        },
+        "waste": waste,
+        "top": top,
         "quality": {
             "error_rate": rate(quality.1, quality.0),
             "truncated_rate": rate(quality.2, quality.0),

@@ -35,3 +35,86 @@
         assert!(!store.revoke(Uuid::new_v4(), id).await.unwrap());
         assert!(store.resolve(&hash).await.unwrap().is_some());
     }
+
+    fn dec(value: &str) -> Decimal {
+        Decimal::from_str_exact(value).unwrap()
+    }
+
+    #[test]
+    fn cache_miss_waste_is_spend_only() {
+        let waste = waste_json(vec![(
+            "cache_miss".to_string(),
+            "deepseek-chat".to_string(),
+            String::new(),
+            2,
+            100,
+            0,
+            dec("0.01"),
+        )]);
+
+        assert_eq!(waste["cache_miss"]["requests"], 2);
+        assert_eq!(waste["cache_miss"]["spend_usd"], "0.01");
+        assert_eq!(waste["cache_miss"]["savings_est_usd"], "0");
+    }
+
+    #[test]
+    fn waste_rows_for_the_same_flag_are_summed() {
+        let waste = waste_json(vec![
+            (
+                "cache_miss".to_string(),
+                "deepseek-chat".to_string(),
+                String::new(),
+                2,
+                100,
+                0,
+                dec("0.01"),
+            ),
+            (
+                "cache_miss".to_string(),
+                "deepseek-chat".to_string(),
+                String::new(),
+                1,
+                50,
+                0,
+                dec("0.02"),
+            ),
+        ]);
+
+        assert_eq!(waste["cache_miss"]["requests"], 3);
+        assert_eq!(waste["cache_miss"]["spend_usd"], "0.03");
+    }
+
+    #[test]
+    fn a_row_without_a_suggested_model_has_no_savings() {
+        let waste = waste_json(vec![(
+            "over_provisioned".to_string(),
+            "gpt-4o".to_string(),
+            String::new(),
+            1,
+            1_000,
+            0,
+            dec("0.01"),
+        )]);
+
+        assert_eq!(waste["over_provisioned"]["savings_est_usd"], "0");
+    }
+
+    #[test]
+    fn a_priced_substitution_has_savings() {
+        let waste = waste_json(vec![(
+            "over_provisioned".to_string(),
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            1,
+            1_000_000,
+            0,
+            dec("5"),
+        )]);
+
+        let savings = waste["over_provisioned"]["savings_est_usd"]
+            .as_str()
+            .expect("a decimal string")
+            .parse::<f64>()
+            .unwrap();
+        assert!(savings > 0.0, "a cheaper suggested model saves money");
+    }

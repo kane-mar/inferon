@@ -182,11 +182,7 @@ pub(crate) async fn proxy_chat_completions(
     // ITEM-092: named stage timing, logged at debug level — a regression says
     // which stage, not just "the proxy got slower".
     stages.mark("auth");
-    let session_id = crate::session::parse_id(
-        req.headers()
-            .get(crate::session::SESSION_ID_HEADER)
-            .and_then(|value| value.to_str().ok()),
-    );
+    let session_id = session_id(&req);
 
     let (_, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
@@ -194,32 +190,8 @@ pub(crate) async fn proxy_chat_completions(
     };
     stages.mark("body");
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
-    // The router/budget override is decided per request in `plan_models` below,
-    // against the tenant's config (ITEM-045/046).
-    let mut meta = RequestMeta {
-        id: Uuid::new_v4(),
-        model: payload["model"].as_str().unwrap_or("unknown").to_string(),
-        system_prompt_hash: system_prompt_hash(&payload),
-        raw_prompt: payload,
-        routing_event: None,
-        router_event: None,
-        cache_affinity: None,
-        policy_version: None,
-        proxy_ms: None,
-        proxy_us: None,
-        wire_format: None,
-        provider_id: None,
-        api_key_id: tenant.api_key_id,
-        is_local: false,
-        capture_payloads: true,
-        session_id,
-        lint: None,
-        prune_event: None,
-        pii: PiiPlan::default(),
-        provider_selection: None,
-        translate_to: None,
-        rate_limit: None,
-    };
+    let prompt_hash = system_prompt_hash(&payload);
+    let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     meta.pii = state.hotpath.pii_plan(&state, tenant_id).await;
@@ -240,7 +212,7 @@ pub(crate) async fn proxy_chat_completions(
     let ModelPlan {
         route,
         primary,
-        chain: allowed,
+        chain,
         prune,
     } = match plan_models(&state, &tenant, &mut meta, started, &mut stages).await {
         Ok(plan) => plan,
@@ -254,7 +226,6 @@ pub(crate) async fn proxy_chat_completions(
     // actually sent. A deterministic share is held out to measure the effect.
     redact_wire(&mut meta, tenant_id);
 
-    let mut routing_event: Option<Value> = None;
     // ITEM-066: the proxy's own pre-upstream time, recorded before the first
     // dispatch (a subset of the trace's total duration).
     stages.mark("prune");
@@ -265,32 +236,76 @@ pub(crate) async fn proxy_chat_completions(
         pre_dispatch_us = meta.proxy_us.unwrap_or_default(),
         "hot-path stages"
     );
-    let mut upstream: Option<reqwest::Response> = None;
-    // ITEM-109: a step declares which failures may send the request to it, so a
-    // 429 can skip a 5xx-only step instead of ending the chain.
-    let triggers: Vec<&[routing::FallbackTrigger]> = allowed
+
+    let dispatch = match dispatch_chain(
+        &state,
+        tenant_id,
+        started,
+        meta,
+        &route,
+        &chain,
+        &primary,
+    )
+    .await
+    {
+        Ok(dispatch) => dispatch,
+        Err(resp) => return resp,
+    };
+    finish_openai_response(&state, tenant_id, started, is_stream, dispatch).await
+}
+
+fn session_id(req: &Request) -> Option<String> {
+    crate::session::parse_id(
+        req.headers()
+            .get(crate::session::SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )
+}
+
+/// The served attempt and everything the response path still needs.
+struct Dispatch<'a> {
+    meta: RequestMeta,
+    upstream: reqwest::Response,
+    served: usize,
+    route: &'a Route,
+    chain: &'a [ChainStep],
+}
+
+/// Try each chain step in order. A retryable failure advances to the next step
+/// that handles its class (ITEM-109); a transport failure with no such step is
+/// a clean 502. Returns the served attempt and the routing event, if any.
+async fn dispatch_chain<'a>(
+    state: &Arc<AppState>,
+    tenant_id: Uuid,
+    started: Instant,
+    mut meta: RequestMeta,
+    route: &'a Route,
+    chain: &'a [ChainStep],
+    primary: &str,
+) -> Result<Dispatch<'a>, Response> {
+    let triggers: Vec<&[routing::FallbackTrigger]> = chain
         .iter()
         .map(|step| step.triggers.as_slice())
         .collect();
+    let mut routing_event: Option<Value> = None;
     let mut index = 0;
-    while index < allowed.len() {
-        let step = &allowed[index];
+    loop {
+        let step = &chain[index];
         let model = step.model.clone();
-        let attempt_route = &step.route;
         // ITEM-067: the target's wire-format capability is per attempt, so a
         // fallback to a provider that honours json_schema keeps the contract.
         let downgrade_schema = guard::request_schema(&meta.raw_prompt).is_some()
-            && !providers::supports_json_schema(&attempt_route.kind, &model);
-        let body = match wire_body(&meta.raw_prompt, attempt_route, &model, downgrade_schema) {
+            && !providers::supports_json_schema(&step.route.kind, &model);
+        let body = match wire_body(&meta.raw_prompt, &step.route, &model, downgrade_schema) {
             Ok(bytes) => bytes,
-            Err(resp) => return resp,
+            Err(resp) => return Err(resp),
         };
         meta.wire_format = downgrade_schema.then_some("json_object");
         // ITEM-100: count the dispatch, not the whole stream; the gauge is what
         // the operator sees while the provider is working.
         let attempt = {
             let _in_flight = crate::metrics::provider_started(meta.provider_id);
-            provider_request(&state.http_client, attempt_route)
+            provider_request(&state.http_client, &step.route)
                 .body(body)
                 .send()
                 .await
@@ -304,11 +319,17 @@ pub(crate) async fn proxy_chat_completions(
                 });
                 let Some(next_index) = next else {
                     meta.model = model;
-                    meta.translate_to = attempt_route.translate;
-                    upstream = Some(response);
-                    break;
+                    meta.translate_to = step.route.translate;
+                    meta.routing_event = routing_event;
+                    return Ok(Dispatch {
+                        meta,
+                        upstream: response,
+                        served: index,
+                        route,
+                        chain,
+                    });
                 };
-                let next_model = allowed[next_index].model.clone();
+                let next_model = chain[next_index].model.clone();
                 tracing::warn!(
                     "routing fallback: {model} -> {next_model} (HTTP {}, step {next_index})",
                     status.as_u16()
@@ -324,25 +345,28 @@ pub(crate) async fn proxy_chat_completions(
                 index = next_index;
             }
             Err(e) => {
-                let next =
-                    routing::next_handling(&triggers, index, routing::FallbackTrigger::Transport);
+                let next = routing::next_handling(
+                    &triggers,
+                    index,
+                    routing::FallbackTrigger::Transport,
+                );
                 let Some(next_index) = next else {
                     tracing::error!("upstream request failed: {e}");
                     trace_error(
-                        &state,
+                        state,
                         &meta,
                         tenant_id,
                         started,
                         502,
                         ErrorClass::from_transport(&e),
                     );
-                    return json_error(
+                    return Err(json_error(
                         StatusCode::BAD_GATEWAY,
                         "upstream_error",
                         "upstream request failed",
-                    );
+                    ));
                 };
-                let next_model = allowed[next_index].model.clone();
+                let next_model = chain[next_index].model.clone();
                 tracing::warn!(
                     "routing fallback (transport): {model} -> {next_model} (step {next_index})"
                 );
@@ -356,15 +380,30 @@ pub(crate) async fn proxy_chat_completions(
             }
         }
     }
-    meta.routing_event = routing_event;
-    let upstream = upstream.expect("the chain always has at least one model");
-    let served_index = index;
+}
 
+/// Forward the served attempt: an upstream error unchanged, a guarded stream
+/// through the schema check, any other stream zero-copy, or a buffered JSON
+/// response. Exactly one trace is emitted on every path.
+async fn finish_openai_response(
+    state: &Arc<AppState>,
+    tenant_id: Uuid,
+    started: Instant,
+    is_stream: bool,
+    dispatch: Dispatch<'_>,
+) -> Response {
+    let Dispatch {
+        meta,
+        upstream,
+        served,
+        route,
+        chain,
+    } = dispatch;
     let status = upstream.status();
     if !status.is_success() {
         // Forward the upstream error as-is (keep its content-type); still trace.
         return forward_buffered(
-            &state,
+            state,
             &meta,
             tenant_id,
             started,
@@ -381,18 +420,18 @@ pub(crate) async fn proxy_chat_completions(
         // ITEM-027 AC1: the guard is ON by default; a tenant opts out via
         // tenant_configurations.guard_enabled (fail-open on read errors).
         let guarded = guard::is_guarded_request(&meta.raw_prompt, &meta.model)
-            && state.hotpath.guard_enabled(&state, tenant_id).await;
+            && state.hotpath.guard_enabled(state, tenant_id).await;
         if guarded {
             guarded_stream_response(
-                &state,
+                state,
                 meta,
                 tenant_id,
                 started,
                 upstream,
                 GuardContext {
-                    route: &route,
-                    chain: &allowed,
-                    served: served_index,
+                    route,
+                    chain,
+                    served,
                 },
                 state.telemetry_tx.clone(),
             )
@@ -411,7 +450,7 @@ pub(crate) async fn proxy_chat_completions(
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));
         forward_buffered(
-            &state,
+            state,
             &meta,
             tenant_id,
             started,
@@ -453,71 +492,23 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         }
     };
     let tenant_id = tenant.id;
-    let session_id = crate::session::parse_id(
-        req.headers()
-            .get(crate::session::SESSION_ID_HEADER)
-            .and_then(|value| value.to_str().ok()),
-    );
-
+    let session_id = session_id(&req);
     let (body_bytes, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
         Err(resp) => return resp,
     };
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
-    let mut meta = RequestMeta {
-        id: Uuid::new_v4(),
-        model: payload["model"].as_str().unwrap_or("unknown").to_string(),
-        system_prompt_hash: system_prompt_hash_anthropic(&payload),
-        raw_prompt: payload,
-        routing_event: None,
-        router_event: None,
-        cache_affinity: None,
-        policy_version: None,
-        proxy_ms: None,
-        proxy_us: None,
-        wire_format: None,
-        provider_id: None,
-        api_key_id: tenant.api_key_id,
-        is_local: false,
-        capture_payloads: true,
-        session_id,
-        lint: None,
-        prune_event: None,
-        pii: PiiPlan::default(),
-        provider_selection: None,
-        translate_to: None,
-        rate_limit: None,
-    };
-    meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
-    meta.pii = state.hotpath.pii_plan(&state, tenant_id).await;
-    preflight(&state, tenant_id, &mut meta).await;
-    let policy = state.hotpath.policy(&state, tenant_id).await;
-    meta.policy_version = policy.as_ref().map(|policy| policy.version);
-    prune_payload(
-        &mut meta,
-        policy.as_ref().and_then(|policy| policy.prune.as_ref()),
-        &tenant_id.to_string(),
-    );
-    redact_wire(&mut meta, tenant_id);
-    let decision = match state
-        .hotpath
-        .route(&state, &tenant, &meta.model, Surface::Anthropic, None)
-        .await
-    {
-        Ok(decision) => decision,
+    let prompt_hash = system_prompt_hash_anthropic(&payload);
+    let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
+
+    let (route, disabled) = match prepare_anthropic(&state, &tenant, &mut meta).await {
+        Ok(prepared) => prepared,
         Err(resp) => return resp,
     };
-    let route = decision.route;
-    meta.provider_id = route.provider_id;
-    meta.is_local = route.is_local;
-    meta.provider_selection = route.selection;
-    crate::metrics::request_routed(route.provider_id);
     let started = Instant::now();
-
-    if let Err(resp) = ensure_model_enabled(&state, &meta, tenant_id, started, decision.disabled) {
+    if let Err(resp) = ensure_model_enabled(&state, &meta, tenant_id, started, disabled) {
         return resp;
     }
-
     // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
     // and bypassed here; only the hard monthly cap still applies.
     if let Err(resp) = budget::check_cap(&state, tenant_id).await {
@@ -531,7 +522,6 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         );
         return resp;
     }
-
     // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
     meta.proxy_us = Some(request_started.elapsed().as_micros() as i64);
@@ -576,11 +566,54 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
             );
         }
     };
+    finish_anthropic_response(&state, meta, tenant_id, started, upstream, is_stream).await
+}
 
+/// The Anthropic-prepared request: consent, pre-flight, policy, route. The
+/// router/guard are OpenAI-shaped and deliberately not applied here.
+async fn prepare_anthropic(
+    state: &Arc<AppState>,
+    tenant: &Tenant,
+    meta: &mut RequestMeta,
+) -> Result<(Route, bool), Response> {
+    let tenant_id = tenant.id;
+    meta.capture_payloads = state.hotpath.capture_enabled(state, tenant_id).await;
+    meta.pii = state.hotpath.pii_plan(state, tenant_id).await;
+    preflight(state, tenant_id, meta).await;
+    let policy = state.hotpath.policy(state, tenant_id).await;
+    meta.policy_version = policy.as_ref().map(|policy| policy.version);
+    prune_payload(
+        meta,
+        policy.as_ref().and_then(|policy| policy.prune.as_ref()),
+        &tenant_id.to_string(),
+    );
+    redact_wire(meta, tenant_id);
+    let decision = state
+        .hotpath
+        .route(state, tenant, &meta.model, Surface::Anthropic, None)
+        .await?;
+    let route = decision.route;
+    meta.provider_id = route.provider_id;
+    meta.is_local = route.is_local;
+    meta.provider_selection = route.selection;
+    crate::metrics::request_routed(route.provider_id);
+    Ok((route, decision.disabled))
+}
+
+/// Forward an Anthropic response: upstream errors unchanged, streams zero-copy,
+/// JSON buffered. Exactly one trace is emitted on every path.
+async fn finish_anthropic_response(
+    state: &Arc<AppState>,
+    meta: RequestMeta,
+    tenant_id: Uuid,
+    started: Instant,
+    upstream: reqwest::Response,
+    is_stream: bool,
+) -> Response {
     let status = upstream.status();
     if !status.is_success() {
         return forward_buffered(
-            &state,
+            state,
             &meta,
             tenant_id,
             started,
@@ -603,7 +636,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));
         forward_buffered(
-            &state,
+            state,
             &meta,
             tenant_id,
             started,

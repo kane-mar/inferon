@@ -45,6 +45,42 @@ pub(super) struct RequestMeta {
     pub(super) provider_selection: Option<&'static str>,
 }
 
+impl RequestMeta {
+    /// The request-derived fields every trace shares. `system_prompt_hash` is
+    /// passed in because the two ingress surfaces hash different things.
+    pub(super) fn new(
+        payload: Value,
+        tenant: &crate::Tenant,
+        session_id: Option<String>,
+        system_prompt_hash: Option<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            model: payload["model"].as_str().unwrap_or("unknown").to_string(),
+            system_prompt_hash,
+            raw_prompt: payload,
+            routing_event: None,
+            router_event: None,
+            cache_affinity: None,
+            policy_version: None,
+            proxy_ms: None,
+            proxy_us: None,
+            wire_format: None,
+            provider_id: None,
+            api_key_id: tenant.api_key_id,
+            is_local: false,
+            capture_payloads: true,
+            session_id,
+            lint: None,
+            prune_event: None,
+            translate_to: None,
+            rate_limit: None,
+            pii: PiiPlan::default(),
+            provider_selection: None,
+        }
+    }
+}
+
 /// ITEM-096: what the trace path should do with this payload.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PiiPlan {

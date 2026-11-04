@@ -106,6 +106,210 @@
         }
     }
 
+    /// Status-only failures, before any payload-specific behaviour.
+    fn mock_error_response(model: &str) -> Option<axum::response::Response> {
+        let response = match model {
+            "fail" => axum::response::Response::builder()
+                .status(500)
+                .body(Body::from("boom"))
+                .unwrap(),
+            "rate" => axum::response::Response::builder()
+                .status(429)
+                .body(Body::from("rate limited"))
+                .unwrap(),
+            "nousage" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(SSE_BODY_NO_USAGE))
+                .unwrap(),
+            _ => return None,
+        };
+        Some(response)
+    }
+
+    /// The schema-guard branches: cheap-tier lies, their frontier replays, and
+    /// the guard-marked chain steps the tests drive.
+    fn mock_guard_response(model: &str, payload: &Value) -> Option<axum::response::Response> {
+        let marker = payload["messages"][0]["content"].as_str();
+        let response = match (model, marker) {
+            // Cheap lie: frames arrive but [DONE] never does — the guard
+            // discards the buffer and falls back. "boom" is the replay-failure
+            // marker (ITEM-025 AC4).
+            ("gpt-4o-mini", Some("truncated" | "boom")) => {
+                axum::response::Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(
+                        "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
+                    ))
+                    .unwrap()
+            }
+            // Content that satisfies the request's answer schema — flushed.
+            ("gpt-4o-mini", Some("valid-json")) => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                .unwrap(),
+            // Well-formed JSON that violates the answer schema — discarded.
+            ("gpt-4o-mini", Some("wrong-shape" | "guard-skip")) => {
+                axum::response::Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
+                    .unwrap()
+            }
+            // Instant violation, so the replay starts at once.
+            ("gpt-4o-mini", Some("slow-fallback")) => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
+                .unwrap(),
+            // Slow guarded stream: lets a test abort mid-buffer.
+            ("gpt-4o-mini", Some("guarded-slow")) => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(async_stream::stream! {
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                    ));
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                    ));
+                }))
+                .unwrap(),
+            // The first guard-marked chain step rejects the replay.
+            ("deepseek-chat", Some("guard-skip")) => axum::response::Response::builder()
+                .status(500)
+                .body(Body::from("guard replay rejected"))
+                .unwrap(),
+            // The frontier replay itself answers 5xx — loud and clean.
+            ("deepseek-v4-pro", Some("boom")) => axum::response::Response::builder()
+                .status(500)
+                .body(Body::from("boom"))
+                .unwrap(),
+            // A frontier replay that honours the contract.
+            ("deepseek-v4-pro" | "gpt-4o", Some("wrong-shape" | "truncated" | "guard-skip")) => {
+                axum::response::Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
+                    .unwrap()
+            }
+            // Slow frontier replay: lets a test abort mid-replay.
+            ("deepseek-v4-pro", Some("slow-fallback")) => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(async_stream::stream! {
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                    ));
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                    ));
+                }))
+                .unwrap(),
+            _ => return None,
+        };
+        Some(response)
+    }
+
+    /// The plain-content branches: streams (complete, slow, mid-stream error),
+    /// translator echoes, and the outcome taxonomy fixtures.
+    fn mock_simple_response(model: &str, payload: &Value) -> Option<axum::response::Response> {
+        let response = match model {
+            "slow" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(async_stream::stream! {
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                    ));
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
+                    ));
+                }))
+                .unwrap(),
+            "miderror" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(async_stream::stream! {
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
+                    ));
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    yield Err(std::io::Error::other("mock mid-stream failure"));
+                }))
+                .unwrap(),
+            "stream" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(
+                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n\
+data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n\
+data: [DONE]\n\n",
+                ))
+                .unwrap(),
+            "echo" => axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "id": "echo",
+                        "model": payload["model"],
+                        "choices": [{
+                            "message": {"role": "assistant", "content": payload.to_string()},
+                            "finish_reason": "stop",
+                        }],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            "content" => axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"choices":[{"message":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#,
+                ))
+                .unwrap(),
+            "empty" => axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"choices":[{"message":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
+                ))
+                .unwrap(),
+            "refusal" => axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"choices":[{"message":{"content":""},"finish_reason":"content_filter"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
+                ))
+                .unwrap(),
+            "nodone" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(
+                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
+                ))
+                .unwrap(),
+            _ => return None,
+        };
+        Some(response)
+    }
+
+    /// The generic upstream: a stream when asked for one, else the auth/model
+    /// echo tests use to prove the key swap and the router rewrites.
+    fn mock_default_response(
+        headers: &axum::http::HeaderMap,
+        payload: &Value,
+    ) -> axum::response::Response {
+        if payload["stream"].as_bool().unwrap_or(false) {
+            return axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(SSE_BODY))
+                .unwrap();
+        }
+        let auth = headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        let model = payload["model"].as_str().unwrap_or("");
+        axum::response::Response::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"echoed_auth":"{auth}","model":"{model}","usage":{{"prompt_tokens":5,"completion_tokens":2}}}}"#
+            )))
+            .unwrap()
+    }
+
     async fn mock_upstream() -> String {
         let app = axum::Router::new()
             .route(
@@ -141,275 +345,12 @@
             .route(
                 "/v1/chat/completions",
             axum::routing::post(
-                |headers: axum::http::HeaderMap, payload: axum::Json<serde_json::Value>| async move {
-                    match payload["model"].as_str() {
-                        Some("fail") => axum::response::Response::builder()
-                            .status(500)
-                            .body(Body::from("boom"))
-                            .unwrap(),
-                        Some("rate") => axum::response::Response::builder()
-                            .status(429)
-                            .body(Body::from("rate limited"))
-                            .unwrap(),
-                        Some("nousage") => axum::response::Response::builder()
-                            .header("content-type", "text/event-stream")
-                            .body(Body::from(SSE_BODY_NO_USAGE))
-                            .unwrap(),
-                        Some("slow") => {
-                            // Two SSE frames 300ms apart so a client can abort
-                            // mid-stream while the tap is waiting for frame 2.
-                            let body = async_stream::stream! {
-                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
-                                ));
-                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                                yield Ok(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
-                                ));
-                            };
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(axum::body::Body::from_stream(body))
-                                .unwrap()
-                        }
-                        Some("miderror") => {
-                            // One good frame, then — after headers have surely
-                            // flushed — a mid-stream failure.
-                            let body = async_stream::stream! {
-                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
-                                ));
-                                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                                yield Err(std::io::Error::other("mock mid-stream failure"));
-                            };
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(axum::body::Body::from_stream(body))
-                                .unwrap()
-                        }
-                        Some("gpt-4o-mini") if {
-                            // Cheap lie: frames arrive but [DONE] never does —
-                            // the guard discards the buffer and falls back.
-                            // Markers: "truncated" (container failure) and
-                            // "boom" (fallback-failure test, ITEM-025 AC4).
-                            matches!(
-                                payload["messages"][0]["content"].as_str(),
-                                Some("truncated" | "boom")
-                            )
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(
-                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
-                                ))
-                                .unwrap()
-                        }
-                        Some("gpt-4o-mini") if {
-                            // Content that satisfies the request's answer schema
-                            // (well-formed JSON object) — must be flushed.
-                            payload["messages"][0]["content"].as_str() == Some("valid-json")
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
-                                .unwrap()
-                        }
-                        Some("gpt-4o-mini") if {
-                            // Cheap lie: well-formed JSON that violates the
-                            // answer schema ({"other":1}, missing required
-                            // "answer") — must be discarded, never forwarded.
-                            matches!(
-                                payload["messages"][0]["content"].as_str(),
-                                Some("wrong-shape" | "guard-skip")
-                            )
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
-                                .unwrap()
-                        }
-                        Some("gpt-4o-mini") if {
-                            // Cheap lie for the abort-during-fallback test:
-                            // instant violation, so the replay starts at once.
-                            payload["messages"][0]["content"].as_str() == Some("slow-fallback")
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(delta_only_stream(r#"{"other":1}"#)))
-                                .unwrap()
-                        }
-                        Some("gpt-4o-mini") if {
-                            // Slow guarded stream: first frame, 300ms gap, then
-                            // [DONE] — lets a test abort mid-buffer.
-                            payload["messages"][0]["content"].as_str() == Some("guarded-slow")
-                        } => {
-                            let body = async_stream::stream! {
-                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
-                                ));
-                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                                yield Ok(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
-                                ));
-                            };
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(axum::body::Body::from_stream(body))
-                                .unwrap()
-                        }
-                        Some("deepseek-chat") if {
-                            // The first guard-marked chain step rejects the
-                            // replay, so the guard must try the next one.
-                            payload["messages"][0]["content"].as_str() == Some("guard-skip")
-                        } => {
-                            axum::response::Response::builder()
-                                .status(500)
-                                .body(Body::from("guard replay rejected"))
-                                .unwrap()
-                        }
-                        Some("deepseek-v4-pro") if {
-                            // Fallback failure (ITEM-025 AC4): the frontier
-                            // replay itself answers 5xx — loud and clean.
-                            payload["messages"][0]["content"].as_str() == Some("boom")
-                        } => {
-                            axum::response::Response::builder()
-                                .status(500)
-                                .body(Body::from("boom"))
-                                .unwrap()
-                        }
-                        Some("deepseek-v4-pro") if {
-                            // Default frontier replay (cheap original escalated
-                            // to the deployment frontier): honours the contract.
-                            let marker = payload["messages"][0]["content"].as_str();
-                            matches!(marker, Some("wrong-shape" | "truncated" | "guard-skip"))
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
-                                .unwrap()
-                        }
-                        Some("deepseek-v4-pro") if {
-                            // Slow frontier replay: first frame, 300ms gap,
-                            // then [DONE] — lets a test abort mid-replay.
-                            payload["messages"][0]["content"].as_str() == Some("slow-fallback")
-                        } => {
-                            let body = async_stream::stream! {
-                                yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n",
-                                ));
-                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                                yield Ok(axum::body::Bytes::from_static(
-                                    b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
-                                ));
-                            };
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(axum::body::Body::from_stream(body))
-                                .unwrap()
-                        }
-                        Some("gpt-4o") if {
-                            // Frontier replay when the tenant's original request
-                            // (pre-downgrade) was gpt-4o: honours the contract.
-                            let marker = payload["messages"][0]["content"].as_str();
-                            matches!(marker, Some("wrong-shape" | "truncated" | "guard-skip"))
-                        } => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(delta_only_stream(r#"{"answer":"42"}"#)))
-                                .unwrap()
-                        }
-                        Some("stream") => {
-                            // ITEM-094 AC4: an OpenAI stream for the translator.
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(
-                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n\
-data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2}}\n\n\
-data: [DONE]\n\n",
-                                ))
-                                .unwrap()
-                        }
-                        Some("echo") => {
-                            // ITEM-094: echo the payload the provider received, so
-                            // a test can assert the translated request shape.
-                            axum::response::Response::builder()
-                                .header("content-type", "application/json")
-                                .body(Body::from(
-                                    json!({
-                                        "id": "echo",
-                                        "model": payload["model"],
-                                        "choices": [{
-                                            "message": {"role": "assistant", "content": payload.to_string()},
-                                            "finish_reason": "stop",
-                                        }],
-                                        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-                                    })
-                                    .to_string(),
-                                ))
-                                .unwrap()
-                        }
-                        Some("content") => {
-                            // A clean 2xx non-streaming completion with text.
-                            axum::response::Response::builder()
-                                .header("content-type", "application/json")
-                                .body(Body::from(
-                                    r#"{"choices":[{"message":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}"#,
-                                ))
-                                .unwrap()
-                        }
-                        Some("empty") => {
-                            // A 2xx with a blank completion — ITEM-055 `empty`.
-                            axum::response::Response::builder()
-                                .header("content-type", "application/json")
-                                .body(Body::from(
-                                    r#"{"choices":[{"message":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
-                                ))
-                                .unwrap()
-                        }
-                        Some("refusal") => {
-                            // A content-filter stop — ITEM-055 `refused`.
-                            axum::response::Response::builder()
-                                .header("content-type", "application/json")
-                                .body(Body::from(
-                                    r#"{"choices":[{"message":{"content":""},"finish_reason":"content_filter"}],"usage":{"prompt_tokens":3,"completion_tokens":0}}"#,
-                                ))
-                                .unwrap()
-                        }
-                        Some("nodone") => {
-                            // Valid JSON frames but no [DONE] — used to prove
-                            // unguarded traffic pipes a truncated body through
-                            // unchanged (guard never engages without a schema).
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(
-                                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":1}}\n\n",
-                                ))
-                                .unwrap()
-                        }
-                        _ if payload["stream"].as_bool().unwrap_or(false) => {
-                            axum::response::Response::builder()
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from(SSE_BODY))
-                                .unwrap()
-                        }
-                        _ => {
-                            // Echo the Authorization header and model we received
-                            // so tests can prove the key swap and the router /
-                            // budget model rewrites reached the upstream.
-                            let auth = headers
-                                .get("authorization")
-                                .and_then(|v| v.to_str().ok())
-                                .unwrap_or("");
-                            let model = payload["model"].as_str().unwrap_or("");
-                            let body = format!(
-                                r#"{{"echoed_auth":"{auth}","model":"{model}","usage":{{"prompt_tokens":5,"completion_tokens":2}}}}"#
-                            );
-                            axum::response::Response::builder()
-                                .header("content-type", "application/json")
-                                .body(Body::from(body))
-                                .unwrap()
-                        }
-                    }
+                |headers: axum::http::HeaderMap, payload: axum::Json<Value>| async move {
+                    let model = payload["model"].as_str().unwrap_or_default();
+                    mock_error_response(model)
+                        .or_else(|| mock_guard_response(model, &payload))
+                        .or_else(|| mock_simple_response(model, &payload))
+                        .unwrap_or_else(|| mock_default_response(&headers, &payload))
                 },
             ),
         );
@@ -704,6 +645,32 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_for_a_disabled_model_are_refused() {
+        let base = mock_anthropic_upstream().await;
+        let (state, _rx) = anthropic_state(base).await;
+        let tenant = uuid::Uuid::parse_str(TENANT_ID).unwrap();
+        let providers = state
+            .provider_store
+            .list(tenant)
+            .await
+            .expect("the seeded provider");
+        state
+            .model_store
+            .set_enabled(providers[0].id, "claude-3-5-sonnet-20241022", false)
+            .await
+            .expect("disable the model");
+
+        let body = r#"{"model":"claude-3-5-sonnet-20241022","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}"#;
+        let response = build_router(state)
+            .oneshot(messages_request(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let json = json_body(response).await;
+        assert_eq!(json["error"]["type"], "model_disabled");
     }
 
     #[tokio::test]
