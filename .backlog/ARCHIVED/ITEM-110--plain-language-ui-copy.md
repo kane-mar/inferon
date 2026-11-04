@@ -56,3 +56,19 @@ make the language suitable for grade 12").
 - Deployed: `inferon-web` rebuilt on the durable host; homepage EN + FR show the
   new copy, 15 dashboard pages 200 with a real session, a real completion 200,
   no proxy panics and no web errors in the deploy window.
+
+### Documentation (same request)
+
+- `README.md`, `guides/inferon-self-hosted.md`, `guides/inferon-cost-audit.md`,
+  `guides/inferon-step2-materials.md` and `web/README.md` rewritten to the same
+  standard: one idea per sentence (mean 16–21 words), plain verbs, no metaphor
+  standing in for a mechanism. Every command, path, env var, endpoint, number and
+  table is unchanged, so the docs still match the code.
+- Prose now says **workspace** and keeps the identifiers that say `tenant`
+  (`tenants` table, `seed-tenant.sh`, `/v1/dashboard/api/*`), with a note at the top
+  of the README so the two do not look like different things.
+- Jargon replaced throughout "attribution" → explaining where the money went,
+  "moat/wedge" → the gap competitors do not cover, "holdout" → comparison group.
+- Checked: average sentence length per file (README 20.0, self-hosted 15.7,
+  step 2 19.0, cost audit 20.7 words), balanced code fences and inline code,
+  relative links resolve.
