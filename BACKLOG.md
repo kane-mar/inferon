@@ -24,8 +24,8 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO (2026-11-05)** — needs a Cloudflare Pages project and the DNS record for `docs.inferon.agilefederation.com`; there is no `wrangler` or CF token on the build machine, so creating the first project is a PO action. Then publish `guides/` as a searchable static site: MkDocs Material with `docs_dir: guides` (decision 2026-11-05, so no page moves and `guides/README.md` is the home), the two sales documents excluded, per-PR previews, and `scripts/check-guides.py` as the link check. Static only: no new container, $0/month. The Rust API reference on docs.rs is separate and optional |
-| ITEM-117 | Troubleshooting — access and routing (401, no_provider, 429, 5xx) | feature | **ready** — four pages with the inherited shape (symptom → meaning → fix → confirm → ask): `401/403`, `no_provider`, provider 429 vs our own RPM/TPM, and a 5xx / exhausted chain. Each reproduced from a real failure, each naming the endpoint, page, log line or table |
+| ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO (2026-11-05)** — Cloudflare was removed at the PO's request, so the host is an open decision. Recommendation: **Netlify Free** (the only $0 option that accepts a private repo, allows commercial use and gives PR previews); second: make the repository public (it is AGPL) and use **GitHub Pages**; **Read the Docs Community** only fits once the repo is public (free for open source only). Render is viable without previews. The generator is already decided: MkDocs Material with `docs_dir: guides` — no page moves, `guides/README.md` is the home, the two sales documents excluded, `scripts/check-guides.py` as the link check. Static only: no new container, $0/month |
+| ITEM-123 | A refusal you can point at — trace ids on gateway errors, and no_provider untraced | bug | **ready** — measured on the live host: a `no_provider` refusal writes no trace at all (Quality reads `requests: 0`), and the errors the gateway generates (`no_provider`, `rate_limited`, `upstream_error`) carry no `x-inferon-trace-id`, while a relayed provider error does. Trace the route-resolution refusal and decorate every generated error with the id of the row it wrote. Small code, one proxy deploy; the ITEM-117 `no_provider` and `429` pages lose their caveat in the same change |
 | ITEM-118 | What answers your requests (providers, own models, tiers, checker) | feature | **ready** — four configuration pages: add your own provider (five kinds, local/keyless included), models and tier pairs, the output checker, the automatic router and its threshold |
 | ITEM-119 | Protecting the bill and the context | feature | **ready** — four configuration pages: budgets and rate limits that do not block real traffic, a fallback chain whose triggers fire, prompt caching (why the audit says "not cached"), pruning and its comparison group |
 | ITEM-120 | From traffic to data, and the money story | feature | **ready** — four configuration pages: payloads/retention/PII, datasets → gold sets → evals, the cost audit's six findings, and sessions and spend (why our number differs from the provider bill) |
@@ -45,6 +45,7 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-117 | Troubleshooting — access and routing (401, no_provider, 429, 5xx) | feature | **done + archived (2026-11-05)** — four pages in the inherited shape (symptom → what it means → fix → how to confirm → when to stop and ask), each reproduced on the live host: a real `rpm_limit=1` 429 with `Retry-After: 53` and the `X-RateLimit-*` headers, a relayed upstream 429 and 500 from a mock provider on the compose network, a chain step that handles `rate_limited` (trace `routing_event` step 1), a step that handles `5xx` and then fails (the client receives the second step's error), a `502 upstream_error` for a closed port, a member's `403 insufficient_role` and a revoked key's `401`. Two gaps found while verifying — `no_provider` is not traced at all, and gateway-generated errors carry no trace id — are captured as ITEM-123 and stated plainly in the pages |
 | ITEM-122 | Providers empty state promises the shared platform key | bug | **done + archived (2026-11-05)** — the empty state told a self-serve workspace its traffic would use the shared platform key. A workspace with no provider has no `upstream_openai_key`, so its first request is refused `400 no_provider` (verified on a freshly provisioned workspace). EN and FR now say to add one. One key, no schema, no endpoint; `i18n-check`, `tsc`, 80 unit tests and `next build` pass. Live: the web image rebuilt on the durable host, `/dashboard/providers` and `/fr/dashboard/providers` 200 for a temporary workspace with no provider, the new line rendered, the old one absent, and the request still refused `400 no_provider` |
 | ITEM-116 | Docs skeleton + getting started (index, first request, move an SDK) | feature | **done + archived (2026-11-05)** — the first slice of ITEM-113. `guides/README.md` is the entry point; `guides/using/first-request.md` walks sign-in → key → provider → model → request → confirmation; `guides/using/move-an-sdk.md` shows the two changed values in Python (`openai` 3.46.0) and Node 24. Every command was run against the live host, including the real `401` / `400 no_provider` bodies and a `deepseek-chat` request the provider served as `deepseek-flash`. `scripts/check-guides.py` now enforces the suite's rules (links resolve inside `guides/`, no link to the sales documents, a dated footer, the five troubleshooting sections in order, mean sentence under 25 words) and a CI `docs` job gates the deploy. Live: `guides/` and `README.md` shipped to the durable host byte for byte, check passes there |
 | ITEM-113 | Guide suite — using Inferon, configuring it, and fixing what breaks | feature | **split (2026-11-05)** — the PO's 13 configuration guides and 13 troubleshooting entries, broken into five slices so each ships verified: ITEM-116 (skeleton + getting started, delivered), ITEM-117 (access and routing troubleshooting), ITEM-118 (providers, models, tiers, checker), ITEM-119 (budgets, limits, fallback, caching, pruning), ITEM-120 (payloads, evals, audit, spend), ITEM-121 (operational troubleshooting) |
@@ -124,16 +125,18 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-05 — ITEM-113 (the guide suite) was too large to pull whole,
-so it is broken into five slices (ITEM-117..121) and the first is delivered as
-ITEM-116. A live check of the first-request path turned up ITEM-122 (a false
-statement in the Providers empty state), ranked first and delivered the same day.
-Same form: one ranked list, gated at its bottom, then delivered history, then
-retired items._
+_Last updated: 2026-11-05 — the guide suite ships in slices: ITEM-116 (skeleton +
+getting started) and ITEM-117 (access and routing troubleshooting) are live, 118–121
+remain. Live checks keep producing work: ITEM-122 (a false statement in the Providers
+empty state) and ITEM-123 (a refusal the dashboard cannot show or name) both came
+from verifying a page. ITEM-112's host choice is back with the PO — Cloudflare was
+removed and Netlify is the recommendation. Same form: one ranked list, gated at its
+bottom, then delivered history, then retired items._
 
-**Pullable, in order:** the guide slices ITEM-117 → 121. ITEM-112 sits above them
-and stays blocked on the PO's Cloudflare project: the pages exist in the repository
-and are shipped to the host, but there is no public site yet.
+**Pullable, in order:** ITEM-123 (the refusal you can point at), then the guide
+slices ITEM-118 → 121. ITEM-112 sits above them and is blocked on the PO's host
+choice: the pages exist in the repository and are shipped to the host, but there is
+no public site yet.
 
 **PO action (not a build item):** the goal's first clause — put it in front of
 **real external developers** — has no open item. ITEM-018 closed on dogfooding

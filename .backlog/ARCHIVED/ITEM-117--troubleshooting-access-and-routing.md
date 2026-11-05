@@ -1,3 +1,12 @@
+> **Delivered 2026-11-05.** `guides/troubleshooting/{401-403,no-provider,too-many-requests,upstream-5xx}.md`,
+> each in the inherited shape, each reproduced on the live host: a real `rpm_limit=1`
+> 429 with `Retry-After: 53` and the `X-RateLimit-*` headers; a relayed upstream 429
+> and 500 from a mock provider on the compose network; a chain step handling
+> `rate_limited`; a step handling `5xx` that then fails, where the client receives the
+> second step's error; a `502 upstream_error` for a closed port; a member's `403
+> insufficient_role`; a revoked key's `401`. Two gaps found on the way are captured as
+> ITEM-123.
+
 ## ITEM-117: Troubleshooting — access and routing (401, no_provider, 429, 5xx)
 
 **As a** developer whose request just failed

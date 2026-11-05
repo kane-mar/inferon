@@ -1,5 +1,41 @@
 # Refinement Log
 
+## 2026-11-05 (later) — ITEM-117 delivered; two data-plane gaps captured as ITEM-123
+
+Four troubleshooting pages went live (401/403, no_provider, 429 ours-vs-provider,
+5xx/exhausted chain). Writing them against the live host produced evidence the items did
+not anticipate, and two of those findings are defects, not prose:
+
+- **`no_provider` writes no trace.** A workspace with no provider answers `400
+  no_provider`, and three seconds later has zero rows in `traces`; Quality reads
+  `requests: 0`. The most likely first support question leaves no evidence.
+- **Gateway-generated errors carry no `x-inferon-trace-id`.** `400 no_provider`, `429
+  rate_limited` and `502 upstream_error` come back without it, while a relayed provider
+  error does. The rate-limited and transport rows exist, so the gap is the header, not
+  the record.
+
+Captured as **ITEM-123** and ranked first: small code, one proxy deploy, and it removes
+the caveat the new pages had to write ("this failure leaves no trace"). Deliberate
+method note: the pages state the gap plainly rather than hiding it; the item closes it.
+
+Working method that made this cheap — a mock OpenAI-compatible upstream (three models:
+`-ok`, `-429`, `-500`) as a throwaway container on `inferon_default`, plus a temporary
+workspace, owner and member users, a minted session and per-key limits. Every scenario
+(our 429, relayed 429/500, chain step, exhausted chain, transport 502, member 403,
+revoked 401) was reproduced end to end and torn down afterwards.
+
+## 2026-11-05 (later) — Cloudflare removed from ITEM-112; host choice reopened
+
+PO instruction: remove Cloudflare from the docs-site item and find something else,
+confirming with the PO before committing. The candidates and the constraint that
+decides them are recorded in the item; the recommendation is **Netlify Free** (the
+only $0 host that accepts the private repository, allows commercial use and gives PR
+previews), with **GitHub Pages** second (best once the repository goes public, which
+the AGPL positioning argues for) and **Read the Docs Community** only once it is
+public (their free tier is for open-source projects). The generator decision —
+MkDocs Material with `docs_dir: guides` — is unaffected, so the build can be written
+and previewed while the host is pending.
+
 ## 2026-11-05 — ITEM-113 broken into five slices; the first is delivered
 
 The pullable region held one item (ITEM-112, blocked on a PO-owned Cloudflare
