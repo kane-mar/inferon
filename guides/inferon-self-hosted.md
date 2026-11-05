@@ -165,6 +165,9 @@ configure points at an endpoint you choose.
 
 ## See also
 
-- [Customer-hosted LLMs](../wiki/llm-inference/customer-hosted-llms.md) — the three
-  connectivity options and their trade-offs.
-- `README.md` § Durable deployment — the reference `prod` profile with Caddy.
+- `README.md` § Durable deployment — the reference `prod` profile with Caddy, for a
+  host you keep online.
+- [Your first request](using/first-request.md) — the five-minute path once the stack
+  is up.
+
+_Last verified 2026-10-29 against the documented compose stack (master fe7c760)._

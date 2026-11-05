@@ -103,8 +103,20 @@ jobs:
           fi
           exit "$status"
 
+  # ITEM-113: a guide that links where a reader cannot follow, loses its
+  # `Last verified` footer or drifts past the reading level fails the build.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guide check (links, footers, sections, reading level)
+        run: python3 scripts/check-guides.py
+
   deploy:
-    needs: [test, web, licences]
+    needs: [test, web, licences, docs]
     runs-on: ubuntu-latest
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

@@ -90,6 +90,9 @@ This is measured on every change, not promised:
 
 **Base URL:** `https://inferon.agilefederation.com/v1` (OpenAI-compatible).
 
+Task guides, from the first request to the things that break:
+**[guides/README.md](guides/README.md)**.
+
 ### 1. Sign in (self-serve)
 
 Open `https://inferon.agilefederation.com/auth/login` and sign in with GitHub.
