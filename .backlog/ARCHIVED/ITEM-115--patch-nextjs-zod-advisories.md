@@ -43,3 +43,22 @@ a patch bump.
   affected code is already live.
 
 **Source:** `npm audit --omit=dev` in `web/`, 2026-11-05.
+
+## Delivered (2026-11-05)
+
+- `web/package.json`: `next` `^16.2.9` → `^16.4.5`, `zod` `^4.4.3` → `^4.6.7`.
+  The lockfile moved only `next`, the ten `@next/swc-*` platform packages and
+  `zod`; no other dependency changed.
+- `npm audit --omit=dev`: **0 vulnerabilities** (was 1 critical + 1 high).
+- Checks: `next typegen`, `tsc --noEmit`, the 80 vitest unit tests and
+  `next build` pass locally (`--webpack` for the SMB workspace; the image builds
+  with Turbopack on Linux). The ITEM-111 audits still pass: `cargo deny check
+  licenses` ok, `node scripts/check-npm-licenses.mjs` ok.
+- Live on the durable host: the web image runs Next.js 16.4.5; TLS `/healthz`,
+  `/` and `/fr` return 200, `/dashboard` plus Runtime, Spend and Settings return
+  200 with a minted session, a real completion through the proxy returns 200, and
+  the deploy window has no web errors and no proxy panics.
+- The deploy command (`up -d --build web`) also rebuilt the proxy because compose
+  builds the service's dependency and the chef layer cache missed; the proxy came
+  back healthy and no behaviour changed. Next time build only the image
+  (`docker build -t inferon-web ./web`) and bring it up with `--no-build`.
