@@ -1,0 +1,46 @@
+# cargo-deny configuration — ITEM-111.
+#
+# CI runs only the licence check (`cargo deny check licenses`); the audit exists
+# to stop a dependency with a licence we cannot ship from being added. The
+# advisory, ban and source checks are deliberately not configured here yet.
+#
+# Every entry in `allow` was justified against the AGPL-3.0-only licence of this
+# repository; see LICENSES.md for the reasoning and the inventory it produced.
+
+[graph]
+# CI also builds with `--features embedder`, so the audit must see those crates.
+all-features = true
+
+# The platforms the project actually builds for: Linux (CI + the durable host)
+# and macOS (the development loop). Platform-specific crates for Windows and
+# other targets are not part of the shipped graph.
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+]
+
+[licenses]
+# `version = 2` is the current evaluation model: an SPDX expression passes when
+# it can be satisfied from `allow` (so `MIT OR Apache-2.0` needs only one arm,
+# while `MIT AND Unicode-3.0` needs both).
+version = 2
+confidence-threshold = 0.9
+
+allow = [
+    # Our own crate.
+    "AGPL-3.0-only",
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "MIT-0",
+    "BSL-1.0",
+]

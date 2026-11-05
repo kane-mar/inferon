@@ -375,3 +375,27 @@ web/             Next.js human surfaces (landing, dashboard, one operator consol
 .backlog/        product backlog (single ranked list) + archived items + refinement log
 wiki/ raw/       design knowledge base (Karpathy-style wiki + immutable sources)
 ```
+
+## Licence
+
+Inferon is open source under the **GNU Affero General Public License, version 3
+only** (AGPL-3.0-only). In plain terms:
+
+- You can read, change, and run the code, and host it for your own users, for free.
+- If you run a modified version and let other people use it over a network, you
+  must offer them the source of your modified version under the same licence.
+- Nothing here stops you competing with us. The licence and the trademark rules
+  are the only limits, and neither adds a "may not compete" clause.
+
+Parts of `web/` come from an MIT-licensed template. Its notice is kept in
+[`web/THIRD-PARTY-NOTICES.md`](web/THIRD-PARTY-NOTICES.md).
+
+If your organisation cannot use AGPL software, a commercial licence is available
+with warranty, indemnity, and a service-level agreement. Email
+<kane@inferon.dev>.
+
+The full text is in [`LICENSE`](LICENSE). [`LICENSES.md`](LICENSES.md) lists every
+dependency licence, why each one is allowed, and how to run the audit. Before you
+contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md): contributions need the
+[CLA](CLA.md), which keeps the commercial option open. The code licence does not
+grant rights to the name or logo — see [`TRADEMARKS.md`](TRADEMARKS.md).

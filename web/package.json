@@ -1,6 +1,7 @@
 {
   "name": "inferon-web",
   "author": "Ixartz (https://github.com/ixartz)",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=24"
   },

@@ -29,6 +29,10 @@ RUN set -eux; \
     curl -fsSL "https://huggingface.co/TaylorAI/bge-micro-v2/resolve/main/tokenizer.json" -o /opt/embedder/tokenizer.json
 
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+# The AGPL treats shipping an image as distribution, so the licence text travels
+# with it (ITEM-111). The corresponding source is this repository at the release
+# tag that matches the image.
+COPY LICENSE /LICENSE
 COPY --from=builder /app/target/release/inferon /usr/local/bin/inferon
 COPY --from=builder /opt/embedder /opt/embedder
 # The embedder loads the runtime itself (no link at build time).

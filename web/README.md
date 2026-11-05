@@ -2,7 +2,7 @@
 
 The Next.js human surfaces for Inferon (ITEM-042): the landing page, the
 sign-in-only dashboard and the operator console. This directory started as a copy of
-`ixartz/SaaS-Boilerplate` (MIT — see `LICENSE`). Everything we do not use was
+`ixartz/SaaS-Boilerplate` (MIT — see `THIRD-PARTY-NOTICES.md`). Everything we do not use was
 removed (Clerk, Stripe, Drizzle and its `migrations/`, Sentry, Crowdin, Checkly, the
 template's `.github/workflows`), and the rest was re-skinned for Inferon.
 
@@ -10,6 +10,9 @@ The repository root `README.md` has the whole architecture: the `web` container
 versus the Rust `proxy` data plane, and how Caddy routes between them. It also
 covers the project's "Rust + bash" rule and the one exception it makes for
 TypeScript in `web/`.
+
+This directory is part of the AGPL-3.0-only repository (see `LICENSE` here and at
+the root). The template's MIT notice travels with it in `THIRD-PARTY-NOTICES.md`.
 
 ## Run it locally
 

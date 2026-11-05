@@ -45,6 +45,23 @@ jobs:
       - name: unit tests (vitest)
         run: npx vitest run --project unit
 
+  # ITEM-111 AC3: a dependency with a licence we cannot ship fails the build.
+  # The allow-lists live in deny.toml (Rust) and scripts/check-npm-licenses.mjs,
+  # with the reasoning in LICENSES.md.
+  licences:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust licence audit (cargo-deny)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: npm licence audit
+        run: node scripts/check-npm-licenses.mjs
+
   # ITEM-083 AC4: the documented self-hosted install must actually start and
   # serve a request, so the guide cannot rot. Builds both images, uses a
   # throwaway compose project, and tears it down.
@@ -87,7 +104,7 @@ jobs:
           exit "$status"
 
   deploy:
-    needs: [test, web]
+    needs: [test, web, licences]
     runs-on: ubuntu-latest
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -122,7 +139,8 @@ jobs:
           tar czf /tmp/durable.tgz \
             --exclude='web/node_modules' --exclude='web/.next' \
             Cargo.toml Cargo.lock Dockerfile docker-compose.yml Caddyfile \
-            .dockerignore .env.example src scripts db web README.md guides
+            .dockerignore .env.example LICENSE LICENSES.md CLA.md CONTRIBUTING.md \
+            TRADEMARKS.md deny.toml src scripts db web README.md guides
 
       - name: Install SSH key
         if: steps.cfg.outputs.configured == 'true'

@@ -64,3 +64,8 @@
 - Raw: raw/llm-inference/2026-10-30-competitive-positioning.md
 - Created: inferon-differentiation-gaps.md (claim vs measured state; 16 gap items)
 - Updated: BACKLOG.md (product goal + ITEM-085..100)
+
+## [2026-11-05] ingest | Inferon Licence Decision: AGPL-3.0-only with a CLA
+- Disposition: New
+- Raw: raw/llm-inference/2026-11-05-inferon-licence-direction.md
+- Created: inferon-licence-decision.md

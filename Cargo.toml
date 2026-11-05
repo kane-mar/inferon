@@ -2,6 +2,8 @@
 name = "inferon"
 version = "0.1.0"
 edition = "2021"
+description = "A cost-aware proxy for the OpenAI API: records what each request costs and routes around the budget"
+license = "AGPL-3.0-only"
 
 [features]
 # ITEM-028: the ONNX Runtime embedder is an opt-in build. The default build
