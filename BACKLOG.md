@@ -25,7 +25,6 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO (2026-11-05)** — needs a Cloudflare Pages project and the DNS record for `docs.inferon.agilefederation.com`; there is no `wrangler` or CF token on the build machine, so creating the first project is a PO action. Then publish `guides/` as a searchable static site: MkDocs Material with `docs_dir: guides` (decision 2026-11-05, so no page moves and `guides/README.md` is the home), the two sales documents excluded, per-PR previews, and `scripts/check-guides.py` as the link check. Static only: no new container, $0/month. The Rust API reference on docs.rs is separate and optional |
-| ITEM-122 | Providers empty state promises the shared platform key | bug | **ready** — a workspace with no provider is told "traffic uses the shared platform key", which is only true for an operator-seeded workspace: a self-serve sign-up gets `400 no_provider`. Replace the `ProvidersPage.empty` string in en/fr with a statement that holds for both shapes. One key, no schema, no endpoint |
 | ITEM-117 | Troubleshooting — access and routing (401, no_provider, 429, 5xx) | feature | **ready** — four pages with the inherited shape (symptom → meaning → fix → confirm → ask): `401/403`, `no_provider`, provider 429 vs our own RPM/TPM, and a 5xx / exhausted chain. Each reproduced from a real failure, each naming the endpoint, page, log line or table |
 | ITEM-118 | What answers your requests (providers, own models, tiers, checker) | feature | **ready** — four configuration pages: add your own provider (five kinds, local/keyless included), models and tier pairs, the output checker, the automatic router and its threshold |
 | ITEM-119 | Protecting the bill and the context | feature | **ready** — four configuration pages: budgets and rate limits that do not block real traffic, a fallback chain whose triggers fire, prompt caching (why the audit says "not cached"), pruning and its comparison group |
@@ -46,6 +45,7 @@ Newest first. This is history, not a ranking: nothing here is waiting to be pull
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
+| ITEM-122 | Providers empty state promises the shared platform key | bug | **done + archived (2026-11-05)** — the empty state told a self-serve workspace its traffic would use the shared platform key. A workspace with no provider has no `upstream_openai_key`, so its first request is refused `400 no_provider` (verified on a freshly provisioned workspace). EN and FR now say to add one. One key, no schema, no endpoint; `i18n-check`, `tsc`, 80 unit tests and `next build` pass. Live: the web image rebuilt on the durable host, `/dashboard/providers` and `/fr/dashboard/providers` 200 for a temporary workspace with no provider, the new line rendered, the old one absent, and the request still refused `400 no_provider` |
 | ITEM-116 | Docs skeleton + getting started (index, first request, move an SDK) | feature | **done + archived (2026-11-05)** — the first slice of ITEM-113. `guides/README.md` is the entry point; `guides/using/first-request.md` walks sign-in → key → provider → model → request → confirmation; `guides/using/move-an-sdk.md` shows the two changed values in Python (`openai` 3.46.0) and Node 24. Every command was run against the live host, including the real `401` / `400 no_provider` bodies and a `deepseek-chat` request the provider served as `deepseek-flash`. `scripts/check-guides.py` now enforces the suite's rules (links resolve inside `guides/`, no link to the sales documents, a dated footer, the five troubleshooting sections in order, mean sentence under 25 words) and a CI `docs` job gates the deploy. Live: `guides/` and `README.md` shipped to the durable host byte for byte, check passes there |
 | ITEM-113 | Guide suite — using Inferon, configuring it, and fixing what breaks | feature | **split (2026-11-05)** — the PO's 13 configuration guides and 13 troubleshooting entries, broken into five slices so each ships verified: ITEM-116 (skeleton + getting started, delivered), ITEM-117 (access and routing troubleshooting), ITEM-118 (providers, models, tiers, checker), ITEM-119 (budgets, limits, fallback, caching, pruning), ITEM-120 (payloads, evals, audit, spend), ITEM-121 (operational troubleshooting) |
 | ITEM-115 | Patch Next.js and zod for the 2026-11 security advisories | bug | **done + archived (2026-11-05)** — `next` 16.3.8 → 16.4.5 and `zod` 4.6.5 → 4.6.7; the lockfile moved only those packages and the `@next/swc-*` binaries. Closes the critical Next.js advisories (Image Optimization RCE with SVG, App Router Server Actions DoS, `use cache` typed-array RCE) and the zod memory-exhaustion advisory. `npm audit --omit=dev` is clean; typegen, typecheck, 80 unit tests, `next build` and both licence audits pass. Live: the web image runs 16.4.5, TLS pages and four dashboard pages 200 with a session, a real completion 200, no errors or panics |
@@ -127,13 +127,13 @@ Decisions, not unfinished work — each with the reason it will not be built.
 _Last updated: 2026-11-05 — ITEM-113 (the guide suite) was too large to pull whole,
 so it is broken into five slices (ITEM-117..121) and the first is delivered as
 ITEM-116. A live check of the first-request path turned up ITEM-122 (a false
-statement in the Providers empty state), ranked first because it costs a new user
-their first five minutes. Same form: one ranked list, gated at its bottom, then
-delivered history, then retired items._
+statement in the Providers empty state), ranked first and delivered the same day.
+Same form: one ranked list, gated at its bottom, then delivered history, then
+retired items._
 
-**Pullable, in order:** ITEM-122, then the guide slices 117 → 121. ITEM-112 sits
-above them and stays blocked on the PO's Cloudflare project: the pages exist in the
-repository and are shipped to the host, but there is no public site yet.
+**Pullable, in order:** the guide slices ITEM-117 → 121. ITEM-112 sits above them
+and stays blocked on the PO's Cloudflare project: the pages exist in the repository
+and are shipped to the host, but there is no public site yet.
 
 **PO action (not a build item):** the goal's first clause — put it in front of
 **real external developers** — has no open item. ITEM-018 closed on dogfooding

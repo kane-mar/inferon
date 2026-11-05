@@ -1,3 +1,9 @@
+> **Delivered 2026-11-05.** `ProvidersPage.empty` now reads "No provider yet — add
+> one so requests have somewhere to go." (EN) and "Aucun fournisseur — ajoutez-en un
+> pour que vos requêtes aient une destination." (FR). Verified live on a temporary
+> workspace with no provider: both locales render the new line, the old line is gone,
+> and the request it now prevents still returns `400 no_provider`.
+
 ## ITEM-122: Providers empty state promises the shared platform key
 
 **As a** developer who has just signed up

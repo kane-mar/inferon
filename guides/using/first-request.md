@@ -27,8 +27,9 @@ You can create more keys, and revoke any of them, on **Settings → API keys**.
 ## 3. Add a provider
 
 A new workspace has no provider, so the gateway has nowhere to send a request. In
-the same card, press **Providers →** (or open **Providers** in the sidebar) and
-press **Add provider**.
+the same card, press **Providers →** (or open **Providers** in the sidebar). The page
+says **No provider yet — add one so requests have somewhere to go.** Press **Add
+provider**.
 
 | Field | What to enter |
 |---|---|
