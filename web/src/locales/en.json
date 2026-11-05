@@ -237,7 +237,7 @@
     "title_bar": "Providers",
     "title_bar_description": "Use your own provider account. The gateway runs on your key.",
     "providers": "Your providers",
-    "empty": "No provider yet — traffic uses the shared platform key.",
+    "empty": "No provider yet — add one so requests have somewhere to go.",
     "kind": "Type",
     "name": "Name",
     "name_placeholder": "My DeepSeek account",

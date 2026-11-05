@@ -237,7 +237,7 @@
     "title_bar": "Fournisseurs",
     "title_bar_description": "Utilisez votre propre compte de fournisseur. La passerelle fonctionne avec votre clé.",
     "providers": "Vos fournisseurs",
-    "empty": "Aucun fournisseur — le trafic utilise la clé partagée de la plateforme.",
+    "empty": "Aucun fournisseur — ajoutez-en un pour que vos requêtes aient une destination.",
     "kind": "Type",
     "name": "Nom",
     "name_placeholder": "Mon compte DeepSeek",
