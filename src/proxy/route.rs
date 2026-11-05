@@ -342,10 +342,19 @@ pub(super) async fn plan_models(
     stages.mark("policy");
     meta.policy_version = policy.as_ref().map(|policy| policy.version);
     let policy_weights = policy.as_ref().map(|policy| &policy.provider_weights);
-    let decision = state
+    let decision = match state
         .hotpath
         .route(state, tenant, &meta.model, Surface::OpenAi, policy_weights)
-        .await?;
+        .await
+    {
+        Ok(decision) => decision,
+        // ITEM-123: a refusal is evidence. `no_provider` is the most common first
+        // failure, so it is traced and carries the id of the row it wrote.
+        Err(resp) => {
+            trace_error(state, meta, tenant_id, started, 400, ErrorClass::Inferon4xx);
+            return Err(super::response::with_trace_id(resp, meta.id));
+        }
+    };
     let route = decision.route;
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;
@@ -354,8 +363,10 @@ pub(super) async fn plan_models(
     crate::metrics::request_routed(route.provider_id);
 
     // ITEM-044 AC5: a model the tenant disabled is refused with a clear typed
-    // error (and traced), not a raw upstream 4xx.
-    ensure_model_enabled(state, meta, tenant_id, started, decision.disabled)?;
+    // error (and traced), not a raw upstream 4xx. ITEM-123: the id goes on it.
+    if let Err(resp) = ensure_model_enabled(state, meta, tenant_id, started, decision.disabled) {
+        return Err(super::response::with_trace_id(resp, meta.id));
+    }
 
     // ITEM-016: the budget breaker wins over the router and rejects before any
     // upstream call; ITEM-046/081: otherwise the router may downshift.
@@ -365,7 +376,7 @@ pub(super) async fn plan_models(
             Ok(chosen) => chosen,
             Err(resp) => {
                 trace_error(state, meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
-                return Err(resp);
+                return Err(super::response::with_trace_id(resp, meta.id));
             }
         };
     stages.mark("budget");

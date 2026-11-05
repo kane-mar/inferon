@@ -207,7 +207,8 @@ pub(crate) async fn proxy_chat_completions(
             429,
             ErrorClass::RateLimited,
         );
-        return resp;
+        // ITEM-123: the row exists; the caller can now point at it.
+        return response::with_trace_id(resp, meta.id);
     }
     let ModelPlan {
         route,
@@ -216,7 +217,7 @@ pub(crate) async fn proxy_chat_completions(
         prune,
     } = match plan_models(&state, &tenant, &mut meta, started, &mut stages).await {
         Ok(plan) => plan,
-        Err(resp) => return resp,
+        Err(resp) => return response::with_trace_id(resp, meta.id),
     };
 
     // ITEM-091: rewrite the payload when the tenant opted in and this request is
@@ -237,6 +238,8 @@ pub(crate) async fn proxy_chat_completions(
         "hot-path stages"
     );
 
+    // ITEM-123: the metadata moves into the dispatch; the id is what a refusal needs.
+    let trace_id = meta.id;
     let dispatch = match dispatch_chain(
         &state,
         tenant_id,
@@ -249,7 +252,7 @@ pub(crate) async fn proxy_chat_completions(
     .await
     {
         Ok(dispatch) => dispatch,
-        Err(resp) => return resp,
+        Err(resp) => return response::with_trace_id(resp, trace_id),
     };
     finish_openai_response(&state, tenant_id, started, is_stream, dispatch).await
 }
@@ -501,13 +504,14 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     let prompt_hash = system_prompt_hash_anthropic(&payload);
     let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
 
-    let (route, disabled) = match prepare_anthropic(&state, &tenant, &mut meta).await {
-        Ok(prepared) => prepared,
-        Err(resp) => return resp,
-    };
+    // ITEM-123: the clock starts before routing, so a refusal is timed and traced.
     let started = Instant::now();
+    let (route, disabled) = match prepare_anthropic(&state, &tenant, &mut meta, started).await {
+        Ok(prepared) => prepared,
+        Err(resp) => return response::with_trace_id(resp, meta.id),
+    };
     if let Err(resp) = ensure_model_enabled(&state, &meta, tenant_id, started, disabled) {
-        return resp;
+        return response::with_trace_id(resp, meta.id);
     }
     // ITEM-050 AC5: the heuristic router and cheap-fallback are OpenAI-shaped
     // and bypassed here; only the hard monthly cap still applies.
@@ -520,7 +524,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
             429,
             ErrorClass::Inferon4xx,
         );
-        return resp;
+        return response::with_trace_id(resp, meta.id);
     }
     // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
@@ -545,7 +549,8 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
             429,
             ErrorClass::RateLimited,
         );
-        return resp;
+        // ITEM-123: the row exists; the caller can now point at it.
+        return response::with_trace_id(resp, meta.id);
     }
     let upstream = match request.body(wire).send().await {
         Ok(response) => response,
@@ -559,10 +564,13 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
                 502,
                 ErrorClass::from_transport(&e),
             );
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                "upstream_error",
-                "upstream request failed",
+            return response::with_trace_id(
+                json_error(
+                    StatusCode::BAD_GATEWAY,
+                    "upstream_error",
+                    "upstream request failed",
+                ),
+                meta.id,
             );
         }
     };
@@ -575,6 +583,7 @@ async fn prepare_anthropic(
     state: &Arc<AppState>,
     tenant: &Tenant,
     meta: &mut RequestMeta,
+    started: Instant,
 ) -> Result<(Route, bool), Response> {
     let tenant_id = tenant.id;
     meta.capture_payloads = state.hotpath.capture_enabled(state, tenant_id).await;
@@ -588,10 +597,17 @@ async fn prepare_anthropic(
         &tenant_id.to_string(),
     );
     redact_wire(meta, tenant_id);
-    let decision = state
+    let decision = match state
         .hotpath
         .route(state, tenant, &meta.model, Surface::Anthropic, None)
-        .await?;
+        .await
+    {
+        Ok(decision) => decision,
+        Err(resp) => {
+            trace_error(state, meta, tenant_id, started, 400, ErrorClass::Inferon4xx);
+            return Err(response::with_trace_id(resp, meta.id));
+        }
+    };
     let route = decision.route;
     meta.provider_id = route.provider_id;
     meta.is_local = route.is_local;

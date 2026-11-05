@@ -514,6 +514,19 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         builder.body(Body::from(body.to_string())).unwrap()
     }
 
+    /// ITEM-123: a refusal the gateway generates names the row it wrote, so a
+    /// support answer can be "look at this trace" instead of a guess.
+    fn trace_id_of(response: &axum::response::Response) -> uuid::Uuid {
+        response
+            .headers()
+            .get("x-inferon-trace-id")
+            .expect("a generated error carries the id of its trace")
+            .to_str()
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
     async fn chat_request(body: &str, auth: Option<&str>) -> axum::response::Response {
         build_router(test_state(&mock_upstream().await))
             .oneshot(chat_request_builder(body, auth))
@@ -920,8 +933,10 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let trace_id = trace_id_of(&response);
         let msg = rx.recv().await.unwrap();
         assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Transport));
+        assert_eq!(msg.id, trace_id);
     }
 
     #[tokio::test]
@@ -1188,7 +1203,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 limits: crate::ratelimit::Limits::default(),
             },
         );
-        let (tx, _rx) = mpsc::channel(8);
+        let (tx, mut rx) = mpsc::channel(8);
         let state = std::sync::Arc::new(AppState {
             tenant_store: std::sync::Arc::new(InMemoryTenantStore::new(by_hash)),
             telemetry_tx: tx,
@@ -1202,8 +1217,14 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let trace_id = trace_id_of(&response);
         let json = json_body(response).await;
         assert_eq!(json["error"]["type"], "no_provider");
+        // ITEM-123: the refusal is recorded, and the caller holds its id.
+        let msg = rx.recv().await.expect("no_provider is traced");
+        assert_eq!(msg.id, trace_id);
+        assert_eq!(msg.status_code, 400);
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Inferon4xx));
     }
 
     #[tokio::test]
@@ -1246,10 +1267,12 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             .await
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let trace_id = trace_id_of(&response);
         let body = axum::body::to_bytes(response.into_body(), 1024 * 64).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["error"]["type"], "model_disabled");
         let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.id, trace_id);
         assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Inferon4xx));
     }
 
