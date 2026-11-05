@@ -329,3 +329,9 @@ placement (bottom of the gated block, after 084) is recorded in
 The product goal's "first clause" — putting this in front of real external
 developers — now has work behind it for the first time: 111 makes the code usable,
 112 makes it findable, 113 makes it adoptable.
+
+**Captured during implementation (2026-11-05): ITEM-115, ranked first.** The
+ITEM-111 licence audit ran `npm audit --omit=dev` and found two live production
+vulnerabilities: `next` 16.3.8 (critical) and `zod` 4.6.5 (high), both patch-fixable.
+A defect in shipped code outranks feature work, so it sits above ITEM-112; the
+public-site items shuffle down one place without any change to their value.

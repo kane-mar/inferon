@@ -69,3 +69,42 @@ adoptable.
 
 **Source:** PO request, 2026-11-05 ("identify an appropriate open source license…
 consistent with the ultimate goal of the for-profit corp").
+
+## Delivered (2026-11-05)
+
+- `LICENSE` and `web/LICENSE` hold the AGPL-3.0-only text verbatim (sha256
+  `0d96a4ff…`); `license = "AGPL-3.0-only"` is set in `Cargo.toml` and
+  `web/package.json`. The template-derived parts of `web/` keep their MIT notice in
+  `web/THIRD-PARTY-NOTICES.md`; MIT permits sublicensing, so the combined work is
+  AGPL-3.0-only.
+- `LICENSES.md` records the inventory, both allow-lists, the two per-package
+  exceptions, and the artifact note (ONNX Runtime 1.19.2 and BGE-micro-v2 are
+  downloads, both MIT — not vendored code).
+- **Audits pass.** `cargo deny check licenses` (0.20.2, all features, Linux +
+  macOS) over 325 crates.io packages, allow-list in `deny.toml`; `node
+  scripts/check-npm-licenses.mjs` over 947 lockfile entries, allow-list plus the
+  `format` (MIT in the legacy field, no LICENSE file) and `jsonify` (public domain)
+  exceptions. The script's negative path was tested with a synthetic lockfile
+  (GPL-3.0-only and a missing field both fail).
+- **CI enforces it.** New `licences` job (cargo-deny-action + the npm script);
+  `deploy` now `needs: [test, web, licences]`. Both deploy bundles (workflow + the
+  local script) carry `LICENSE LICENSES.md CLA.md CONTRIBUTING.md TRADEMARKS.md
+  deny.toml`.
+- **The images ship the licence.** Proxy `/LICENSE`, web `/app/LICENSE` +
+  `/app/THIRD-PARTY-NOTICES.md`; the copied text's hash matches the repository.
+- `CLA.md` grants the owner the relicense right and must be accepted in the pull
+  request before a merge; `CONTRIBUTING.md` says so. The history is one author
+  (three machine-specific email addresses), so nothing needed back-filling.
+- `TRADEMARKS.md` separates the name/logo from the code licence; the README's
+  Licence section states the same in plain language and adds no competition
+  restriction.
+- AC6: reasoning recorded in `wiki/llm-inference/inferon-licence-decision.md`,
+  compiled from `raw/llm-inference/2026-11-05-inferon-licence-direction.md`, with
+  the revisit trigger (AGPL friction becoming the bigger obstacle → fallback
+  Apache-2.0 + proprietary modules). Index and log updated.
+- **Live on the durable host:** both images rebuilt, TLS `/healthz`, `/` and `/fr`
+  return 200, six dashboard pages return 200 with a minted session, a real
+  completion through the proxy returns 200, no proxy panics and no web errors in
+  the deploy window.
+- Not done here: pushing to `origin` (the branch is 68 commits ahead), so the new
+  CI job has not run on GitHub; the same commands pass locally.
