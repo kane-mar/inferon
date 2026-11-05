@@ -1,3 +1,9 @@
+> **Archived 2026-11-05 — split, not dropped.** The story and the page list below are
+> the source; the work is ranked as ITEM-116 (docs skeleton + getting started,
+> delivered), ITEM-117, ITEM-118, ITEM-119, ITEM-120 and ITEM-121. The acceptance
+> criteria are inherited by those slices, with AC1 (published on the docs site)
+> closing when ITEM-112's site exists.
+
 ## ITEM-113: Guide suite — using Inferon, configuring it, and fixing what breaks
 
 **As a** workspace owner, developer or self-hoster

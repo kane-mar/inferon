@@ -1,5 +1,43 @@
 # Refinement Log
 
+## 2026-11-05 — ITEM-113 broken into five slices; the first is delivered
+
+The pullable region held one item (ITEM-112, blocked on a PO-owned Cloudflare
+project) plus ITEM-113, which is 26 pages and too large to pull whole. It was split
+by audience task, and the slice boundary is where verification stops being one
+afternoon's work:
+
+- **ITEM-116 — skeleton + getting started** (index, first request, move an SDK).
+  Delivered the same day. It also fixes the suite's shape: `guides/README.md` as the
+  entry point, a dated `Last verified` footer on every page, and
+  `scripts/check-guides.py` + a CI `docs` job that fail on a broken link, a link that
+  leaves `guides/` or points at a sales document, a missing footer, a troubleshooting
+  page without its five sections in order, a mean sentence over 25 words or any
+  sentence over 40.
+- **ITEM-117 — troubleshooting, access and routing** (401/403, no_provider, 429,
+  5xx chain). Ranked above the configuration slices: with no support channel, the
+  failed request is what costs a developer the product.
+- **ITEM-118 — what answers your requests** (providers incl. a local model, models
+  and tier pairs, output checker, automatic router).
+- **ITEM-119 — the bill and the context** (budgets and limits, fallback chain and
+  triggers, prompt caching, pruning and the comparison group).
+- **ITEM-120 — traffic to data and the money story** (payloads/retention/PII,
+  datasets → gold sets → evals, the cost audit's findings, sessions and spend).
+- **ITEM-121 — troubleshooting, operations** (truncated answers, quality dropped,
+  unreachable provider, empty dashboard, `$0.00` audit, sign-in loop, 502,
+  migrations, purged payloads).
+
+Ordering decision: ITEM-112 keeps its place above the slices and is marked **blocked
+on PO** rather than gated, because nothing about it is uncertain — it needs a
+Cloudflare project and a DNS record that only the PO can create. The guides publish
+from `guides/`, so the slices are useful before the site exists.
+
+Captured during the live verification of ITEM-116: **ITEM-122**, the Providers empty
+state tells a self-serve workspace its traffic uses the shared platform key, which is
+false (`400 no_provider` on the first request). Ranked first: it is a one-key copy
+change, and it costs a new user their first five minutes.
+
+
 ## 2026-09-06 (late) — ITEM-033 broken down; ITEM-018 tail structured
 
 Refinement session with the pullable region empty (guard chain delivered,

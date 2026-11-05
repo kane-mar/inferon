@@ -30,11 +30,14 @@ the same job.
 1. A static docs site is published at **docs.inferon.agilefederation.com** on
    Cloudflare Pages (or GitHub Pages if a second account is unwanted), with TLS and
    a redirect from the apex `/docs` path on the main site.
-2. The generator is Astro Starlight or MkDocs Material — static output, built-in
-   search, no runtime service. The choice and the reason are recorded in the item.
-3. **One source of truth:** page content lives in `docs/` in this repository;
-   `guides/*.md` is moved into it and `README.md` links to the hosted pages instead
-   of to files. No page exists twice.
+2. **Decision 2026-11-05: MkDocs Material with `docs_dir: guides`.** Static output,
+   built-in search, no runtime service. `guides/` *is* the docs directory, so no page
+   moves and no second copy appears; `guides/README.md` becomes the site home and the
+   site is configured with `exclude_docs` for the two sales working documents
+   (`inferon-cost-audit.md`, `inferon-step2-materials.md`). Starlight was rejected
+   because it would require relocating every page into `src/content/docs/`.
+3. **One source of truth:** the Markdown in `guides/` is the site; `README.md` links
+   to the index (`guides/README.md`) and to the hosted pages once they exist.
 4. A CI job builds the site on every pull request and fails the pull request when the
    build breaks; a merge to `master` publishes it.
 5. Navigation covers: Quickstart · Concepts (workspace, provider, routing and tier
