@@ -53,10 +53,15 @@ Two rules keep these pages from rotting:
 2. **Run the checker.** `python3 scripts/check-guides.py` fails on a broken relative
    link, a missing footer, a troubleshooting page without its five sections, and a
    page whose mean sentence runs past 25 words. CI runs it on every push.
+3. **Add the page to `mkdocs.yml`.** The nav at the repository root is the site's table
+   of contents, and the build fails when a nav entry points at no file, or a page is
+   missing from it. The site is built with `mkdocs build --strict` (Python 3.12,
+   `pip install -r requirements-docs.txt`); CI builds it on every push and keeps the
+   output as an artifact. `guides/` is the docs directory, so nothing is copied.
 
 Not published: `inferon-cost-audit.md` and `inferon-step2-materials.md` are sales and
 outreach working documents. They stay in the repository and out of the site, and no
 page here links to them.
 
-_Last verified 2026-11-05 by `scripts/check-guides.py` (master f2165a3)._
+_Last verified 2026-11-05 by `scripts/check-guides.py` (master 5f97dd7)._
 

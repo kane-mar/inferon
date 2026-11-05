@@ -33,8 +33,18 @@ repository public (it is AGPL; the goal is external developers anyway) and use G
 Pages, which keeps the site in the same place as the code. **Revisit** Read the Docs
 if versioned docs (`v1`, `latest`) become a requirement.
 
-The generator decision stands either way (AC2), so the site can be built and previewed
-before any host is confirmed.
+**Built 2026-11-05, host still pending (PO: "build first, choose later").**
+`mkdocs.yml` at the repository root builds `guides/` as the docs directory with
+`exclude_docs` for the two sales documents; `requirements-docs.txt` pins
+`mkdocs-material==9.8.0`; a CI `docs-site` job installs the pin, runs
+`mkdocs build --strict`, asserts no sales document reached `site/`, and uploads the
+output as an artifact. Verified by building the real tree in a `python:3.12-slim`
+container: 8 pages, 404 page, 40 KB search index, every `.md` cross-link rewritten to
+its directory URL, `#if-it-did-not-work` and `#when-to-stop-and-ask` anchors present,
+`--strict` clean. Attaching the artifact to any candidate is now a copy, not a build.
+
+**Revisit trigger:** Material for MkDocs reaches end of life on **2027-05-05** (its
+successor, Zensical, reads the same `mkdocs.yml`). Migrate before that date.
 
 **Acceptance Criteria**
 1. A static docs site is published at **docs.inferon.agilefederation.com** on the

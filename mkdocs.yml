@@ -1,0 +1,69 @@
+# The documentation site (ITEM-112). `guides/` is the docs directory, so a page is
+# written once: it is what GitHub renders and what this builds. The two sales working
+# documents are excluded, not copied elsewhere.
+site_name: Inferon
+site_description: One OpenAI-compatible endpoint in front of every model, with true cost numbers and cost protection.
+docs_dir: guides
+# site_url is set when the host is chosen (ITEM-112 is blocked on that decision); the
+# build does not need it, but search canonical links improve once it is filled in.
+# site_url: https://docs.inferon.agilefederation.com/
+
+exclude_docs: |
+  inferon-cost-audit.md
+  inferon-step2-materials.md
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Start here: README.md
+  - Getting started:
+      - Your first request: using/first-request.md
+      - Move an existing SDK: using/move-an-sdk.md
+  - Troubleshooting:
+      - '401 or 403: the key is not accepted': troubleshooting/401-403.md
+      - 'no_provider: nowhere to send the request': troubleshooting/no-provider.md
+      - '429: our limit, or the provider''s': troubleshooting/too-many-requests.md
+      - '5xx and the fallback chain': troubleshooting/upstream-5xx.md
+  - Run it yourself:
+      - Inferon on your own network: inferon-self-hosted.md
+
+# A new page must appear here as well as in guides/README.md; the nav is the site's
+# table of contents and MkDocs fails the build when a nav entry points at no file.

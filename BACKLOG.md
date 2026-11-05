@@ -24,7 +24,7 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 
 | ID | Title | Type | Status |
 |----|-------|------|--------|
-| ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO (2026-11-05)** — Cloudflare was removed at the PO's request, so the host is an open decision. Recommendation: **Netlify Free** (the only $0 option that accepts a private repo, allows commercial use and gives PR previews); second: make the repository public (it is AGPL) and use **GitHub Pages**; **Read the Docs Community** only fits once the repo is public (free for open source only). Render is viable without previews. The generator is already decided: MkDocs Material with `docs_dir: guides` — no page moves, `guides/README.md` is the home, the two sales documents excluded, `scripts/check-guides.py` as the link check. Static only: no new container, $0/month |
+| ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO — the site builds and is verified; only the host is missing (2026-11-05)** — `mkdocs.yml` builds `guides/` as the docs directory (MkDocs Material, `docs_dir: guides`, sales documents excluded), `requirements-docs.txt` pins the toolchain, and a CI `docs-site` job runs `mkdocs build --strict`, proves no sales document is published and uploads the artifact. Verified in a `python:3.12-slim` container: 8 pages, search index, anchors, `.md` links rewritten, strict clean. Remaining decision: the host — recommendation **Netlify Free** (only $0 option that takes the private repo, allows commercial use, gives PR previews); second **GitHub Pages** once the repo is public; **Read the Docs Community** free only for open source. Then point `docs.inferon.agilefederation.com` at it. Revisit Material (EOL 2027-05-05, successor Zensical) |
 | ITEM-123 | A refusal you can point at — trace ids on gateway errors, and no_provider untraced | bug | **ready** — measured on the live host: a `no_provider` refusal writes no trace at all (Quality reads `requests: 0`), and the errors the gateway generates (`no_provider`, `rate_limited`, `upstream_error`) carry no `x-inferon-trace-id`, while a relayed provider error does. Trace the route-resolution refusal and decorate every generated error with the id of the row it wrote. Small code, one proxy deploy; the ITEM-117 `no_provider` and `429` pages lose their caveat in the same change |
 | ITEM-118 | What answers your requests (providers, own models, tiers, checker) | feature | **ready** — four configuration pages: add your own provider (five kinds, local/keyless included), models and tier pairs, the output checker, the automatic router and its threshold |
 | ITEM-119 | Protecting the bill and the context | feature | **ready** — four configuration pages: budgets and rate limits that do not block real traffic, a fallback chain whose triggers fire, prompt caching (why the audit says "not cached"), pruning and its comparison group |
@@ -134,9 +134,9 @@ removed and Netlify is the recommendation. Same form: one ranked list, gated at 
 bottom, then delivered history, then retired items._
 
 **Pullable, in order:** ITEM-123 (the refusal you can point at), then the guide
-slices ITEM-118 → 121. ITEM-112 sits above them and is blocked on the PO's host
-choice: the pages exist in the repository and are shipped to the host, but there is
-no public site yet.
+slices ITEM-118 → 121. ITEM-112 has nothing left to build — the site builds, is
+checked in CI and is attached to any host as an artifact — so it waits on the PO's
+host choice alone.
 
 **PO action (not a build item):** the goal's first clause — put it in front of
 **real external developers** — has no open item. ITEM-018 closed on dogfooding

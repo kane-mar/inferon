@@ -1,5 +1,22 @@
 # Refinement Log
 
+## 2026-11-05 (later still) — the docs site is built; the host waits
+
+PO: "build first, choose later." Done: `mkdocs.yml` (`docs_dir: guides`, no page moves,
+`exclude_docs` for the two sales documents), `requirements-docs.txt` pinning
+`mkdocs-material==9.8.0`, and a CI `docs-site` job that installs the pin, builds with
+`--strict`, asserts no sales document was published and uploads `site/` as an artifact.
+
+Verified by building the real tree in `python:3.12-slim` on the durable host rather than
+trusting a laptop Python (this machine is 3.8; Material 9.8 needs 3.11+): 8 pages, 404
+page, 40 KB search index, `.md` cross-links rewritten to directory URLs, section anchors
+present, strict clean. MkDocs rewrites the `.md` links, so the repository files stay
+GitHub-readable and the site works without a second copy.
+
+Consequence for the backlog: ITEM-112 no longer has build work. It is a one-line host
+decision plus DNS. Flagged for the future: Material EOL 2027-05-05, successor Zensical
+reads the same config.
+
 ## 2026-11-05 (later) — ITEM-117 delivered; two data-plane gaps captured as ITEM-123
 
 Four troubleshooting pages went live (401/403, no_provider, 429 ours-vs-provider,
