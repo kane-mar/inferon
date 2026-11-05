@@ -12,7 +12,7 @@ text = open('BACKLOG.md').read()
 
 # The known dependency order inside the gated block. A new gated item must be
 # placed deliberately, not appended.
-GATED_ORDER = ('ITEM-076', 'ITEM-032', 'ITEM-029', 'ITEM-030', 'ITEM-072', 'ITEM-084')
+GATED_ORDER = ('ITEM-076', 'ITEM-032', 'ITEM-029', 'ITEM-030', 'ITEM-072', 'ITEM-084', 'ITEM-114')
 MARKER = 'gated below this line'
 
 

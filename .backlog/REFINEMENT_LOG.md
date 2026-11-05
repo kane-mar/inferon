@@ -285,3 +285,47 @@ unblocked: **076** (training/gold set) → **032** (adapter serving) → **029**
 
 Every item's `**Ranking note.**` now carries its rank and V/E score, so the order is
 auditable from the item file alone.
+
+## 2026-11-05 — public face: licence, hosted docs, guide suite; the for-profit path staged
+
+PO request, not a delivery defect: the project needs a public face for traction
+(hosted documentation, task guides) and a licence that stays honest as open source
+now but does not block a company later selling the hosted service **and** a licence
+of the Docker image.
+
+Ranked the three pullable items value-first, effort as the tie-breaker:
+
+1. **111 — licence, CLA, trademark** (V5/E1). The only item that blocks everything
+   else: with no root `LICENSE` the repository is "all rights reserved", so today
+   nobody may legally deploy it and the open-source publicity plan is empty. One
+   afternoon of work, and it changes what every later publication may say.
+2. **112 — hosted documentation site** (V4/E2). Publishing the existing README and
+   guides is worth more than any new page: it turns the repo into a link you can send
+   someone. Cloudflare Pages because its free plan has no bandwidth ceiling, a custom
+   domain with TLS, and per-pull-request previews; Vercel's free tier is excluded
+   because its terms restrict commercial use. docs.rs covers the Rust API for free.
+3. **113 — guide suite** (V4/E3). The content that makes 112 worth visiting, and the
+   answer to the support questions we already see (`no_provider`, exhausted chains,
+   "quality dropped", empty dashboard). Larger than 112, so it sits below it.
+
+**Licence decision, recorded so it is not quietly reversed.** AGPL-3.0-only for the
+core, with a CLA so the owner can also license commercially. MIT/Apache-2.0 gives the
+best adoption but hands a competitor the right to host a closed fork and leaves
+nothing to sell; BSL/FSL protect the business but cannot be called open source, which
+kills the stated traction mechanism; open core keeps the core adoptable but only
+monetises the add-ons. AGPL is the only option that keeps the open-source claim, makes
+a hosted competitor publish their changes, and creates the thing a commercial licence
+sells — relief from copyleft plus warranty and indemnity. Cost accepted: AGPL is on
+many corporate deny-lists, which is friction for exactly the developer audience we
+want; the recorded fallback is Apache-2.0 + proprietary enterprise modules if that
+friction turns out to be the bigger obstacle.
+
+**Gated, not pullable:** *114 — commercial licence and paid image*. Selling a licence
+to a customer who does not exist yet is waste. Unpark on the first "we cannot use
+AGPL", or 10 active external workspaces, or procurement stopping on the licence. Its
+placement (bottom of the gated block, after 084) is recorded in
+`scripts/check-backlog-shape.py`'s `GATED_ORDER`.
+
+The product goal's "first clause" — putting this in front of real external
+developers — now has work behind it for the first time: 111 makes the code usable,
+112 makes it findable, 113 makes it adoptable.
