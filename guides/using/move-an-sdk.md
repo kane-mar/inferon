@@ -121,7 +121,8 @@ request.
 ## If it did not work
 
 Start with the table at the end of
-[Your first request](first-request.md#if-it-did-not-work). A `401` is the key; a
-`400` naming `no_provider` is the provider list.
+[Your first request](first-request.md#if-it-did-not-work). A `401` is the key
+([401 or 403](../troubleshooting/401-403.md)); a `400` naming `no_provider` is the
+provider list ([no_provider](../troubleshooting/no-provider.md)).
 
 _Last verified 2026-11-05 against the live host (master f2165a3)._

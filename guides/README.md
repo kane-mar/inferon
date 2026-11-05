@@ -11,6 +11,18 @@ good result looks like, and says what to check when you get something else.
 | [Your first request](using/first-request.md) | Sign in, create a key, add a provider and see the request in the dashboard. About five minutes. |
 | [Move an existing SDK to Inferon](using/move-an-sdk.md) | Change two lines in Python, Node or curl. Nothing else in your code moves. |
 
+## Troubleshooting
+
+One page per symptom. Same shape every time: what you see, what it means, the fix, how
+to confirm it, and when to stop and ask.
+
+| Page | Answers |
+|---|---|
+| [401 or 403: the key is not accepted](troubleshooting/401-403.md) | Missing, malformed or revoked key; a member hitting an owner-only action |
+| [no_provider](troubleshooting/no-provider.md) | The workspace has nowhere to send the request — the most common first failure |
+| [429: our limit, or the provider's](troubleshooting/too-many-requests.md) | Our per-key limit versus the provider's own refusal |
+| [5xx and the fallback chain](troubleshooting/upstream-5xx.md) | A provider failure, a connection failure of ours, and what an exhausted chain returns |
+
 ## Running it yourself
 
 | Page | What it gets you |

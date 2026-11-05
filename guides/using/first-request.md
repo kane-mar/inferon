@@ -101,8 +101,8 @@ prompt capture, the prompt and the answer are saved too.
 
 | What you see | What it means | Fix |
 |---|---|---|
-| `401` `{"error":{"message":"missing or invalid Authorization header","type":"invalid_api_key"}}` | The request carried no key, or a key we do not know. | Send `Authorization: Bearer $INFERON_API_KEY`. If the key was revoked, create a new one. |
-| `400` `{"error":{"message":"no upstream provider configured — add one in Dashboard → Providers","type":"no_provider"}}` | The workspace has no provider, so there is nothing to forward to. | Do step 3 above. |
+| `401` `{"error":{"message":"missing or invalid Authorization header","type":"invalid_api_key"}}` | The request carried no key, or a key we do not know. | Send `Authorization: Bearer $INFERON_API_KEY`. If the key was revoked, create a new one — see [401 or 403](../troubleshooting/401-403.md). |
+| `400` `{"error":{"message":"no upstream provider configured — add one in Dashboard → Providers","type":"no_provider"}}` | The workspace has no provider, so there is nothing to forward to. | Do step 3 above — see [no_provider](../troubleshooting/no-provider.md). |
 | `400` `{"error":{"message":"no Anthropic provider configured — add one in Dashboard → Providers","type":"no_provider"}}` | You called `/v1/messages`, which needs a provider of type `Anthropic`. | Add an `Anthropic` provider, or call `/v1/chat/completions`. |
 
 ## Next steps
