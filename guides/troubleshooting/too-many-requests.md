@@ -65,9 +65,9 @@ For **the provider's**:
 - Both: **Quality → Errors by cause** names the class verbatim (`rate_limited` or
   `upstream_429`), so the count tells you which one is still happening.
 
-The `429` we generate carries no `x-inferon-trace-id` header. Match it by time and by
-the `rate_limited` counter instead of by trace id. A relayed provider `429` does carry
-the header.
+Both kinds of `429` carry `x-inferon-trace-id`, and each names its own row: ours is
+traced as `rate_limited`, and the provider's as `upstream_429`. The class in **Errors by
+cause** is the row's class, so the header and the counter agree.
 
 ## When to stop and ask
 
@@ -79,4 +79,4 @@ the header.
 - A fallback step handles `429` and the client still receives `429`, with **Routing →
   Recent changes** showing the chain you expect.
 
-_Last verified 2026-11-05 against the live host (master 09f47d8)._
+_Last verified 2026-11-05 against the live host (master 3da7bd3)._

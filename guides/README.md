@@ -63,5 +63,5 @@ Not published: `inferon-cost-audit.md` and `inferon-step2-materials.md` are sale
 outreach working documents. They stay in the repository and out of the site, and no
 page here links to them.
 
-_Last verified 2026-11-05 by `scripts/check-guides.py` (master 5f97dd7)._
+_Last verified 2026-11-05 by `scripts/check-guides.py` (master 3da7bd3)._
 

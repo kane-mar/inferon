@@ -38,9 +38,10 @@ The workspace has no provider that can take this request. There are three shapes
 - **No provider for the model.** A provider exists, but the model you asked for is not
   served by any of them.
 
-**This failure leaves no trace.** No row is written and the response carries no
-`x-inferon-trace-id`, so the dashboard shows nothing. The Quality report stays at zero
-requests. That is why the fix is in the provider list and not in the reports.
+**The refusal is recorded.** The answer carries `x-inferon-trace-id`, and that id is
+the row **Quality → Errors by cause** counts under the class `inferon_4xx`. Nothing was
+sent upstream, so there is no spend and no provider traffic — but the attempt is
+visible, with its model and its time.
 
 ## Fix
 
@@ -85,4 +86,4 @@ refused after this, the answer is a different one — read the body again.
 - You need an Anthropic provider and do not have an Anthropic account.
 - Something other than you seeded this workspace and you cannot tell which key it uses.
 
-_Last verified 2026-11-05 against the live host (master 09f47d8)._
+_Last verified 2026-11-05 against the live host (master 3da7bd3)._
