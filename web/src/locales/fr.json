@@ -333,7 +333,7 @@
     "owner_only": "Seul le propriétaire de l’espace de travail peut modifier le routage.",
     "error": "Impossible d’enregistrer le routage. Veuillez réessayer.",
     "controls": "Réglages",
-    "tier_pairs": "Paires de paliers",
+    "tier_pairs": "Paires de modèles moins chers",
     "tier_pairs_help": "Envoyez le trafic simple qui demande un modèle cher vers un modèle moins cher que vous choisissez, y compris votre propre modèle local. Vos paires passent avant celles intégrées.",
     "tier_pairs_empty": "Aucune paire. La table intégrée s’applique (gpt-4o → gpt-4o-mini, deepseek-v4-pro → deepseek-flash).",
     "tier_pairs_frontier": "Modèle cher",
@@ -341,7 +341,7 @@
     "tier_pairs_select": "Sélectionner un modèle…",
     "tier_pairs_add": "Ajouter la paire",
     "tier_pairs_inactive": "inactive — un des modèles est désactivé",
-    "tier_pairs_error": "Impossible d’enregistrer les paires. Veuillez réessayer.",
+    "tier_pairs_error": "Impossible d’enregistrer les paires. Réessayez.",
     "prune": "Élagage du contexte",
     "triggers_help": "Chaque étape indique ce qu’elle traite. Par défaut : erreurs de connexion, 429 et 5xx. Ajoutez « vérificateur » à une étape seulement si une réponse structurée invalide doit y être renvoyée, au lieu du modèle intégré.",
     "triggers": "Traite",
@@ -374,7 +374,7 @@
     "setting_pii_redact_storage": "Masquer les données personnelles (stockage)",
     "setting_pii_redact_wire": "Masquer les données personnelles (réseau)",
     "setting_fallbacks": "Chaîne de repli",
-    "setting_tier_pairs": "Paires de paliers",
+    "setting_tier_pairs": "Paires de modèles moins chers",
     "setting_prune": "Élagage du contexte"
   },
   "ControlsPage": {
@@ -624,7 +624,7 @@
     "claim_p50": "surcoût médian sous 1 ms",
     "claim_p95": "surcoût au 95e centile sous 5 ms (repère une baisse du cache)",
     "claim_window": "Mesuré sur cette version : les {hours} dernières heures ({samples} échantillon(s), médiane mesurée {observed}). Les cartes ci-dessus décrivent la période que vous avez choisie.",
-    "claim_note": "Mesuré comme proxy_us : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur, donc le temps du fournisseur et le corps de la réponse ne sont pas comptés. Une requête « chaude » arrive dans la fenêtre du cache ; la première après une période d’inactivité doit aussi charger la configuration.",
+    "claim_note": "Mesuré comme le temps de la passerelle : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur, donc le temps du fournisseur et le corps de la réponse ne sont pas comptés. Une requête « chaude » arrive dans la fenêtre du cache ; la première après une période d’inactivité doit aussi charger la configuration.",
     "met": "tenue",
     "not_met": "non tenue",
     "end_to_end": "Bout en bout",
@@ -645,7 +645,7 @@
     "model": "Modèle",
     "requests": "Requêtes",
     "no_samples": "Aucune requête mesurée sur cette période.",
-    "overhead_help": "proxy_us : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur. Le temps du fournisseur et le corps de la réponse ne sont pas comptés.",
+    "overhead_help": "le temps de la passerelle : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur. Le temps du fournisseur et le corps de la réponse ne sont pas comptés.",
     "under_1ms_help": "Part des requêtes mesurées dont la surcharge est restée sous la promesse de 1 ms.",
     "samples_help": "Requêtes dont le surcoût a été mesuré sur cette période. C’est la base de tous les chiffres de cette page.",
     "total_help": "De bout en bout : du début de la requête au dernier octet de la réponse.",
@@ -708,5 +708,35 @@
   "WindowChip": {
     "label": "Derniers",
     "days": "{days} jours"
+  },
+  "ErrorClass": {
+    "upstream_429": "Le fournisseur a limité la requête",
+    "upstream_429_help": "Elle a atteint le fournisseur et a été refusée. Elle compte quand même sur votre facture. Ajoutez une étape de repli qui gère 429, ou ralentissez.",
+    "upstream_5xx": "Le fournisseur a échoué",
+    "upstream_5xx_help": "Le fournisseur a renvoyé une erreur. Une étape de repli qui gère 5xx répond à la place.",
+    "client_4xx": "Le fournisseur a rejeté la requête",
+    "client_4xx_help": "La requête ne convient pas à ce fournisseur : souvent un modèle qu’il ne sert pas, ou un champ qu’il n’accepte pas.",
+    "inferon_4xx": "Refusée avant envoi",
+    "inferon_4xx_help": "Aucun fournisseur ne pouvait la prendre : aucun configuré, modèle désactivé, ou limite de la clé atteinte. Rien n’a été facturé.",
+    "rate_limited": "La limite de votre clé",
+    "rate_limited_help": "Requêtes ou jetons par minute pour cette clé. Augmentez la limite, ou donnez une clé à chaque service.",
+    "inferon_5xx": "Une erreur de la passerelle",
+    "inferon_5xx_help": "Notre côté a échoué avant qu’un modèle réponde. Réessayez une fois ; si cela se répète, signalez l’identifiant de trace.",
+    "transport": "Le fournisseur est injoignable",
+    "transport_help": "Rien n’a été envoyé : mauvaise adresse, TLS, pare-feu ou délai dépassé. Testez le fournisseur depuis la passerelle.",
+    "timeout": "Le fournisseur a mis trop de temps",
+    "timeout_help": "La connexion était ouverte mais aucune réponse n’est arrivée à temps. Un modèle plus rapide ou une invite plus courte aide.",
+    "guard": "Le vérificateur de sortie a refusé la réponse",
+    "guard_help": "La réponse ne respectait pas le schéma demandé.",
+    "client_abort": "Votre client s’est déconnecté",
+    "client_abort_help": "La connexion s’est fermée avant la fin de la réponse : il n’y a donc rien à facturer."
+  },
+  "Outcome": {
+    "flushed": "A passé le vérificateur",
+    "flushed_help": "La réponse structurée respectait le contrat et a été servie.",
+    "fallback": "Relancé sur un modèle plus fort",
+    "fallback_help": "La réponse ne correspondait pas : la requête a été rejouée sur un modèle plus fort et cette réponse a été servie.",
+    "fallback_failed": "Le relais sur un modèle plus fort a échoué",
+    "fallback_failed_help": "Les deux réponses ont manqué le contrat : le client a reçu l’échec."
   }
 }

@@ -316,11 +316,7 @@ export const ProvidersPanel = (props: {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="
-          font-mono text-xs font-medium tracking-wide text-muted-foreground
-          uppercase
-        "
-        >
+        <h2 className="text-sm font-semibold text-muted-foreground">
           {t('list_title', { count: props.data.providers.length })}
         </h2>
         {canEdit && (
@@ -505,11 +501,7 @@ export const ProvidersPanel = (props: {
                           sm:grid-cols-2
                         "
                       >
-                        <h3 className="
-                          font-mono text-xs font-medium tracking-wide uppercase
-                          sm:col-span-2
-                        "
-                        >
+                        <h3 className="text-sm font-semibold sm:col-span-2">
                           {t('edit_title')}
                         </h3>
                         <label className="text-sm">

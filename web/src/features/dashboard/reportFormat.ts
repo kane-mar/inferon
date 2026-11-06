@@ -3,8 +3,10 @@
  * Pure formatters only — the one component lives in `ReportStatus`.
  */
 
-export const HEAD = 'px-3 py-2 text-left font-mono text-xs uppercase text-muted-foreground';
-export const CELL = 'px-3 py-2 text-sm tabular-nums';
+// ITEM-124: a column header is a sentence a reader scans, not a code label. 13px
+// sans, sentence case, no tracking; the row gains room so 15px text is not cramped.
+export const HEAD = 'px-3 py-2.5 text-left text-xs font-medium text-muted-foreground';
+export const CELL = 'px-3 py-2.5 text-sm tabular-nums';
 
 export const us = (value: number | null): string =>
   value == null ? '—' : `${value.toLocaleString('en-US')} µs`;

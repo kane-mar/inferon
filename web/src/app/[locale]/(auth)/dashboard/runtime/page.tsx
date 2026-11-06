@@ -203,7 +203,9 @@ export default async function RuntimePage(props: {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    <th className="py-2 pr-3 font-mono uppercase">{t('heatmap_model')}</th>
+                    <th className="py-2.5 pr-3 font-medium text-muted-foreground">
+                      {t('heatmap_model')}
+                    </th>
                     {data.heatmap.buckets.map(bucket => (
                       <th key={bucket} className="p-2 text-right font-mono">
                         {bucket.slice(5)}

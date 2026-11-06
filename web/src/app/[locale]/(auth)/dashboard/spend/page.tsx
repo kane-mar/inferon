@@ -16,8 +16,8 @@ import { formatCompact, formatInt, spendRows } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
-const HEAD = 'py-2 font-mono text-xs font-medium tracking-wide uppercase';
-const RIGHT = `${HEAD} text-right`;
+// ITEM-124: one header atom for every report — 13px sans, sentence case.
+const RIGHT = `${REPORT_HEAD} text-right`;
 
 /** The spend detail: every dollar by model, provider, key and system prompt. */
 export default async function SpendReportPage(props: {
@@ -113,7 +113,7 @@ export default async function SpendReportPage(props: {
             <table className="mt-4 w-full text-left text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground">
-                  <th className={HEAD}>{t('model')}</th>
+                  <th className={REPORT_HEAD}>{t('model')}</th>
                   <th className={RIGHT}>{t('requests')}</th>
                   <th className={RIGHT}>{t('tokens')}</th>
                   <th className={RIGHT}>{t('cached')}</th>
@@ -201,7 +201,7 @@ export default async function SpendReportPage(props: {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b text-muted-foreground">
-                      <th className={HEAD}>{t('prompt_hash')}</th>
+                      <th className={REPORT_HEAD}>{t('prompt_hash')}</th>
                       <th className={RIGHT}>{t('requests')}</th>
                       <th className={RIGHT}>{t('prompt_tokens')}</th>
                       <th className={RIGHT}>{t('cached')}</th>

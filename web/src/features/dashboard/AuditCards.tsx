@@ -1,4 +1,5 @@
 import { getTranslations } from 'next-intl/server';
+import { errorClassKeys } from '@/libs/labels';
 import { formatInt } from '@/libs/dashboardMetrics';
 import { Finding } from './Finding';
 import { money } from './money';
@@ -43,6 +44,16 @@ export type AuditData = {
 export const AuditCards = async (props: { locale: string; data: AuditData }) => {
   const { locale, data } = props;
   const t = await getTranslations({ locale, namespace: 'AuditPage' });
+  // ITEM-125: name the failure in words; the code stays beside the count.
+  const causes = await getTranslations({ locale, namespace: 'ErrorClass' });
+  const failure = (() => {
+    const top = data.quality.topFailure;
+    if (!top) {
+      return t('none');
+    }
+    const keys = errorClassKeys(top[0]);
+    return keys ? `${causes(keys.label)} · ${formatInt(top[1])}` : `${top[0]} · ${formatInt(top[1])}`;
+  })();
   const over = data.waste.over_provisioned;
   const misuse = data.waste.model_misuse;
   const cached = data.waste.cache_miss;
@@ -115,9 +126,7 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
           { label: t('guard_fallback_rate'), value: pct(data.quality.guardFallbackRate) },
           {
             label: t('top_error_class'),
-            value: data.quality.topFailure
-              ? `${data.quality.topFailure[0]} · ${formatInt(data.quality.topFailure[1])}`
-              : t('none'),
+            value: failure,
           },
         ]}
       />

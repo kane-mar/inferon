@@ -8,6 +8,7 @@ import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
+import { errorClassKeys } from '@/libs/labels';
 import { metricTone, THRESHOLDS, toneText } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
@@ -41,6 +42,16 @@ export default async function QualityPage(props: {
   ]);
   const overall = data.overall;
   const evalsCopy = await getTranslations({ locale, namespace: 'EvalsPage' });
+  // ITEM-125: a cause is a sentence, not a stored code. The code stays visible as
+  // the secondary hint support replies and log lines use.
+  const causes = await getTranslations({ locale, namespace: 'ErrorClass' });
+  const cause = (code: string) => {
+    const keys = errorClassKeys(code);
+    if (!keys) {
+      return { label: code, help: null, code: null };
+    }
+    return { label: causes(keys.label), help: causes(keys.help), code };
+  };
 
   return (
     <>
@@ -115,28 +126,37 @@ export default async function QualityPage(props: {
               <thead>
                 <tr className="border-b">
                   <th className={HEAD}>{t('class')}</th>
-                  <th className={HEAD}>{t('count')}</th>
+                  <th className={`${HEAD} text-right`}>{t('count')}</th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(overall.errors_by_class).map(([errorClass, count]) => (
-                  <tr
-                    key={errorClass}
-                    className="
-                      border-b
-                      last:border-0
-                    "
-                  >
-                    <td className={`
-                      ${CELL}
-                      font-mono
-                    `}
+                {Object.entries(overall.errors_by_class).map(([errorClass, count]) => {
+                  const { label, help, code } = cause(errorClass);
+                  return (
+                    <tr
+                      key={errorClass}
+                      className="
+                        border-b
+                        last:border-0
+                      "
                     >
-                      {errorClass}
-                    </td>
-                    <td className={CELL}>{count}</td>
-                  </tr>
-                ))}
+                      <td className={CELL}>
+                        <div className="font-medium">{label}</div>
+                        {help && (
+                          <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
+                            {help}
+                          </p>
+                        )}
+                        {code && (
+                          <code className="mt-1 block text-xs text-muted-foreground">
+                            {code}
+                          </code>
+                        )}
+                      </td>
+                      <td className={`${CELL} text-right`}>{count}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

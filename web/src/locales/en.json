@@ -333,7 +333,7 @@
     "owner_only": "Only the workspace owner can change routing.",
     "error": "Could not save routing. Please try again.",
     "controls": "Controls",
-    "tier_pairs": "Tier pairs",
+    "tier_pairs": "Cheaper model pairs",
     "tier_pairs_help": "Send simple traffic that asks for an expensive model to a cheaper one you choose, including your own local model. Your pairs win over the built-in ones.",
     "tier_pairs_empty": "No pairs. The built-in table applies (gpt-4o → gpt-4o-mini, deepseek-v4-pro → deepseek-flash).",
     "tier_pairs_frontier": "Expensive model",
@@ -341,7 +341,7 @@
     "tier_pairs_select": "Select a model…",
     "tier_pairs_add": "Add pair",
     "tier_pairs_inactive": "inactive — one of the models is disabled",
-    "tier_pairs_error": "Could not save tier pairs. Please try again.",
+    "tier_pairs_error": "Could not save the pairs. Please try again.",
     "prune": "Context pruning",
     "triggers_help": "Each step lists what it handles. By default that is connection errors, 429s and 5xx. Add “checker” to a step only if a failed structured response should be retried there, instead of on the built-in model.",
     "triggers": "Handles",
@@ -374,7 +374,7 @@
     "setting_pii_redact_storage": "Hide personal data in storage",
     "setting_pii_redact_wire": "Hide personal data in transit",
     "setting_fallbacks": "Fallback chain",
-    "setting_tier_pairs": "Tier pairs",
+    "setting_tier_pairs": "Cheaper model pairs",
     "setting_prune": "Context pruning"
   },
   "ControlsPage": {
@@ -624,7 +624,7 @@
     "claim_p50": "median overhead under 1 ms",
     "claim_p95": "95th percentile overhead under 5 ms (catches a cache slowdown)",
     "claim_window": "Measured on this build: the last {hours} h ({samples} sample(s), measured median {observed}). The cards above describe the window you selected.",
-    "claim_note": "Measured as proxy_us: from the start of the request to just before it is sent to the provider, so provider time and the response body are not counted. Warm requests arrive within the cache window; the first request after an idle period also has to load the config.",
+    "claim_note": "Gateway time is measured from the start of the request to just before it is sent to the provider, so provider time and the response body are not counted. Warm requests arrive within the cache window; the first request after an idle period also has to load the config.",
     "met": "met",
     "not_met": "not met",
     "end_to_end": "End to end",
@@ -645,7 +645,7 @@
     "model": "Model",
     "requests": "Requests",
     "no_samples": "No requests measured in this window.",
-    "overhead_help": "proxy_us: from the start of the request to just before it is sent to the provider. Provider time and the response body are not counted.",
+    "overhead_help": "From the start of the request to just before it is sent to the provider. Provider time and the response body are not counted.",
     "under_1ms_help": "Share of measured requests whose own overhead stayed under the 1 ms claim.",
     "samples_help": "Requests with a measured overhead in this window. This is the base for every number on this page.",
     "total_help": "End to end: from the start of the request to the last byte of the response.",
@@ -708,5 +708,35 @@
   "WindowChip": {
     "label": "Last",
     "days": "{days} days"
+  },
+  "ErrorClass": {
+    "upstream_429": "The provider rate-limited it",
+    "upstream_429_help": "It reached the provider and was refused. It still counts on your provider bill. Add a fallback step that handles 429, or slow down.",
+    "upstream_5xx": "The provider failed",
+    "upstream_5xx_help": "The provider returned an error. A fallback step that handles 5xx answers instead of returning the failure.",
+    "client_4xx": "The provider rejected the request",
+    "client_4xx_help": "The request itself was wrong for that provider — usually a model name it does not serve, or a field it does not accept.",
+    "inferon_4xx": "Refused before it was sent",
+    "inferon_4xx_help": "No provider could take it: none configured, the model is disabled, or your key hit a limit. Nothing was billed.",
+    "rate_limited": "Your key's rate limit",
+    "rate_limited_help": "Requests or tokens per minute for this key. Raise it on the key, or give each service its own key.",
+    "inferon_5xx": "A gateway error",
+    "inferon_5xx_help": "Our side failed before a model answered. Retry once; if it repeats, report the trace id.",
+    "transport": "The provider could not be reached",
+    "transport_help": "Nothing was sent: wrong address, TLS, firewall or a timeout. Test the provider from the gateway.",
+    "timeout": "The provider took too long",
+    "timeout_help": "The connection was open but no answer arrived in time. A faster model or a shorter prompt helps.",
+    "guard": "The output checker refused the answer",
+    "guard_help": "The answer did not match the schema the request asked for.",
+    "client_abort": "Your client disconnected",
+    "client_abort_help": "The connection closed before the answer finished, so there is no completion to bill."
+  },
+  "Outcome": {
+    "flushed": "Passed the checker",
+    "flushed_help": "The structured answer matched the contract and was served.",
+    "fallback": "Retried on a stronger model",
+    "fallback_help": "The answer did not match, so the request was replayed on a stronger model and that answer was served.",
+    "fallback_failed": "Retry on a stronger model failed",
+    "fallback_failed_help": "Both answers missed the contract, so the client received the failure."
   }
 }

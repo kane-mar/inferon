@@ -40,7 +40,7 @@ const msOrDash = (value: number | null | undefined): string =>
 const Th = (props: { children: React.ReactNode; align?: 'left' | 'right' }) => (
   <th
     className={cn(
-      'py-2 font-mono text-xs font-medium tracking-wide uppercase',
+      'py-2.5 text-xs font-medium text-muted-foreground',
       props.align === 'right' && 'text-right',
     )}
   >

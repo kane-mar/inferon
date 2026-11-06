@@ -19,6 +19,10 @@ import { Icon } from './Icon';
  * `goodWhen` marks which direction is an improvement (spend/down, requests/up).
  * `tone` highlights a value that needs attention — the card is not tinted, only
  * the value and its glyph, so colour stays a highlight rather than decoration.
+ *
+ * ITEM-124/125: the label is sans and sentence case at 15px, and the definition is
+ * printed on the card. It used to live in a `title` attribute, which a touch device
+ * never shows and nobody hovers to discover — the page has to explain itself.
  */
 export const KpiCard = (props: {
   label: string;
@@ -37,6 +41,8 @@ export const KpiCard = (props: {
   tone?: Tone;
 }) => {
   const delta = props.delta ?? null;
+  // One line under the value: what this measures, in the order the caller gave it.
+  const explanation = props.definition ?? props.hint;
   const direction = trend(delta);
   const improved
     = direction === 'flat'
@@ -44,24 +50,17 @@ export const KpiCard = (props: {
       : ((props.goodWhen ?? 'up') === 'up') === (direction === 'up');
 
   return (
-    <div className={KPI_CARD} title={props.definition ?? props.hint}>
+    <div className={KPI_CARD}>
       <div className="flex items-baseline justify-between gap-2">
-        <div
-          className={cn(
-            `
-              flex items-center gap-1.5 font-mono text-xs font-medium
-              tracking-wide uppercase
-            `,
-            KPI_SUBTLE,
-          )}
-        >
+        <div className={cn('flex items-center gap-1.5 text-sm font-medium', KPI_SUBTLE)}>
           {props.icon && (
-            <Icon name={props.icon} size={14} className="text-muted-foreground" />
+            <Icon name={props.icon} size={16} className="text-muted-foreground" />
           )}
           {props.label}
         </div>
+        {/* Locale-neutral: the page's window chip spells the period out. */}
         {props.window != null && (
-          <span className={cn('font-mono text-[10px] tracking-wide uppercase', KPI_SUBTLE)}>
+          <span className={cn('text-xs tabular-nums', KPI_SUBTLE)}>
             {props.window}
             d
           </span>
@@ -89,8 +88,8 @@ export const KpiCard = (props: {
           </span>
         )}
       </div>
-      {props.hint && (
-        <div className={cn('mt-1 text-xs', KPI_SUBTLE)}>{props.hint}</div>
+      {explanation && (
+        <p className={cn('mt-2 text-xs leading-relaxed', KPI_SUBTLE)}>{explanation}</p>
       )}
     </div>
   );

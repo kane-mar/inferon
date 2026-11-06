@@ -57,7 +57,7 @@ export const Features = () => {
               </div>
 
               <div className="
-                mt-3 font-mono text-sm font-semibold tracking-wide uppercase
+                mt-3 text-sm font-semibold
               "
               >
                 {t(title)}

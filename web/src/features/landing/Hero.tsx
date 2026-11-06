@@ -33,7 +33,7 @@ export const Hero = () => {
         <span
           className={badgeVariants({
             variant: 'outline',
-            className: 'font-mono text-xs tracking-wide uppercase',
+            className: 'text-xs font-semibold tracking-wide uppercase',
           })}
         >
           {t('badge')}

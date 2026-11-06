@@ -7,6 +7,7 @@ import { money } from '@/features/dashboard/money';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { InferonApi } from '@/libs/InferonApi';
+import { guardOutcomeKeys } from '@/libs/labels';
 import { currentSession } from '@/libs/session';
 
 /**
@@ -47,6 +48,8 @@ export default async function OperatorPage(props: OperatorPageProps) {
     locale,
     namespace: 'OperatorPage',
   });
+  // ITEM-125: an outcome is a sentence. The stored value stays as the hint.
+  const outcomes = await getTranslations({ locale, namespace: 'Outcome' });
   const api = InferonApi.fromEnv();
   const auth = { cookie: session.cookie };
   const [summary, tenants, guard, alerts, activation, evolution] = await Promise.all([
@@ -192,7 +195,22 @@ export default async function OperatorPage(props: OperatorPageProps) {
                             last:border-0
                           "
                         >
-                          <td className="py-2">{outcome.outcome}</td>
+                          <td className="py-2">
+                            {(() => {
+                              const keys = guardOutcomeKeys(outcome.outcome);
+                              if (!keys) {
+                                return outcome.outcome;
+                              }
+                              return (
+                                <div>
+                                  <div>{outcomes(keys.label)}</div>
+                                  <code className="text-xs text-muted-foreground">
+                                    {outcome.outcome}
+                                  </code>
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td className="py-2 tabular-nums">{outcome.requests}</td>
                         </tr>
                       ))}

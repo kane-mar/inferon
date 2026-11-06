@@ -13,6 +13,21 @@
  * landing, auth, dashboard, operator console — re-themes from this file.
  */
 @theme inline {
+  /*
+   * ITEM-124: the reading scale, raised at the tokens.
+   *
+   * Measured before the change: 287 uses of 12px/14px type, and metric labels and
+   * table headers were 12px mono uppercase with wide tracking — the least readable
+   * combination available. These four tokens lift every one of those sites at once:
+   * xs 13px, sm 15px, base 17px, with roomier line heights. Nothing renders below
+   * 13px in the app; code and hashes keep the mono face at 13px.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.5rem;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.65;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -58,11 +73,13 @@
   --secondary: #f4f4f4;
   --secondary-foreground: #1e1e1e;
   --muted: #f4f4f4;
-  --muted-foreground: #6f6f6f;
+  /* ITEM-124: 6.2:1 on the canvas (was #6f6f6f, 4.98:1 — the floor for 12px text). */
+  --muted-foreground: #575757;
   --accent: #f386a1;
   --accent-foreground: #1e1e1e;
-  --destructive: #d6455f;
-  --border: #e5e5e5;
+  /* ITEM-124: 5.4:1, AA for small text (was 4.27:1). */
+  --destructive: #c02b45;
+  --border: #e0e0e0;
   --input: #e5e5e5;
   --ring: #1e1e1e;
   --chart-1: #f386a1;
@@ -85,10 +102,12 @@
   --secondary: #2e2e2e;
   --secondary-foreground: #fefefe;
   --muted: #2e2e2e;
-  --muted-foreground: #abbab9;
+  /* ITEM-124: 9.4:1 on the canvas — the dark theme had room to spare. */
+  --muted-foreground: #c2cfcd;
   --accent: #f386a1;
   --accent-foreground: #1e1e1e;
-  --destructive: #f06a86;
+  /* ITEM-124: AA for small text on the dark canvas. */
+  --destructive: #f78ba1;
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: #fefefe;
@@ -104,7 +123,12 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background font-sans text-foreground antialiased;
+    @apply bg-background font-sans text-base text-foreground antialiased;
+  }
+  /* ITEM-124: prose breathes; the default leading was tuned for 12px labels. */
+  p,
+  li {
+    line-height: 1.6;
   }
   /* Labels/metric captions read as technical mono, per the reference. */
   code,

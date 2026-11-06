@@ -43,8 +43,8 @@ const LANG_LABEL: Record<SnippetLang, string> = {
 const StepHeading = (props: { n: number; children: React.ReactNode }) => (
   <h2 className="flex items-center gap-2 text-sm font-semibold">
     <span className="
-      flex size-5 items-center justify-center rounded-full bg-primary font-mono
-      text-[11px] text-primary-foreground
+      flex size-6 items-center justify-center rounded-full bg-primary font-mono
+      text-xs text-primary-foreground
     "
     >
       {props.n}

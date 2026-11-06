@@ -16,8 +16,8 @@ export const Section = (props: {
       <div className="mx-auto mb-12 max-w-3xl text-center">
         {props.subtitle && (
           <div className="
-            bg-linear-to-r from-accent to-chart-2 bg-clip-text font-mono text-sm
-            font-bold tracking-wide text-transparent uppercase
+            bg-linear-to-r from-accent to-chart-2 bg-clip-text text-sm font-bold
+            tracking-wide text-transparent uppercase
           "
           >
             {props.subtitle}
