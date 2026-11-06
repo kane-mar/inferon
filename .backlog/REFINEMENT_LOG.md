@@ -1,6 +1,6 @@
 # Refinement Log
 
-## 2026-11-05 (evening) — ITEM-123 delivered; refusals are evidence
+## 2026-11-06 — ITEM-123 delivered; refusals are evidence
 
 Fixed the two gaps ITEM-117 found: route resolution is now traced (`inferon_4xx`) and
 every generated refusal carries the id of its row. Verified live on the rebuilt proxy —

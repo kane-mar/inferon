@@ -86,4 +86,4 @@ refused after this, the answer is a different one — read the body again.
 - You need an Anthropic provider and do not have an Anthropic account.
 - Something other than you seeded this workspace and you cannot tell which key it uses.
 
-_Last verified 2026-11-05 against the live host (master 3da7bd3)._
+_Last verified 2026-11-06 against the live host (master 3da7bd3)._

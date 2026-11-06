@@ -1,4 +1,4 @@
-> **Delivered 2026-11-05.** Route resolution is traced on both surfaces (class
+> **Delivered 2026-11-06.** Route resolution is traced on both surfaces (class
 > `inferon_4xx`), and every generated refusal returns with the id of the row it wrote:
 > `no_provider`, `surface_mismatch`, `model_disabled`, `rate_limited`, the budget
 > refusal and `upstream_error`. The Anthropic handler starts its clock before routing so

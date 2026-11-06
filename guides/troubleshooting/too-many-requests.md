@@ -79,4 +79,4 @@ cause** is the row's class, so the header and the counter agree.
 - A fallback step handles `429` and the client still receives `429`, with **Routing →
   Recent changes** showing the chain you expect.
 
-_Last verified 2026-11-05 against the live host (master 3da7bd3)._
+_Last verified 2026-11-06 against the live host (master 3da7bd3)._
