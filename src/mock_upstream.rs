@@ -42,13 +42,13 @@ async fn chat_completions(Json(payload): Json<Value>) -> axum::response::Respons
             .body(axum::body::Body::from(sse_with_content(content).to_string()))
             .unwrap()
     };
-    if has_contract && streaming && crate::guard::is_cheap_tier(model) {
+    if has_contract && streaming && crate::guard::is_cheap_tier(model, &[], false) {
         if marker.starts_with("smoke-valid") {
             body(r#"{"answer":"42"}"#) // honest cheap answer -> guard flush
         } else {
             body(r#"{"other":1}"#) // lying cheap answer -> guard fallback
         }
-    } else if has_contract && streaming && !crate::guard::is_cheap_tier(model) {
+    } else if has_contract && streaming && !crate::guard::is_cheap_tier(model, &[], false) {
         body(r#"{"answer":"42"}"#) // frontier replay honours the contract
     } else if streaming {
         body("hi") // plain stream — the unguarded latency baseline

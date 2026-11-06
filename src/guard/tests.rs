@@ -23,35 +23,35 @@
 
     #[test]
     fn cheap_tier_includes_mini_and_deepseek_flash_families() {
-        assert!(is_cheap_tier("gpt-4o-mini"));
-        assert!(is_cheap_tier("gpt-4o-mini-2024-07-18"));
-        assert!(is_cheap_tier("deepseek-chat"));
-        assert!(is_cheap_tier("deepseek-v4-flash"));
-        assert!(is_cheap_tier("deepseek-v4-flash-vision-exp"));
+        assert!(is_cheap_tier("gpt-4o-mini", &[], false));
+        assert!(is_cheap_tier("gpt-4o-mini-2024-07-18", &[], false));
+        assert!(is_cheap_tier("deepseek-chat", &[], false));
+        assert!(is_cheap_tier("deepseek-v4-flash", &[], false));
+        assert!(is_cheap_tier("deepseek-v4-flash-vision-exp", &[], false));
         // `deepseek-flash` is the name the API actually returns and the router's
         // DeepSeek downgrade target (ITEM-054) — it must be cheap too.
-        assert!(is_cheap_tier("deepseek-flash"));
-        assert!(is_cheap_tier("deepseek-flash-2026-01-01"));
+        assert!(is_cheap_tier("deepseek-flash", &[], false));
+        assert!(is_cheap_tier("deepseek-flash-2026-01-01", &[], false));
     }
 
     #[test]
     fn frontier_models_are_not_cheap_tier() {
-        assert!(!is_cheap_tier("gpt-4o"));
-        assert!(!is_cheap_tier("deepseek-v4-pro"));
-        assert!(!is_cheap_tier("claude-3-5-sonnet-20241022"));
-        assert!(!is_cheap_tier(""));
+        assert!(!is_cheap_tier("gpt-4o", &[], false));
+        assert!(!is_cheap_tier("deepseek-v4-pro", &[], false));
+        assert!(!is_cheap_tier("claude-3-5-sonnet-20241022", &[], false));
+        assert!(!is_cheap_tier("", &[], false));
     }
 
     #[test]
     fn guarded_requires_schema_and_cheap_model() {
         let with_schema = payload_with_schema();
-        assert!(is_guarded_request(&with_schema, "deepseek-chat"));
+        assert!(is_guarded_request(&with_schema, "deepseek-chat", &[], false));
         // The router's DeepSeek downgrade target is guarded too (ITEM-054).
-        assert!(is_guarded_request(&with_schema, "deepseek-flash"));
+        assert!(is_guarded_request(&with_schema, "deepseek-flash", &[], false));
         // Same contract but a frontier model -> not guarded.
-        assert!(!is_guarded_request(&with_schema, "deepseek-v4-pro"));
+        assert!(!is_guarded_request(&with_schema, "deepseek-v4-pro", &[], false));
         // No contract -> never guarded, regardless of model.
-        assert!(!is_guarded_request(&plain_payload(), "deepseek-chat"));
+        assert!(!is_guarded_request(&plain_payload(), "deepseek-chat", &[], false));
     }
 
     #[test]
@@ -62,14 +62,14 @@
             "response_format": {"type": "json_object"},
             "messages": []
         });
-        assert!(!is_guarded_request(&json_mode, "gpt-4o-mini"));
+        assert!(!is_guarded_request(&json_mode, "gpt-4o-mini", &[], false));
         // json_schema without a .schema object is not a contract.
         let no_schema = serde_json::json!({
             "model": "gpt-4o-mini",
             "response_format": {"type": "json_schema", "json_schema": {"name": "x"}},
             "messages": []
         });
-        assert!(!is_guarded_request(&no_schema, "gpt-4o-mini"));
+        assert!(!is_guarded_request(&no_schema, "gpt-4o-mini", &[], false));
         assert!(request_schema(&no_schema).is_none());
     }
 
@@ -355,3 +355,53 @@
         assert_eq!(failed["outcome"], "fallback_failed");
         assert_eq!(failed["detail"], "http 500");
     }
+
+#[test]
+fn a_non_streaming_answer_is_validated_like_a_stream() {
+    // ITEM-128: the checker used to run only on streamed answers, so the most
+    // common structured request — a plain `json_schema` call — was never checked.
+    let schema = Some(serde_json::json!({
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+        "additionalProperties": false
+    }));
+    let valid = br#"{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"answer\":\"ok\"}"}}]}"#;
+    let invalid =
+        br#"{"choices":[{"index":0,"message":{"role":"assistant","content":"{\"wrong\":true}"}}]}"#;
+    let not_json =
+        br#"{"choices":[{"index":0,"message":{"role":"assistant","content":"not json at all"}}]}"#;
+    let empty = br#"{"choices":[{"index":0,"message":{"role":"assistant","content":""}}]}"#;
+
+    assert_eq!(check_guarded_json(valid, schema.as_ref()), Ok(()));
+    assert_eq!(
+        check_guarded_json(invalid, schema.as_ref()),
+        Err(GuardReason::SchemaViolation)
+    );
+    assert_eq!(
+        check_guarded_json(not_json, schema.as_ref()),
+        Err(GuardReason::InvalidJsonSyntax)
+    );
+    assert_eq!(
+        check_guarded_json(empty, schema.as_ref()),
+        Err(GuardReason::SchemaViolation),
+        "no content at all is a violation, never a panic"
+    );
+}
+
+#[test]
+fn a_workspace_treats_its_own_cheap_model_as_cheap() {
+    // ITEM-128: the cheap-tier test was a hard-coded model-name list, so a pair
+    // the workspace defined itself, and any model it hosts, never got checked.
+    let pairs = vec![crate::router::TierPair {
+        frontier: "my-frontier".to_string(),
+        cheap: "my-small".to_string(),
+    }];
+    assert!(is_cheap_tier("my-small", &pairs, false));
+    assert!(is_cheap_tier("my-small-8b-instruct", &pairs, false));
+    assert!(!is_cheap_tier("my-frontier", &pairs, false));
+    assert!(is_cheap_tier("any-local-model", &[], true), "local is free");
+    // The built-in families still count with no pairs of your own.
+    assert!(is_cheap_tier("deepseek-flash", &[], false));
+    assert!(!is_cheap_tier("gpt-4o", &[], false));
+}

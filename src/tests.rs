@@ -20,6 +20,27 @@
         format!("data: {frame}\n\ndata: [DONE]\n\n")
     }
 
+    /// A buffered (non-streaming) completion whose content is `content_json`.
+    fn plain_completion(content_json: &str) -> axum::response::Response {
+        axum::response::Response::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "id": "chatcmpl-plain",
+                    "object": "chat.completion",
+                    "model": "mock",
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": content_json},
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {"prompt_tokens": 9, "completion_tokens": 4}
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    }
+
     const SSE_BODY_NO_USAGE: &str =
         "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n";
     const CLIENT_KEY: &str = "sk-client-dev-key";
@@ -142,6 +163,9 @@
                     ))
                     .unwrap()
             }
+            // ITEM-128: the same two answers, buffered instead of streamed.
+            ("gpt-4o-mini", Some("plain-wrong")) => plain_completion(r#"{"other":1}"#),
+            ("gpt-4o-mini", Some("plain-valid")) => plain_completion(r#"{"answer":"42"}"#),
             // Content that satisfies the request's answer schema — flushed.
             ("gpt-4o-mini", Some("valid-json")) => axum::response::Response::builder()
                 .header("content-type", "text/event-stream")
@@ -182,6 +206,7 @@
                 .status(500)
                 .body(Body::from("boom"))
                 .unwrap(),
+            ("deepseek-v4-pro" | "gpt-4o", Some("plain-wrong")) => plain_completion(r#"{"answer":"42"}"#),
             // A frontier replay that honours the contract.
             ("deepseek-v4-pro" | "gpt-4o", Some("wrong-shape" | "truncated" | "guard-skip")) => {
                 axum::response::Response::builder()
@@ -3054,6 +3079,58 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert_eq!(ev["reason"], "schema_violation");
         assert_eq!(ev["guarded_model"], "gpt-4o-mini");
         assert!(rx.try_recv().is_err(), "fallback is not a second request");
+    }
+
+
+    /// ITEM-128: a client that does not stream asked for the same contract, so
+    /// the checker has to verify the buffered answer too — before 2026-11-06 it
+    /// only guarded streams, and every plain `json_schema` call went unchecked.
+    #[tokio::test]
+    async fn a_buffered_answer_is_checked_and_replayed_when_it_breaks_the_contract() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let body = json!({
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "plain-wrong"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"answer": {"type": "string"}},
+                        "required": ["answer"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        })
+        .to_string();
+        let response = build_router(state)
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let forwarded: Value =
+            serde_json::from_slice(&axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            forwarded["choices"][0]["message"]["content"], "{\"answer\":\"42\"}",
+            "the client receives the frontier replay, never the broken answer"
+        );
+        let msg = rx.recv().await.expect("exactly one trace");
+        assert_eq!(msg.request_model, "deepseek-v4-pro", "cost basis = the model that served");
+        let event = msg.guard_event.as_ref().expect("guard event recorded");
+        assert_eq!(event["outcome"], "fallback");
+        assert_eq!(event["reason"], "schema_violation");
+        assert_eq!(event["guarded_model"], "gpt-4o-mini");
     }
 
     #[tokio::test]

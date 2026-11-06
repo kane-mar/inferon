@@ -87,20 +87,42 @@ impl GuardReason {
 /// Cheap tier = the router's downgrade target family + the DeepSeek flash
 /// family that live traffic already uses (deepseek-chat resolves to
 /// v4-flash). Anything else (gpt-4o, deepseek-v4-pro, unknown) is frontier.
-pub fn is_cheap_tier(model: &str) -> bool {
-    model.starts_with("gpt-4o-mini")
-        || model.starts_with("deepseek-chat")
-        || model.starts_with("deepseek-flash")
-        || model.starts_with("deepseek-v4-flash")
+pub fn is_cheap_tier(model: &str, tenant_pairs: &[crate::router::TierPair], is_local: bool) -> bool {
+    // ITEM-128: "cheap" is a property of this workspace, not a hard-coded list of
+    // model names. A model on your own hardware is the cheapest one there is, and
+    // the cheap side of a pair you defined is exactly what the router downshifts to.
+    is_local
+        || BUILTIN_CHEAP_TIERS
+            .iter()
+            .any(|prefix| model.starts_with(prefix))
+        || crate::router::TIER_PAIRS
+            .iter()
+            .any(|(_, cheap)| model.starts_with(cheap))
+        || tenant_pairs
+            .iter()
+            .any(|pair| model.starts_with(&pair.cheap) && !model.starts_with(&pair.frontier))
 }
+
+/// The model families that are cheap on every deployment.
+const BUILTIN_CHEAP_TIERS: [&str; 4] = [
+    "gpt-4o-mini",
+    "deepseek-chat",
+    "deepseek-flash",
+    "deepseek-v4-flash",
+];
 
 /// Does this request qualify for the guard? True only when BOTH hold:
 ///   - it carries a JSON-schema contract (`response_format.json_schema.schema`)
 ///   - the effective model being served is a cheap-tier model
 ///     (`effective_model` = whatever the proxy will actually call upstream,
 ///     after router/budget overrides.)
-pub fn is_guarded_request(payload: &Value, effective_model: &str) -> bool {
-    has_json_schema_contract(payload) && is_cheap_tier(effective_model)
+pub fn is_guarded_request(
+    payload: &Value,
+    effective_model: &str,
+    tenant_pairs: &[crate::router::TierPair],
+    is_local: bool,
+) -> bool {
+    has_json_schema_contract(payload) && is_cheap_tier(effective_model, tenant_pairs, is_local)
 }
 
 /// The request-side schema contract, when present and object-shaped.
@@ -129,7 +151,7 @@ pub const DEFAULT_GUARD_FRONTIER: &str = "deepseek-v4-pro";
 /// cheap-tier model. Pure function of the original (pre-override) payload.
 pub fn fallback_model(original_payload: &Value) -> String {
     match original_payload["model"].as_str() {
-        Some(requested) if !is_cheap_tier(requested) => requested.to_string(),
+        Some(requested) if !is_cheap_tier(requested, &[], false) => requested.to_string(),
         _ => DEFAULT_GUARD_FRONTIER.to_string(),
     }
 }
@@ -226,6 +248,39 @@ pub fn content_matches_schema(content: &str, schema: &Value) -> bool {
 pub fn check_guarded_sse(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
     validate_sse_container(bytes)?;
     validate_content(bytes, schema)
+}
+
+/// ITEM-128: the same check for a buffered (non-streaming) answer. The contract
+/// lives on `choices[0].message.content`, exactly as it does for a stream's
+/// assembled deltas — a client that does not stream is not exempt from the
+/// promise it asked us to enforce.
+pub fn check_guarded_json(bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
+    let Ok(body) = serde_json::from_slice::<Value>(bytes) else {
+        return Err(GuardReason::InvalidJsonSyntax);
+    };
+    let content = body["choices"]
+        .as_array()
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice["message"]["content"].as_str());
+    let Some(content) = content else {
+        return Err(GuardReason::SchemaViolation);
+    };
+    validate_json_content(content, schema)
+}
+
+/// The schema check itself, shared by both shapes once the answer's text is known.
+fn validate_json_content(content: &str, schema: Option<&Value>) -> Result<(), GuardReason> {
+    let Some(schema) = schema else {
+        return Ok(());
+    };
+    if content.trim().is_empty() {
+        return Err(GuardReason::SchemaViolation);
+    }
+    let instance: Value =
+        serde_json::from_str(content).map_err(|_| GuardReason::InvalidJsonSyntax)?;
+    compiled_validator(schema)?
+        .validate(&instance)
+        .map_err(|_| GuardReason::SchemaViolation)
 }
 
 /// Concatenated plain-text content of the response, per the spec: content

@@ -454,58 +454,134 @@ pub(super) struct GuardContext<'a> {
     pub(super) served: usize,
 }
 
-pub(super) async fn guarded_stream_response(
-    state: &Arc<AppState>,
-    meta: RequestMeta,
-    tenant_id: Uuid,
-    started: Instant,
-    upstream: reqwest::Response,
-    context: GuardContext<'_>,
-    tx: mpsc::Sender<TraceMessage>,
-) -> Response {
-    let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
-    let bytes = match upstream.bytes().await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            tracing::error!("guarded upstream body read failed: {e}");
-            // 025: a cheap stream that dies before any bytes is the
-            // "connection crash" class — fall back, don't surface it.
-            return guard_fallback(
-                &mut guard_emit,
-                state,
-                &context,
-                GuardReason::UpstreamFailure,
-            )
-            .await;
-        }
-    };
+/// The shape of the answer a guarded request is waiting for.
+///
+/// ITEM-128: the checker used to know only the streaming shape, so a buffered
+/// `json_schema` call — the most common structured request — was never verified.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum AnswerShape {
+    Stream,
+    Buffered,
+}
 
-    // Flush gate: container integrity then schema conformance (ITEM-024).
-    let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
-    match guard::check_guarded_sse(&bytes, schema.as_ref()) {
-        Ok(()) => {
-            guard_emit.note_completion(&bytes);
-            let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
-            // ttft is when the client actually sees the first byte: after the
-            // buffered flush (Slice 4 latency target measures this, ITEM-027).
-            guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
-            guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
-            let mut response = Response::new(Body::from(bytes));
-            *response.status_mut() = StatusCode::OK;
-            response
-                .headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-            decorate(response, &guard_emit.meta)
-        }
-        Err(reason) => {
-            tracing::warn!(
-                "guard rejected a cheap-tier response: {} (reason {}) — replaying",
-                tenant_id,
-                reason.label()
-            );
-            guard_fallback(&mut guard_emit, state, &context, reason).await
+impl AnswerShape {
+    /// Container integrity plus schema conformance.
+    fn check(self, bytes: &[u8], schema: Option<&Value>) -> Result<(), GuardReason> {
+        match self {
+            Self::Stream => guard::check_guarded_sse(bytes, schema),
+            Self::Buffered => guard::check_guarded_json(bytes, schema),
         }
     }
+
+    fn usage(self, bytes: &[u8]) -> Usage {
+        match self {
+            Self::Stream => usage_from_sse_bytes(bytes).unwrap_or_default(),
+            Self::Buffered => usage_from_json(&serde_json::from_slice(bytes).ok()),
+        }
+    }
+
+    fn outcome(self, bytes: &[u8]) -> Outcome {
+        match self {
+            Self::Stream => outcome_for_sse(200, bytes),
+            Self::Buffered => outcome_for_json(200, &serde_json::from_slice(bytes).ok()),
+        }
+    }
+
+    const fn content_type(self) -> &'static str {
+        match self {
+            Self::Stream => "text/event-stream",
+            Self::Buffered => "application/json",
+        }
+    }
+}
+
+/// One guarded answer waiting to be checked: the request, the upstream response
+/// and everything the trace and the replay need.
+pub(super) struct GuardedAnswer<'a> {
+    pub(super) shape: AnswerShape,
+    pub(super) state: &'a Arc<AppState>,
+    pub(super) meta: RequestMeta,
+    pub(super) tenant_id: Uuid,
+    pub(super) started: Instant,
+    pub(super) upstream: reqwest::Response,
+    pub(super) context: GuardContext<'a>,
+    pub(super) tx: mpsc::Sender<TraceMessage>,
+}
+
+/// Buffer the answer, check it against the request's contract, then either flush
+/// it to the client or replay the prompt on a stronger model.
+pub(super) async fn guarded_response(answer: GuardedAnswer<'_>) -> Response {
+    let GuardedAnswer {
+        shape,
+        state,
+        meta,
+        tenant_id,
+        started,
+        upstream,
+        context,
+        tx,
+    } = answer;
+    let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
+    let bytes = match read_guarded_body(&mut guard_emit, state, &context, shape, upstream).await {
+        Ok(bytes) => bytes,
+        Err(response) => return response,
+    };
+    let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
+    if let Err(reason) = shape.check(&bytes, schema.as_ref()) {
+        tracing::warn!(
+            "guard rejected a cheap-tier answer: {} (reason {}, shape {shape:?}) — replaying",
+            tenant_id,
+            reason.label()
+        );
+        return guard_fallback(&mut guard_emit, state, &context, reason, shape).await;
+    }
+    flush_guarded(guard_emit, bytes, shape)
+}
+
+/// The body of a guarded answer, read in full. A cheap upstream that dies before
+/// sending anything is the "connection crash" class: fall back, never surface it.
+async fn read_guarded_body(
+    guard_emit: &mut BufferedGuard,
+    state: &Arc<AppState>,
+    context: &GuardContext<'_>,
+    shape: AnswerShape,
+    upstream: reqwest::Response,
+) -> Result<axum::body::Bytes, Response> {
+    match upstream.bytes().await {
+        Ok(bytes) => Ok(bytes),
+        Err(e) => {
+            tracing::error!("guarded upstream body read failed: {e}");
+            Err(guard_fallback(
+                guard_emit,
+                state,
+                context,
+                GuardReason::UpstreamFailure,
+                shape,
+            )
+            .await)
+        }
+    }
+}
+
+/// Emit the trace for a validated answer and hand the bytes to the client.
+fn flush_guarded(
+    guard_emit: BufferedGuard,
+    bytes: axum::body::Bytes,
+    shape: AnswerShape,
+) -> Response {
+    let usage = shape.usage(&bytes);
+    let outcome = shape.outcome(&bytes);
+    // ttft is when the client actually sees the first byte: after the buffered
+    // flush (Slice 4 latency target measures this, ITEM-027).
+    guard_emit.note_completion(&bytes);
+    guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
+    guard_emit.emit(usage, false, outcome, None);
+    let mut response = Response::new(Body::from(bytes));
+    *response.status_mut() = StatusCode::OK;
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(shape.content_type()));
+    decorate(response, &guard_emit.meta)
 }
 
 /// One model the guard may replay the original prompt to.
@@ -564,6 +640,7 @@ pub(super) async fn guard_fallback(
     state: &AppState,
     context: &GuardContext<'_>,
     reason: GuardReason,
+    shape: AnswerShape,
 ) -> Response {
     let replays = replay_targets(
         &guard_emit.meta.raw_prompt,
@@ -574,7 +651,7 @@ pub(super) async fn guard_fallback(
     let mut last_failure: Option<ReplayFailure> = None;
 
     for replay in replays {
-        match replay_once(guard_emit, state, replay, reason).await {
+        match replay_once(guard_emit, state, replay, reason, shape).await {
             Ok(response) => return response,
             Err(failure) => last_failure = Some(failure),
         }
@@ -604,6 +681,7 @@ async fn replay_once(
     state: &AppState,
     replay: ReplayTarget<'_>,
     reason: GuardReason,
+    shape: AnswerShape,
 ) -> Result<Response, ReplayFailure> {
     let guarded_model = guard_emit.meta.model.clone();
     // ITEM-067: the replay is normalized per target — a single DeepSeek
@@ -678,22 +756,23 @@ async fn replay_once(
             ));
         }
     };
-    let usage = usage_from_sse_bytes(&bytes).unwrap_or_default();
+    let usage = shape.usage(&bytes);
     // ITEM-067 AC4: never serve an invalid replay silently — record a
     // `fallback_invalid` event when the replay also violates the schema.
     let schema = guard::request_schema(&guard_emit.meta.raw_prompt);
-    if guard::check_guarded_sse(&bytes, schema.as_ref()).is_err() {
+    if shape.check(&bytes, schema.as_ref()).is_err() {
         guard_emit.note_guard(
             Some(&replay.model),
             guard::guard_event("fallback_invalid", reason, &guarded_model, None),
         );
     }
-    guard_emit.emit(usage, false, outcome_for_sse(200, &bytes), None);
+    let outcome = shape.outcome(&bytes);
+    guard_emit.emit(usage, false, outcome, None);
     let mut response = Response::new(Body::from(bytes));
     *response.status_mut() = StatusCode::OK;
     response
         .headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
+        .insert(CONTENT_TYPE, HeaderValue::from_static(shape.content_type()));
     Ok(decorate(response, &guard_emit.meta))
 }
 

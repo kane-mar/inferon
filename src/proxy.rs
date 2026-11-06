@@ -417,30 +417,24 @@ async fn finish_openai_response(
         )
         .await;
     }
-    if is_stream {
-        // ITEM-023 (guard): requests with a JSON-schema contract served by a
-        // cheap tier are buffered end-to-end and validated before anything
-        // reaches the client. Anything else keeps the zero-copy passthrough.
-        // ITEM-027 AC1: the guard is ON by default; a tenant opts out via
-        // tenant_configurations.guard_enabled (fail-open on read errors).
-        let guarded = guard::is_guarded_request(&meta.raw_prompt, &meta.model)
-            && state.hotpath.guard_enabled(state, tenant_id).await;
-        if guarded {
-            guarded_stream_response(
-                state,
-                meta,
-                tenant_id,
-                started,
-                upstream,
-                GuardContext {
-                    route,
-                    chain,
-                    served,
-                },
-                state.telemetry_tx.clone(),
-            )
-            .await
-        } else {
+    // ITEM-023 (guard): requests with a JSON-schema contract served by a cheap
+    // tier are buffered end-to-end and validated before anything reaches the
+    // client. Anything else keeps the zero-copy passthrough.
+    // ITEM-027 AC1: the guard is ON by default; a tenant opts out via
+    // tenant_configurations.guard_enabled (fail-open on read errors).
+    // ITEM-128: "cheap" now includes the cheap side of a pair this workspace
+    // defined and any model it hosts, and a buffered answer is checked too — a
+    // non-streaming client asked for the same contract.
+    let pairs = guard_pairs(state, tenant_id).await;
+    let guarded = guard::is_guarded_request(&meta.raw_prompt, &meta.model, &pairs, route.is_local)
+        && state.hotpath.guard_enabled(state, tenant_id).await;
+    let context = GuardContext {
+        route,
+        chain,
+        served,
+    };
+    if !guarded {
+        return if is_stream {
             stream_response(
                 upstream,
                 started,
@@ -450,19 +444,43 @@ async fn finish_openai_response(
                 state.telemetry_tx.clone(),
                 usage_from_sse_bytes,
             )
-        }
-    } else {
-        let json_content_type = Some(HeaderValue::from_static("application/json"));
-        forward_buffered(
-            state,
-            &meta,
-            tenant_id,
-            started,
-            upstream,
-            json_content_type,
-            usage_from_json,
-        )
-        .await
+        } else {
+            let json_content_type = Some(HeaderValue::from_static("application/json"));
+            forward_buffered(
+                state,
+                &meta,
+                tenant_id,
+                started,
+                upstream,
+                json_content_type,
+                usage_from_json,
+            )
+            .await
+        };
+    }
+    guarded_response(GuardedAnswer {
+        shape: if is_stream {
+            AnswerShape::Stream
+        } else {
+            AnswerShape::Buffered
+        },
+        state,
+        meta,
+        tenant_id,
+        started,
+        upstream,
+        context,
+        tx: state.telemetry_tx.clone(),
+    })
+    .await
+}
+
+/// ITEM-128: the tier pairs in force for this workspace — the cheap side of each
+/// is a model whose structured answers the checker verifies.
+async fn guard_pairs(state: &Arc<AppState>, tenant_id: Uuid) -> Vec<crate::router::TierPair> {
+    match state.hotpath.budget(state, tenant_id).await {
+        Ok(Some(budget)) => budget.tier_pairs,
+        _ => Vec::new(),
     }
 }
 
