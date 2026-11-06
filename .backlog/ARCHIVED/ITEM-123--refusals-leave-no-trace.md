@@ -1,3 +1,14 @@
+> **Delivered 2026-11-05.** Route resolution is traced on both surfaces (class
+> `inferon_4xx`), and every generated refusal returns with the id of the row it wrote:
+> `no_provider`, `surface_mismatch`, `model_disabled`, `rate_limited`, the budget
+> refusal and `upstream_error`. The Anthropic handler starts its clock before routing so
+> a refusal is timed. 553 tests, clippy clean. Verified on the rebuilt proxy against the
+> live host: a workspace with no provider answers `400` with a trace id whose row is
+> `status=400 class=inferon_4xx` (Quality: 1 request, 1 error, `inferon_4xx`); the
+> Anthropic surface does the same; a closed-port provider answers `502` with a header
+> and class `transport`; a key with `rpm_limit=1` answers `429` with a header and class
+> `rate_limited`. The two ITEM-117 pages lost their caveat in the same change.
+
 ## ITEM-123: A refusal you can point at — trace ids on gateway errors, and no_provider is not traced
 
 **As a** developer whose request was refused, and as the person answering their message

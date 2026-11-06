@@ -1,5 +1,19 @@
 # Refinement Log
 
+## 2026-11-05 (evening) — ITEM-123 delivered; refusals are evidence
+
+Fixed the two gaps ITEM-117 found: route resolution is now traced (`inferon_4xx`) and
+every generated refusal carries the id of its row. Verified live on the rebuilt proxy —
+`no_provider` (both surfaces), `502 upstream_error` (class `transport`), and our own `429`
+(class `rate_limited`) each return a header that matches the row, and Quality counts the
+`no_provider` attempt it previously could not see.
+
+Method note: the 429 path cannot be unit-tested without a live database (the limiter
+charges a Postgres window and fails open when it is unreachable), so it was verified on
+the host while the other three paths got unit tests that assert the header equals the
+traced id. A test that asserts *the id the caller holds is the row that was written* is
+cheap and catches the exact bug this item was.
+
 ## 2026-11-05 (later still) — the docs site is built; the host waits
 
 PO: "build first, choose later." Done: `mkdocs.yml` (`docs_dir: guides`, no page moves,
