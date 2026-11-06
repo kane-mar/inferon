@@ -9,6 +9,7 @@ import {
   toneGlyph,
   toneGlyphClass,
 } from '@/libs/reportTone';
+import { kpiCaption } from '@/libs/kpiCaption';
 import { cn } from '@/utils/Helpers';
 import { Icon } from './Icon';
 
@@ -41,8 +42,6 @@ export const KpiCard = (props: {
   tone?: Tone;
 }) => {
   const delta = props.delta ?? null;
-  // One line under the value: what this measures, in the order the caller gave it.
-  const explanation = props.definition ?? props.hint;
   const direction = trend(delta);
   const improved
     = direction === 'flat'
@@ -88,9 +87,20 @@ export const KpiCard = (props: {
           </span>
         )}
       </div>
-      {explanation && (
-        <p className={cn('mt-2 text-xs leading-relaxed', KPI_SUBTLE)}>{explanation}</p>
-      )}
+      {/* ITEM-125/127: the verdict and the definition are both printed — the
+          caller's line first, the explanation under it. */}
+      {kpiCaption(props).map((line, index) => (
+        <p
+          key={line}
+          className={cn(
+            'text-xs leading-relaxed',
+            index === 0 ? 'mt-2' : 'mt-1',
+            index > 0 && KPI_SUBTLE,
+          )}
+        >
+          {line}
+        </p>
+      ))}
     </div>
   );
 };
