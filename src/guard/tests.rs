@@ -298,12 +298,12 @@
         // Router downgraded a gpt-4o request to gpt-4o-mini; the tenant's own
         // frontier (pre-downgrade) is the replay target.
         let gpt = serde_json::json!({"model": "gpt-4o", "messages": []});
-        assert_eq!(fallback_model(&gpt), "gpt-4o");
+        assert_eq!(fallback_model(&gpt, &[], false), "gpt-4o");
         let pro = serde_json::json!({"model": "deepseek-v4-pro", "messages": []});
-        assert_eq!(fallback_model(&pro), "deepseek-v4-pro");
+        assert_eq!(fallback_model(&pro, &[], false), "deepseek-v4-pro");
         // Unknown models count as frontier (never downgraded, never guarded).
         let unknown = serde_json::json!({"model": "claude-3-5-sonnet-20241022", "messages": []});
-        assert_eq!(fallback_model(&unknown), "claude-3-5-sonnet-20241022");
+        assert_eq!(fallback_model(&unknown, &[], false), "claude-3-5-sonnet-20241022");
     }
 
     #[test]
@@ -311,11 +311,11 @@
         // Replaying a cheap original to itself would fail the guard again.
         for cheap in ["gpt-4o-mini", "deepseek-chat", "deepseek-v4-flash", "deepseek-flash"] {
             let p = serde_json::json!({"model": cheap, "messages": []});
-            assert_eq!(fallback_model(&p), DEFAULT_GUARD_FRONTIER);
+            assert_eq!(fallback_model(&p, &[], false), DEFAULT_GUARD_FRONTIER);
         }
         // No model at all -> same escalation.
         assert_eq!(
-            fallback_model(&serde_json::json!({ "messages": [] })),
+            fallback_model(&serde_json::json!({ "messages": [] }), &[], false),
             DEFAULT_GUARD_FRONTIER
         );
     }
@@ -404,4 +404,27 @@ fn a_workspace_treats_its_own_cheap_model_as_cheap() {
     // The built-in families still count with no pairs of your own.
     assert!(is_cheap_tier("deepseek-flash", &[], false));
     assert!(!is_cheap_tier("gpt-4o", &[], false));
+}
+
+#[test]
+fn a_workspace_cheap_model_still_escalates_to_the_deployment_frontier() {
+    // ITEM-128: replaying a failing cheap model to itself just fails twice. The
+    // escalation decision has to use the same notion of "cheap" as the guard.
+    let payload = serde_json::json!({"model": "mock-lie", "messages": []});
+    let pairs = vec![crate::router::TierPair {
+        frontier: "my-frontier".to_string(),
+        cheap: "my-small".to_string(),
+    }];
+    assert_eq!(
+        fallback_model(&payload, &pairs, true),
+        DEFAULT_GUARD_FRONTIER,
+        "a local model is cheap, so the replay escalates"
+    );
+    assert_eq!(
+        fallback_model(&payload, &pairs, false),
+        "mock-lie",
+        "an unknown model outside a pair is treated as the tenant's frontier"
+    );
+    let pair_cheap = serde_json::json!({"model": "my-small-8b", "messages": []});
+    assert_eq!(fallback_model(&pair_cheap, &pairs, false), DEFAULT_GUARD_FRONTIER);
 }

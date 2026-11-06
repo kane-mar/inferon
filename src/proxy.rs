@@ -432,6 +432,7 @@ async fn finish_openai_response(
         route,
         chain,
         served,
+        pairs: &pairs,
     };
     if !guarded {
         return if is_stream {

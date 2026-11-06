@@ -149,9 +149,15 @@ pub const DEFAULT_GUARD_FRONTIER: &str = "deepseek-v4-pro";
 /// i.e. their own frontier in a single-upstream world. Escalates to
 /// [`DEFAULT_GUARD_FRONTIER`] when the original request itself named a
 /// cheap-tier model. Pure function of the original (pre-override) payload.
-pub fn fallback_model(original_payload: &Value) -> String {
+pub fn fallback_model(
+    original_payload: &Value,
+    tenant_pairs: &[crate::router::TierPair],
+    is_local: bool,
+) -> String {
     match original_payload["model"].as_str() {
-        Some(requested) if !is_cheap_tier(requested, &[], false) => requested.to_string(),
+        Some(requested) if !is_cheap_tier(requested, tenant_pairs, is_local) => {
+            requested.to_string()
+        }
         _ => DEFAULT_GUARD_FRONTIER.to_string(),
     }
 }

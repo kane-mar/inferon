@@ -452,6 +452,9 @@ pub(super) struct GuardContext<'a> {
     /// The full chain and the step that served, for guard-triggered replays.
     pub(super) chain: &'a [ChainStep],
     pub(super) served: usize,
+    /// ITEM-128: the pairs in force, so the built-in replay decides "cheap" the
+    /// same way the guard did — a replay to itself would only fail twice.
+    pub(super) pairs: &'a [crate::router::TierPair],
 }
 
 /// The shape of the answer a guarded request is waiting for.
@@ -601,6 +604,7 @@ fn replay_targets<'a>(
     route: &'a Route,
     chain: &'a [ChainStep],
     served: usize,
+    pairs: &[crate::router::TierPair],
 ) -> Vec<ReplayTarget<'a>> {
     let triggers: Vec<&[routing::FallbackTrigger]> =
         chain.iter().map(|step| step.triggers.as_slice()).collect();
@@ -615,7 +619,7 @@ fn replay_targets<'a>(
             .collect();
     if targets.is_empty() {
         return vec![ReplayTarget {
-            model: guard::fallback_model(original),
+            model: guard::fallback_model(original, pairs, route.is_local),
             route,
             step: None,
         }];
@@ -647,6 +651,7 @@ pub(super) async fn guard_fallback(
         context.route,
         context.chain,
         context.served,
+        context.pairs,
     );
     let mut last_failure: Option<ReplayFailure> = None;
 
