@@ -25,6 +25,7 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO — the site builds and is verified; only the host is missing (2026-11-05)** — `mkdocs.yml` builds `guides/` as the docs directory (MkDocs Material, `docs_dir: guides`, sales documents excluded), `requirements-docs.txt` pins the toolchain, and a CI `docs-site` job runs `mkdocs build --strict`, proves no sales document is published and uploads the artifact. Verified in a `python:3.12-slim` container: 8 pages, search index, anchors, `.md` links rewritten, strict clean. Remaining decision: the host — recommendation **Netlify Free** (only $0 option that takes the private repo, allows commercial use, gives PR previews); second **GitHub Pages** once the repo is public; **Read the Docs Community** free only for open source. Then point `docs.inferon.agilefederation.com` at it. Revisit Material (EOL 2027-05-05, successor Zensical) |
+| ITEM-127 | Gateway time scales with the prompt — the sub-millisecond claim does not hold for real payloads | bug | **ready** — measured on the live host: `proxy_us` is 2–11 ms for a 35-token prompt but 1.2–2.2 s at 310k tokens and 10.2 s at 313k, so the Runtime page's gateway KPI reads 1.2 s while the product claims sub-millisecond (ITEM-092 verified it on 41 small requests). The pre-dispatch path makes several whole-payload passes, one of which serialises the entire prompt to a `String` just to measure its length. Make the estimate cheap, state the payload size beside the number, and assert the budget at 300 KB |
 | ITEM-118 | What answers your requests (providers, own models, tiers, checker) | feature | **ready** — four configuration pages: add your own provider (five kinds, local/keyless included), models and tier pairs, the output checker, the automatic router and its threshold |
 | ITEM-119 | Protecting the bill and the context | feature | **ready** — four configuration pages: budgets and rate limits that do not block real traffic, a fallback chain whose triggers fire, prompt caching (why the audit says "not cached"), pruning and its comparison group |
 | ITEM-120 | From traffic to data, and the money story | feature | **ready** — four configuration pages: payloads/retention/PII, datasets → gold sets → evals, the cost audit's six findings, and sessions and spend (why our number differs from the provider bill) |
@@ -140,7 +141,8 @@ from verifying a page. ITEM-112's host choice is back with the PO — Cloudflare
 removed and Netlify is the recommendation. Same form: one ranked list, gated at its
 bottom, then delivered history, then retired items._
 
-**Pullable, in order:** the guide slices ITEM-118 → 121. ITEM-112 has nothing left to build — the site builds, is
+**Pullable, in order:** ITEM-127 (the gateway-time claim the dashboard contradicts),
+then the guide slices ITEM-118 → 121. ITEM-112 has nothing left to build — the site builds, is
 checked in CI and is attached to any host as an artifact — so it waits on the PO's
 host choice alone.
 
