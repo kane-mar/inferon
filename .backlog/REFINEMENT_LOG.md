@@ -1,5 +1,24 @@
 # Refinement Log
 
+## 2026-11-06 (final) — pullable region empty; what is left is a PO decision
+
+Delivered this session, all live: the guide suite (ITEM-116..121, 29 pages), and the four
+defects its evidence produced — ITEM-123 (a refusal now names its trace), ITEM-127 (gateway
+time scales with the prompt, and the claim now carries its payload), ITEM-128 (the checker
+covers buffered answers and a workspace's own cheap model), ITEM-129 (a keyless provider no
+longer needs a `key` field). One regression of my own was found by reading the rendered
+page rather than the diff: ITEM-125's card change made a definition replace a verdict line,
+so the Runtime page lost the very context ITEM-127 added. Fixed, with the rule moved into a
+pure function the unit suite covers.
+
+What remains is not buildable by an agent:
+
+- **ITEM-112** — the site builds (`mkdocs build --strict`, 29 pages), CI checks it and
+  uploads the artifact; the host is a PO choice (Netlify Free recommended).
+- **ITEM-029** — a re-decision, not a build: ITEM-089 supplies the input.
+- **The goal's first clause** — an external developer, which is a handover, not an item.
+- The gated block (076/032/030/072/084/114) is unchanged and unparkable on evidence.
+
 ## 2026-11-06 (late) — the guide suite is complete; evidence produced three defects
 
 The backlog's pullable region was the guide suite. It is delivered: 29 published pages

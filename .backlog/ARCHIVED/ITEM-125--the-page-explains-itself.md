@@ -1,4 +1,9 @@
-> **Delivered 2026-11-06.** `src/libs/labels.ts` maps the ten stored error classes
+> **Delivered 2026-11-06.** (Follow-up the same day: rendering `definition ?? hint`
+> replaced a card's verdict line whenever it also had a definition, so the Runtime page
+> lost "over the 1 ms claim" and ITEM-127's payload context with it. Both lines are now
+> assembled by `kpiCaption` and printed, verdict first — the rule lives in a pure
+> function because the `ui` vitest project cannot run here and CI does not run it.)
+> `src/libs/labels.ts` maps the ten stored error classes
 > and the three checker outcomes to a phrase plus a line of meaning, in en and fr, with
 > the raw code kept as a secondary hint and an unknown code still rendered. Quality,
 > the cost-audit report (both surfaces) and the operator console use it — live: Quality
