@@ -1,6 +1,6 @@
 # Refinement Log
 
-## 2026-11-06 (final) — pullable region empty; what is left is a PO decision
+## 2026-11-07 — pullable region empty; what is left is a PO decision
 
 Delivered this session, all live: the guide suite (ITEM-116..121, 29 pages), and the four
 defects its evidence produced — ITEM-123 (a refusal now names its trace), ITEM-127 (gateway

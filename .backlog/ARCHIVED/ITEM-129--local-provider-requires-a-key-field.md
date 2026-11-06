@@ -1,4 +1,4 @@
-> **Delivered 2026-11-06.** `#[serde(default)]` on the provider body's `key`, so absent
+> **Delivered 2026-11-07.** `#[serde(default)]` on the provider body's `key`, so absent
 > means empty; `requires_key(kind)` still refuses an empty key on the four keyed kinds with
 > the typed `400 invalid_key`. Verified live on the rebuilt proxy: a `local` provider is
 > created without the field, and a `deepseek` one without it gets the typed refusal. Two
