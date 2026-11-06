@@ -2119,3 +2119,35 @@ async fn only_an_owner_can_publish_a_pruning_policy() {
         "a member must not change pruning"
     );
 }
+
+#[tokio::test]
+async fn a_local_provider_can_be_created_without_a_key_field() {
+    // ITEM-129: the type demanded `key` even though a local provider needs no
+    // credential, so an API client following the guide got a raw serde error.
+    let (state, token) = tenant_role_session("owner").await;
+    let router = crate::build_router(state);
+    let body = json!({"kind": "local", "base_url": "http://127.0.0.1:11434/v1"}).to_string();
+    let created = router
+        .oneshot(post_with_cookie("/v1/dashboard/api/providers", &token, &body))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), axum::http::StatusCode::OK);
+    let json: Value = body_json(created).await;
+    assert!(json["id"].is_string(), "the provider was created: {json}");
+}
+
+#[tokio::test]
+async fn a_keyed_provider_missing_its_key_is_a_typed_refusal() {
+    // ITEM-129: an absent key on a kind that needs one is our error shape, never
+    // a deserialisation message.
+    let (state, token) = tenant_role_session("owner").await;
+    let router = crate::build_router(state);
+    let body = json!({"kind": "deepseek", "base_url": "https://api.deepseek.com/v1"}).to_string();
+    let refused = router
+        .oneshot(post_with_cookie("/v1/dashboard/api/providers", &token, &body))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), axum::http::StatusCode::BAD_REQUEST);
+    let json: Value = body_json(refused).await;
+    assert_eq!(json["error"]["type"], "invalid_key", "{json}");
+}

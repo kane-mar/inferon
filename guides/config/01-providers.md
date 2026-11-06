@@ -28,8 +28,9 @@ curl -s https://inferon.agilefederation.com/v1/dashboard/api/providers \
 {"kinds":["deepseek","openai","openai-compatible","anthropic","local"],"providers":[],"role":"owner"}
 ```
 
-The four keyed types refuse an empty key with `400 invalid_key`
-(`"a provider key is required"`). `local` accepts one and is stored without it.
+The four keyed types refuse an empty or missing key with `400 invalid_key`
+(`"a provider key is required"`). `local` needs no key at all — the field can be
+omitted entirely, and a local provider is stored without one.
 
 ## The key
 

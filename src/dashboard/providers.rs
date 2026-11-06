@@ -513,6 +513,10 @@ pub struct ProviderBody {
     kind: String,
     name: Option<String>,
     base_url: String,
+    /// ITEM-129: absent is the same as empty. A `local` provider needs no
+    /// credential at all, and a keyed kind refuses an empty one with a typed
+    /// error rather than a deserialisation message.
+    #[serde(default)]
     key: String,
     #[serde(default)]
     metadata: crate::providers::ProviderMetadata,
