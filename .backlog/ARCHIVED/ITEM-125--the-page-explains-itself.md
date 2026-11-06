@@ -1,3 +1,13 @@
+> **Delivered 2026-11-06.** `src/libs/labels.ts` maps the ten stored error classes
+> and the three checker outcomes to a phrase plus a line of meaning, in en and fr, with
+> the raw code kept as a secondary hint and an unknown code still rendered. Quality,
+> the cost-audit report (both surfaces) and the operator console use it — live: Quality
+> reads "Refused before it was sent", "The provider rate-limited it", "Your key's rate
+> limit" and the operator console reads "Passed the checker". KPI definitions are
+> printed on the card (no `title` left on any KPI), and the two help texts that named
+> `proxy_us` now say "gateway time". 96 unit tests, including one that fails when a
+> code arrives without a label in either locale.
+
 ## ITEM-125: The page explains itself — no documentation required
 
 **As a** reader of a report

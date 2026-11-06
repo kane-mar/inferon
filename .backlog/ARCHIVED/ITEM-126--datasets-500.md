@@ -1,3 +1,8 @@
+> **Delivered 2026-11-06.** Both grouped queries in `src/dashboard/datasets.rs` now
+> drop rows that belong to no prompt (`system_prompt_hash IS NOT NULL`) and rows with
+> no reason; live: `/v1/dashboard/api/datasets` returns `200` in both groupings and
+> `/dashboard/datasets` renders. 553 tests, clippy clean.
+
 ## ITEM-126: The Datasets page returns 500 when one request had no system prompt
 
 **As a** workspace owner opening **Datasets**

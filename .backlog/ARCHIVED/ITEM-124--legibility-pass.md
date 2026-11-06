@@ -1,3 +1,10 @@
+> **Delivered 2026-11-06.** Type scale raised at the tokens: `text-xs` 13px, `text-sm`
+> 15px, body 17px/1.65. Labels and table headers are sans, sentence case, medium
+> weight; mono is reserved for ids, numbers, code and hashes; table rows gained
+> `py-2.5`. Muted ink 7.2:1 light / 9.4:1 dark (was 4.98:1), destructive 5.7:1 / 7.3:1
+> (was 4.27:1). Verified in the CSS the host serves: only 13/15/17px sizes are
+> emitted. `/fr` and the marketing pages follow the same scale.
+
 ## ITEM-124: Legibility pass — type scale, contrast and label typography
 
 **As a** workspace owner reading the dashboard for the first time

@@ -1,5 +1,32 @@
 # Refinement Log
 
+## 2026-11-06 — UI review: legibility, self-explaining screens, and a page that was 500
+
+PO: "the fonts are small, and often hard to read"; "if the user needs the documentation
+then there is a clear design failure". Measured before changing anything, which is what
+made the fix small: 287 uses of 12/14px type, 49 `font-mono text-xs` label sites (metric
+captions and table headers at 12px, uppercase, wide tracking), muted ink at 4.98:1 and
+destructive at 4.27:1.
+
+Decision: raise the scale at the design tokens (`--text-xs/sm/base` in `global.css`),
+not at 287 call sites; convert labels to sans/sentence case; reserve mono for ids,
+numbers and code. Contrast measured per token, not eyeballed: muted 7.2:1 light and
+9.4:1 dark, destructive 5.7:1 and 7.3:1.
+
+Second finding: the pages printed our vocabulary (`upstream_429`, `fallback_failed`) and
+hid the meaning in `title` attributes, which is precisely why the guides had to teach
+those words. One mapping (`web/src/libs/labels.ts`) + two locale namespaces fixed all
+three surfaces, with the raw code kept as a secondary hint for support replies. A test
+now fails if the backend gains a class with no label in either locale — the guard that
+keeps the guides from becoming required reading again.
+
+Third finding, and the reason this was worth doing in one pass: `/dashboard/datasets`
+answered `500` on the live host. The reasons query grouped excluded traces by prompt
+hash without the `IS NOT NULL` filter the cluster query above it has, so any workspace
+with one prompt-less request (a rejected call, for instance) lost the whole dataset
+report — the only door to the dataset loop. Fixed as ITEM-126, verified `200` in both
+groupings.
+
 ## 2026-11-06 — ITEM-123 delivered; refusals are evidence
 
 Fixed the two gaps ITEM-117 found: route resolution is now traced (`inferon_4xx`) and
