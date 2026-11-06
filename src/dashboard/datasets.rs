@@ -105,11 +105,17 @@ pub async fn datasets(
     .fetch_all(&state.db)
     .await)?;
 
+    // ITEM-126: the same null-hash filter as the cluster query above, plus the
+    // reason itself. A request with no system prompt has no prompt hash, so it
+    // belongs to no dataset row; selecting its reason as a `String` returned NULL
+    // and aborted the whole report with a 500.
     let reasons: Vec<ReasonRow> = stored(sqlx::query_as(&format!(
-        "SELECT {group_key}, request_model, example_reason, COUNT(*)
+        "SELECT {group_key}, t.request_model, t.example_reason, COUNT(*)
          FROM traces t
          WHERE t.tenant_id = $1
+           AND t.system_prompt_hash IS NOT NULL
            AND t.example_state = 'excluded'
+           AND t.example_reason IS NOT NULL
            AND t.created_at >= NOW() - ($2 * INTERVAL '1 day')
            {scope}
          GROUP BY {group_key}, t.request_model, t.example_reason"

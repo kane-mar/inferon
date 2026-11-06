@@ -25,6 +25,9 @@ Ranked by value then effort; the gated block sits at the bottom of this same lis
 | ID | Title | Type | Status |
 |----|-------|------|--------|
 | ITEM-112 | Hosted documentation site (free static hosting) | feature | **blocked on PO — the site builds and is verified; only the host is missing (2026-11-05)** — `mkdocs.yml` builds `guides/` as the docs directory (MkDocs Material, `docs_dir: guides`, sales documents excluded), `requirements-docs.txt` pins the toolchain, and a CI `docs-site` job runs `mkdocs build --strict`, proves no sales document is published and uploads the artifact. Verified in a `python:3.12-slim` container: 8 pages, search index, anchors, `.md` links rewritten, strict clean. Remaining decision: the host — recommendation **Netlify Free** (only $0 option that takes the private repo, allows commercial use, gives PR previews); second **GitHub Pages** once the repo is public; **Read the Docs Community** free only for open source. Then point `docs.inferon.agilefederation.com` at it. Revisit Material (EOL 2027-05-05, successor Zensical) |
+| ITEM-124 | Legibility pass — type scale, contrast and label typography | improvement | **ready** — measured: 287 uses of 12px/14px type, 49 mono small labels (metric captions and table headers at 12px uppercase tracked-out), muted ink at 4.98:1 and destructive at 4.27:1. Raise the scale at the tokens (`text-xs` 13, `text-sm` 15, base 17), make labels sans/sentence-case at 13–15px, raise muted to ≥6:1 and destructive to ≥4.5:1, give table rows room. No layout restructuring |
+| ITEM-125 | The page explains itself — no documentation required | improvement | **ready** — Quality prints stored error classes verbatim (`upstream_429`, `inferon_4xx`, `transport`), the audit report names its top failure the same way, and the operator console prints `flushed`/`fallback`/`fallback_failed`. KPI definitions exist only in a hover title, and two help texts explain a metric by naming `proxy_us`. One shared label mapping + i18n keys, definitions visible on the card, copy rewritten in user terms |
+| ITEM-126 | The Datasets page returns 500 when one request had no system prompt | bug | **ready** — the reasons query in `src/dashboard/datasets.rs` grouped excluded rows by prompt hash without the `IS NOT NULL` filter the cluster query has, so a request with no system prompt (a rejected one, for instance) grouped under NULL and sqlx aborted the whole report: `/dashboard/datasets` answers `500`. One filter, no schema change; the page is the only door to the dataset loop |
 | ITEM-118 | What answers your requests (providers, own models, tiers, checker) | feature | **ready** — four configuration pages: add your own provider (five kinds, local/keyless included), models and tier pairs, the output checker, the automatic router and its threshold |
 | ITEM-119 | Protecting the bill and the context | feature | **ready** — four configuration pages: budgets and rate limits that do not block real traffic, a fallback chain whose triggers fire, prompt caching (why the audit says "not cached"), pruning and its comparison group |
 | ITEM-120 | From traffic to data, and the money story | feature | **ready** — four configuration pages: payloads/retention/PII, datasets → gold sets → evals, the cost audit's six findings, and sessions and spend (why our number differs from the provider bill) |
@@ -125,7 +128,9 @@ Decisions, not unfinished work — each with the reason it will not be built.
 | ITEM-075 | Edge serves the local provider's own models | feature | **retired (2026-11-01)** — superseded by ITEM-083 (self-hosted full stack) and ITEM-051/077 (a reachable on-prem model as a `local` provider). The node could not be a controller: prompts never left it, so datasets, eval and adaptation were impossible there, and its budget/limits were a stale cloud snapshot (9 of 17 synced config fields were even parsed). One data plane, two deployment shapes — see `wiki/llm-inference/customer-hosted-llms.md` |
 
 
-_Last updated: 2026-11-05 — the guide suite ships in slices: ITEM-116 (skeleton +
+_Last updated: 2026-11-06 — the PO reviewed the UI: fonts are too small and the
+screens print vocabulary only the guides explain, so ITEM-124 (legibility) and
+ITEM-125 (the page explains itself) are ranked first. The guide suite ships in slices: ITEM-116 (skeleton +
 getting started) and ITEM-117 (access and routing troubleshooting) are live, 118–121
 remain, and the refusals they describe now name themselves (ITEM-123). The docs site
 builds (`mkdocs build --strict`, CI artifact) and waits only on the host choice. Live checks keep producing work: ITEM-122 (a false statement in the Providers
@@ -134,7 +139,8 @@ from verifying a page. ITEM-112's host choice is back with the PO — Cloudflare
 removed and Netlify is the recommendation. Same form: one ranked list, gated at its
 bottom, then delivered history, then retired items._
 
-**Pullable, in order:** the guide slices ITEM-118 → 121. ITEM-112 has nothing left to build — the site builds, is
+**Pullable, in order:** ITEM-124 and ITEM-125 (the PO's legibility and
+self-explanation request, 2026-11-06), then the guide slices ITEM-118 → 121. ITEM-112 has nothing left to build — the site builds, is
 checked in CI and is attached to any host as an artifact — so it waits on the PO's
 host choice alone.
 
