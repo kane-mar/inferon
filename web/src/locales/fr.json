@@ -612,7 +612,7 @@
   },
   "RuntimePage": {
     "title_bar": "Exécution",
-    "title_bar_description": "La passerelle est-elle rapide ? Voici son propre surcoût face à la promesse du sous-milliseconde, la latence de bout en bout autour, et les moments et modèles où elle ralentit.",
+    "title_bar_description": "La passerelle est-elle rapide ? Voici son propre surcoût, la promesse à laquelle il est comparé, la latence de bout en bout autour, et les moments et modèles où elle ralentit. La taille d’invite indiquée à côté d’un chiffre est celle de la mesure.",
     "overhead_p50": "Surcoût de la passerelle, médiane",
     "overhead_p95": "Surcoût de la passerelle, 5 % les plus lents",
     "under_1ms": "Requêtes sous 1 ms",
@@ -623,7 +623,7 @@
     "claim": "La promesse",
     "claim_p50": "surcoût médian sous 1 ms",
     "claim_p95": "surcoût au 95e centile sous 5 ms (repère une baisse du cache)",
-    "claim_window": "Mesuré sur cette version : les {hours} dernières heures ({samples} échantillon(s), médiane mesurée {observed}). Les cartes ci-dessus décrivent la période que vous avez choisie.",
+    "claim_window": "Mesuré sur cette version : les {hours} dernières heures ({samples} échantillon(s), médiane {observed} pour une invite médiane de {tokens} jetons). Les cartes ci-dessus décrivent la fenêtre choisie.",
     "claim_note": "Mesuré comme le temps de la passerelle : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur, donc le temps du fournisseur et le corps de la réponse ne sont pas comptés. Une requête « chaude » arrive dans la fenêtre du cache ; la première après une période d’inactivité doit aussi charger la configuration.",
     "met": "tenue",
     "not_met": "non tenue",
@@ -645,7 +645,7 @@
     "model": "Modèle",
     "requests": "Requêtes",
     "no_samples": "Aucune requête mesurée sur cette période.",
-    "overhead_help": "le temps de la passerelle : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur. Le temps du fournisseur et le corps de la réponse ne sont pas comptés.",
+    "overhead_help": "Du début de la requête jusqu’à l’instant où elle part chez le fournisseur. L’analyse du corps de la requête en fait partie : ce temps croît donc avec la taille de l’invite — la taille indiquée à côté est celle de la mesure.",
     "under_1ms_help": "Part des requêtes mesurées dont la surcharge est restée sous la promesse de 1 ms.",
     "samples_help": "Requêtes dont le surcoût a été mesuré sur cette période. C’est la base de tous les chiffres de cette page.",
     "total_help": "De bout en bout : du début de la requête au dernier octet de la réponse.",
@@ -653,7 +653,9 @@
     "legend_healthy": "Sans teinte : moins de 5 % d’erreurs et 5 % les plus lents sous 3 s",
     "legend_degraded": "Teinte claire : 5 % d’erreurs ou plus, ou 5 % les plus lents au-delà de 3 s",
     "legend_failing": "Teinte foncée : 20 % d’erreurs ou plus, ou 5 % les plus lents au-delà de 10 s",
-    "legend_empty": "point : aucun trafic sur cette période"
+    "legend_empty": "point : aucun trafic sur cette période",
+    "at_payload": "invite médiane {tokens} jetons",
+    "payload_column": "Taille d’invite, médiane"
   },
   "PayloadsPage": {
     "title_bar": "Charges utiles",

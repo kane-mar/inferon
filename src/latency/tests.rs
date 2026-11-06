@@ -8,6 +8,15 @@ fn a_small_sample_is_not_a_verdict() {
 }
 
 #[test]
+fn the_verdict_carries_the_payload_it_was_measured_at() {
+    // ITEM-127: 300k-token prompts cost the proxy real work before dispatch, so a
+    // verdict without its payload size says nothing about the fixed work.
+    let verdict = verdict(MIN_SAMPLES, Some(1_200), Some(4_000)).with_payload(Some(310_000));
+    assert_eq!(verdict.prompt_tokens_p50, Some(310_000));
+    assert_eq!(verdict.p50_met, Some(false), "a big payload still misses the budget");
+}
+
+#[test]
 fn the_floor_is_enough_to_speak() {
     let verdict = verdict(MIN_SAMPLES, Some(200), Some(900));
     assert_eq!(verdict.p50_met, Some(true));

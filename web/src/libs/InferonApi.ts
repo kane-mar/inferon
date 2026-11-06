@@ -149,6 +149,8 @@ export type PerformanceModelRow = {
   proxy_p95_us: number | null;
   total_p50_ms: number | null;
   total_p95_ms: number | null;
+  /** Gateway time grows with the payload, so it is never shown alone (ITEM-127). */
+  prompt_tokens_p50: number | null;
 };
 
 export type RuntimeReport = {
@@ -163,6 +165,8 @@ export type RuntimeReport = {
     samples: number;
     observed_p50_us: number | null;
     observed_p95_us: number | null;
+    /** The median prompt size the verdict covered (ITEM-127). */
+    prompt_tokens_p50: number | null;
     p50_met: boolean | null;
     p95_met: boolean | null;
   };
@@ -173,6 +177,8 @@ export type RuntimeReport = {
     p50_us: number | null;
     p95_us: number | null;
     p99_us: number | null;
+    /** Gateway time grows with the payload, so the size travels with it. */
+    prompt_tokens_p50: number | null;
   };
   latency: {
     total_p50_ms: number | null;

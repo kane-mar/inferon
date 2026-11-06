@@ -360,6 +360,42 @@ data: [DONE]\n\n",
         format!("http://{addr}/v1/chat/completions")
     }
 
+
+    /// An upstream that records the exact bytes it received, so a test can assert
+    /// what actually went on the wire (ITEM-127).
+    async fn recording_upstream(seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>) -> String {
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(
+                |body: axum::body::Bytes| async move {
+                    seen.lock().unwrap().push(body.to_vec());
+                    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                    let model = payload["model"].as_str().unwrap_or_default();
+                    match mock_error_response(model) {
+                        Some(failure) => failure,
+                        None => axum::response::Response::builder()
+                            .header("content-type", "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "id": "chatcmpl-mock",
+                                    "object": "chat.completion",
+                                    "model": model,
+                                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                                    "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap(),
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/v1/chat/completions")
+    }
+
     /// A mock Anthropic Messages host echoing the `x-api-key` it saw, with both
     /// a non-streaming JSON body and an Anthropic-shaped SSE body.
     async fn mock_anthropic_upstream() -> String {
@@ -1187,6 +1223,90 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         let json = json_body(response).await;
         assert_eq!(json["data"][0]["id"], "mock-model");
+    }
+
+
+
+    // ITEM-127: the pre-dispatch path must not rewrite a payload it does not change.
+    // The caller's own bytes are what goes on the wire, so a 1.2 MB prompt is parsed
+    // once instead of being cloned and re-serialised before it is even sent.
+    #[tokio::test]
+    async fn an_unchanged_request_is_forwarded_byte_for_byte() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let url = recording_upstream(seen.clone()).await;
+        // Pretty-printed on purpose: a re-serialisation would compact it.
+        let body = "{\n  \"model\": \"deepseek-chat\",\n  \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}]\n}";
+        let response = build_router(std::sync::Arc::new(base_state(&url)))
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let forwarded = seen.lock().unwrap().clone();
+        assert_eq!(forwarded.len(), 1);
+        assert_eq!(String::from_utf8(forwarded[0].clone()).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn a_model_the_router_changes_is_substituted_and_nothing_else() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let url = recording_upstream(seen.clone()).await;
+        let tenant = seeded_tenant();
+        let state = std::sync::Arc::new(AppState {
+            routing_store: std::sync::Arc::new(
+                crate::routing::InMemoryRoutingStore::with_fallbacks(tenant.id, &["deepseek-chat"]),
+            ),
+            ..base_state(&url)
+        });
+        let body = r#"{"model":"fail","messages":[{"role":"user","content":"hi"}],"temperature":0.25}"#;
+        let response = build_router(state)
+            .oneshot(chat_request_builder(body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let forwarded = seen.lock().unwrap().clone();
+        assert_eq!(forwarded.len(), 2, "the failing attempt and the fallback");
+        let served: Value = serde_json::from_slice(&forwarded[1]).unwrap();
+        let asked: Value = serde_json::from_slice(body.as_bytes()).unwrap();
+        assert_eq!(served["model"], "deepseek-chat");
+        // Everything the client sent survives the substitution untouched.
+        let mut expected = asked.clone();
+        expected["model"] = json!("deepseek-chat");
+        assert_eq!(served, expected);
+    }
+
+
+
+
+    /// ITEM-127: the gateway's own time must not grow with the payload beyond
+    /// parsing it. Two claims, both measured on the same run so the comparison is
+    /// fair: an unchanged request is forwarded verbatim (above), and a schema is
+    /// measured up to a cap instead of serialising a megabyte to count it.
+    #[tokio::test]
+    async fn a_large_prompt_is_not_measured_with_a_second_pass_over_itself() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let content = "x".repeat(1_200_000);
+        let body = format!(
+            r#"{{"model":"deepseek-chat","messages":[{{"role":"user","content":"{content}"}}]}}"#
+        );
+        let response = build_router(state)
+            .oneshot(chat_request_builder(&body, Some(CLIENT_KEY)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let msg = rx.recv().await.unwrap();
+        // The budget is deliberately loose: a debug build of the JSON parser is
+        // ~20x slower than the release build the host runs. What it forbids is the
+        // old behaviour — a clone plus a full re-serialisation (≈+130 ms debug).
+        assert!(
+            msg.proxy_us.unwrap() < 100_000,
+            "pre-dispatch took {} us for a 1.2 MB prompt",
+            msg.proxy_us.unwrap()
+        );
     }
 
     #[tokio::test]

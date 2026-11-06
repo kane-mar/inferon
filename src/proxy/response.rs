@@ -117,7 +117,7 @@ pub(super) async fn enforce_rate_limit(
         return Ok(());
     }
 
-    let estimate = crate::ratelimit::estimate_tokens(meta.raw_prompt.to_string().len());
+    let estimate = crate::ratelimit::estimate_tokens(meta.payload_bytes());
     let Some(usage) = crate::ratelimit::charge(&state.db, key_id, estimate).await else {
         return Ok(()); // the limiter is down; the data plane keeps working
     };
@@ -213,12 +213,18 @@ pub(super) fn with_rate_limit(mut response: Response, meta: &RequestMeta) -> Res
 /// other surface. Routing, the guard, pruning and the pre-flight lint all run on
 /// the *client's* shape; translation is the last step before the wire.
 pub(super) fn wire_body(
-    payload: &Value,
+    meta: &RequestMeta,
     route: &Route,
     model: &str,
     downgrade_schema: bool,
 ) -> Result<axum::body::Bytes, Response> {
+    let payload = &meta.raw_prompt;
     let Some(target) = route.translate else {
+        // ITEM-127: routing usually changes nothing, and then the caller's own
+        // bytes go on the wire — a large prompt is never re-serialised to be sent.
+        if let Some(received) = unchanged_body(meta, model, downgrade_schema) {
+            return Ok(received);
+        }
         return budget::forward_body(payload, model, downgrade_schema)
             .map(axum::body::Bytes::from)
             .map_err(|e| {
@@ -264,6 +270,19 @@ pub(super) fn wire_body(
                 "failed to serialize the translated request payload",
             )
         })
+}
+
+/// ITEM-127: the body to forward when nothing about it changes — the request as
+/// the client sent it. `None` when the router picked another model or the wire
+/// format is downgraded, so the caller knows it must rebuild the payload.
+fn unchanged_body(
+    meta: &RequestMeta,
+    model: &str,
+    downgrade_schema: bool,
+) -> Option<axum::body::Bytes> {
+    let received = meta.received.as_ref()?;
+    let asked = meta.raw_prompt.get("model")?.as_str()?;
+    (!downgrade_schema && asked == model).then(|| received.clone())
 }
 
 /// ITEM-090: inspect the payload before dispatch. Advisory only — nothing is
@@ -591,12 +610,7 @@ async fn replay_once(
     // deployment cannot accept json_schema at all.
     let downgrade = guard::request_schema(&guard_emit.meta.raw_prompt).is_some()
         && !providers::supports_json_schema(&replay.route.kind, &replay.model);
-    let body = match wire_body(
-        &guard_emit.meta.raw_prompt,
-        replay.route,
-        &replay.model,
-        downgrade,
-    ) {
+    let body = match wire_body(&guard_emit.meta, replay.route, &replay.model, downgrade) {
         Ok(body) => body,
         Err(response) => {
             guard_emit.emit(

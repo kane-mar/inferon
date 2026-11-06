@@ -14,7 +14,12 @@ use crate::latency::{CONTRACT_WINDOW_HOURS, MIN_SAMPLES, P50_BUDGET_US, P95_GUAR
 type HeatCellRow = (String, String, i64, i64, Option<f64>);
 
 /// `(samples, under_1ms, p50, p95, p99)` of the proxy's own overhead.
-type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>);
+/// `(samples, under_1ms, p50_us, p95_us, p99_us, prompt_tokens_p50)`.
+///
+/// ITEM-127: gateway time is proportional to the payload — parsing the body is
+/// unavoidable work — so the number is meaningless without the prompt size it
+/// was measured at. It travels with the percentile, never apart from it.
+type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, Option<i64>);
 
 /// `(total_p50, total_p95, total_p99, ttft_p50, ttft_p95)` in ms.
 type LatencyRow = (
@@ -26,7 +31,17 @@ type LatencyRow = (
 );
 
 /// `(model, requests, proxy_p50_us, proxy_p95_us, total_p50_ms, total_p95_ms)`.
-type ModelRow = (String, i64, Option<i64>, Option<i64>, Option<f64>, Option<f64>);
+/// `(model, requests, proxy_p50_us, proxy_p95_us, total_p50_ms, total_p95_ms,
+/// prompt_tokens_p50)` — the payload context rides with the gateway time.
+type ModelRow = (
+    String,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<f64>,
+    Option<f64>,
+    Option<i64>,
+);
 
 /// The report's window: `days` back, ending `offset` days before now.
 #[derive(serde::Deserialize)]
@@ -58,7 +73,7 @@ pub async fn runtime(
     let offset = query.offset();
     let step = query.step.clone().unwrap_or_else(|| "day".to_string());
 
-    let (samples, under_1ms, p50_us, p95_us, p99_us) =
+    let (samples, under_1ms, p50_us, p95_us, p99_us, prompt_tokens_p50) =
         overhead(&state, tenant_id, days, offset).await?;
     let verdict = contract_verdict(&state, tenant_id).await?;
     let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95) =
@@ -76,6 +91,7 @@ pub async fn runtime(
             "samples": verdict.samples,
             "observed_p50_us": verdict.p50_us,
             "observed_p95_us": verdict.p95_us,
+            "prompt_tokens_p50": verdict.prompt_tokens_p50,
             "p50_met": verdict.p50_met,
             "p95_met": verdict.p95_met,
         },
@@ -86,6 +102,7 @@ pub async fn runtime(
             "p50_us": p50_us,
             "p95_us": p95_us,
             "p99_us": p99_us,
+            "prompt_tokens_p50": prompt_tokens_p50,
         },
         "latency": {
             "total_p50_ms": total_p50,
@@ -116,7 +133,8 @@ async fn overhead(
                 COUNT(*) FILTER (WHERE proxy_us < 1000),
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
-                round(percentile_cont(0.99) WITHIN GROUP (ORDER BY proxy_us))::bigint
+                round(percentile_cont(0.99) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint
          FROM traces
          WHERE tenant_id = $1
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -137,11 +155,13 @@ async fn contract_verdict(
     state: &Arc<AppState>,
     tenant_id: uuid::Uuid,
 ) -> Result<crate::latency::Verdict, Response> {
-    let (samples, p50, p95): (i64, Option<i64>, Option<i64>) = stored(
+    let (samples, p50, p95, prompt_tokens_p50): (i64, Option<i64>, Option<i64>, Option<i64>) =
+        stored(
         sqlx::query_as(
             "SELECT COUNT(*),
                     round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
-                    round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint
+                    round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint
              FROM traces
              WHERE tenant_id = $1
                AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
@@ -152,7 +172,7 @@ async fn contract_verdict(
         .fetch_one(&state.db)
         .await,
     )?;
-    Ok(crate::latency::verdict(samples, p50, p95))
+    Ok(crate::latency::verdict(samples, p50, p95).with_payload(prompt_tokens_p50))
 }
 
 async fn latency(
@@ -193,7 +213,8 @@ async fn model_rows(
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
-                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms))::float8
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint
          FROM traces
          WHERE tenant_id = $1
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
@@ -209,16 +230,19 @@ async fn model_rows(
     )?;
     Ok(rows
         .into_iter()
-        .map(|(model, requests, proxy_p50, proxy_p95, total_p50, total_p95)| {
-            json!({
-                "model": model,
-                "requests": requests,
-                "proxy_p50_us": proxy_p50,
-                "proxy_p95_us": proxy_p95,
-                "total_p50_ms": total_p50,
-                "total_p95_ms": total_p95,
-            })
-        })
+        .map(
+            |(model, requests, proxy_p50, proxy_p95, total_p50, total_p95, tokens_p50)| {
+                json!({
+                    "model": model,
+                    "requests": requests,
+                    "proxy_p50_us": proxy_p50,
+                    "proxy_p95_us": proxy_p95,
+                    "total_p50_ms": total_p50,
+                    "total_p95_ms": total_p95,
+                    "prompt_tokens_p50": tokens_p50,
+                })
+            },
+        )
         .collect())
 }
 

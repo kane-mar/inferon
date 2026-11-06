@@ -10,6 +10,7 @@
 
 use crate::AppState;
 use axum::{http::StatusCode, response::Response};
+use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
@@ -602,12 +603,48 @@ pub fn forward_body(
     model: &str,
     downgrade_schema: bool,
 ) -> Result<Vec<u8>, serde_json::Error> {
-    let mut forwarded = payload.clone();
-    forwarded["model"] = serde_json::Value::String(model.to_string());
-    if downgrade_schema {
-        forwarded["response_format"] = serde_json::json!({"type": "json_object"});
-    }
-    serde_json::to_vec(&forwarded)
+    serde_json::to_vec(&Forwarded {
+        payload,
+        model,
+        downgrade_schema,
+    })
 }
+
+/// The outgoing body: the client's payload with `model` (and, on a schema
+/// downgrade, `response_format`) substituted while it is serialised.
+///
+/// ITEM-127: this used to clone the whole `Value` first, so a 300k-token prompt
+/// paid for a megabyte-scale deep copy before the request had even left.
+struct Forwarded<'a> {
+    payload: &'a Value,
+    model: &'a str,
+    downgrade_schema: bool,
+}
+
+impl Serialize for Forwarded<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let Value::Object(entries) = self.payload else {
+            return self.payload.serialize(serializer);
+        };
+        let downgraded = serde_json::json!({"type": "json_object"});
+        let extra = usize::from(self.downgrade_schema && !entries.contains_key("response_format"));
+        let mut object = serializer.serialize_map(Some(entries.len() + extra))?;
+        for (key, value) in entries {
+            match (key.as_str(), self.downgrade_schema) {
+                ("model", _) => object.serialize_entry("model", self.model)?,
+                // ITEM-067: a provider without json_schema gets a plain json_object.
+                ("response_format", true) => {
+                    object.serialize_entry("response_format", &downgraded)?
+                }
+                _ => object.serialize_entry(key, value)?,
+            }
+        }
+        if extra == 1 {
+            object.serialize_entry("response_format", &downgraded)?;
+        }
+        object.end()
+    }
+}
+
 #[cfg(test)]
 mod tests;

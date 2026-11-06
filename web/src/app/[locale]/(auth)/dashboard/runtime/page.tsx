@@ -63,11 +63,13 @@ export default async function RuntimePage(props: {
           window={days}
           definition={t('overhead_help')}
           tone={metricTone(overhead.p50_us, THRESHOLDS.proxyP50Us)}
-          hint={contract.p50_met == null
+          hint={`${contract.p50_met == null
             ? t('not_enough_samples', { count: contract.min_samples })
             : contract.p50_met
               ? t('within_contract')
-              : t('over_contract')}
+              : t('over_contract')} · ${t('at_payload', {
+            tokens: formatInt(overhead.prompt_tokens_p50 ?? 0),
+          })}`}
         />
         <KpiCard
           label={t('overhead_p95')}
@@ -111,6 +113,7 @@ export default async function RuntimePage(props: {
                 hours: contract.window_hours,
                 samples: formatInt(contract.samples),
                 observed: us(contract.observed_p50_us),
+                tokens: formatInt(contract.prompt_tokens_p50 ?? 0),
               })}
             </p>
             <p className="text-xs text-muted-foreground">{t('claim_note')}</p>
@@ -296,6 +299,7 @@ export default async function RuntimePage(props: {
                 <tr className="border-b">
                   <th className={HEAD}>{t('model')}</th>
                   <th className={HEAD}>{t('requests')}</th>
+                  <th className={HEAD}>{t('payload_column')}</th>
                   <th className={HEAD}>{t('overhead_p50')}</th>
                   <th className={HEAD}>{t('overhead_p95')}</th>
                   <th className={HEAD}>{t('total_p50')}</th>
@@ -319,6 +323,7 @@ export default async function RuntimePage(props: {
                       {row.model}
                     </td>
                     <td className={CELL}>{formatInt(row.requests)}</td>
+                    <td className={CELL}>{formatInt(row.prompt_tokens_p50 ?? 0)}</td>
                     <td className={CELL}>{us(row.proxy_p50_us)}</td>
                     <td className={CELL}>{us(row.proxy_p95_us)}</td>
                     <td className={CELL}>{ms(row.total_p50_ms)}</td>

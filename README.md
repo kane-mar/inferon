@@ -60,11 +60,19 @@ Caddy sends `/v1/*`, `/auth/*` and `/healthz` to `proxy`, and everything else to
 
 ## Performance contract
 
-The proxy's own overhead is **p50 under 1 ms and p95 under 2 ms for a warm
-request**. Overhead means the time from the start of a request to just before it is
-sent to the provider, recorded as `traces.proxy_us`. It leaves out the provider and
-the response body, and counts auth, workspace config, routing, the budget and router
-decision, and parsing.
+The proxy's own overhead is **p50 under 1 ms and p95 under 2 ms for a warm request
+carrying a small prompt** (the suite and the deploy gate use ~35-token requests).
+Overhead means the time from the start of a request to just before it is sent to the
+provider, recorded as `traces.proxy_us`. It leaves out the provider and the response
+body, and counts auth, workspace config, routing, the budget and router decision, and
+**parsing the request body**.
+
+That last part is why the claim carries a payload size. Parsing is unavoidable work
+and it is proportional to the payload: the gateway adds a few microseconds on a 4 KB
+prompt, and a **300k-token (1.2 MB) prompt spends a few milliseconds** on it. The
+dashboard states the median prompt size beside the number for exactly that reason
+(ITEM-127), and the request body is forwarded as the client sent it — it is parsed
+once, never cloned and re-serialised before dispatch.
 
 "Warm" has a precise meaning: the request lands inside the cache windows (keys and
 spend 1 s, config 5 s), which means it is part of a burst. The **first** request

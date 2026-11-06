@@ -137,3 +137,33 @@ fn rules_round_trip_through_their_stored_names() {
         }
     );
 }
+
+#[test]
+fn a_schema_near_the_budget_reports_its_exact_size() {
+    // 9000 characters of schema, 1000 over the budget: the finding prices the
+    // excess exactly, as the dashboard has always shown it.
+    let mut p = payload(serde_json::json!([{"role": "user", "content": "hi"}]));
+    p["tools"] = serde_json::json!([{"type": "function", "function": {"parameters": {"x": "y".repeat(9000)}}}]);
+    let found = inspect(&p, false, MODEL, &Rules::default());
+    let bytes = super::schema_bytes(&p).0;
+    assert_eq!(found["schema_bytes"], bytes);
+    assert_eq!(found["schema_bytes_capped"], false);
+    assert_eq!(found["wasted_tokens_est"], ((bytes - SCHEMA_BUDGET_BYTES) / 4) as i64);
+}
+
+#[test]
+fn a_pathological_schema_is_reported_as_capped_not_measured() {
+    // ITEM-127: measuring a megabyte-scale schema meant serialising it on every
+    // request. Past the reporting cap the finding says so instead of paying for
+    // the exact number — the verdict is the same either way.
+    let mut p = payload(serde_json::json!([{"role": "user", "content": "hi"}]));
+    p["tools"] = serde_json::json!([{"type": "function", "function": {"parameters": {"x": "y".repeat(2_000_000)}}}]);
+    let found = inspect(&p, false, MODEL, &Rules::default());
+    assert_eq!(found["kinds"][0], "oversized_schema");
+    assert_eq!(found["schema_bytes"], SCHEMA_REPORT_CAP_BYTES);
+    assert_eq!(found["schema_bytes_capped"], true);
+    assert_eq!(
+        found["wasted_tokens_est"],
+        ((SCHEMA_REPORT_CAP_BYTES - SCHEMA_BUDGET_BYTES) / 4) as i64
+    );
+}

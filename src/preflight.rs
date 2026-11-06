@@ -72,6 +72,13 @@ impl Rules {
 
 /// Tool/function definitions beyond this many bytes are flagged.
 pub const SCHEMA_BUDGET_BYTES: usize = 8_000;
+/// Schemas are measured up to this size and capped beyond it.
+///
+/// ITEM-127: measuring a schema meant serialising it, and a pathological one
+/// (a megabyte of property descriptions) cost more to measure than the finding
+/// is worth. Past the cap the report says "capped" and prices the cap; the
+/// verdict — oversized — is the same, and it is 16× the budget either way.
+pub const SCHEMA_REPORT_CAP_BYTES: usize = 64_000;
 /// A system prompt beyond this many characters is flagged as boilerplate.
 pub const PROMPT_BUDGET_CHARS: usize = 8_000;
 /// How long a system prompt counts as "the same one again".
@@ -99,7 +106,7 @@ pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str, rules
         kinds.push("repeated_system_prompt");
         wasted_tokens += (system / 4) as i64;
     }
-    let schema_bytes = schema_bytes(payload);
+    let (schema_bytes, schema_capped) = schema_bytes(payload);
     if rules.oversized_schema && schema_bytes > SCHEMA_BUDGET_BYTES {
         kinds.push("oversized_schema");
         wasted_tokens += ((schema_bytes - SCHEMA_BUDGET_BYTES) / 4) as i64;
@@ -123,6 +130,8 @@ pub fn inspect(payload: &Value, repeated_system_prompt: bool, model: &str, rules
         "kinds": kinds,
         "wasted_tokens_est": wasted_tokens,
         "wasted_usd_est": wasted_usd.round_dp(10).to_string(),
+        "schema_bytes": schema_bytes,
+        "schema_bytes_capped": schema_capped,
     })
 }
 
@@ -138,13 +147,54 @@ fn system_chars(payload: &Value) -> usize {
         .sum()
 }
 
-/// Bytes of the tool/function definitions.
-fn schema_bytes(payload: &Value) -> usize {
-    ["tools", "functions"]
-        .iter()
-        .filter_map(|key| serde_json::to_string(&payload[*key]).ok())
-        .map(|value| value.len())
-        .sum()
+/// Bytes of the tool/function definitions, and whether the count hit the cap.
+///
+/// A missing key contributes nothing: `Value::Null` used to serialise to "null"
+/// and quietly add four bytes per absent key.
+fn schema_bytes(payload: &Value) -> (usize, bool) {
+    let mut total = 0;
+    let mut capped = false;
+    for key in ["tools", "functions"] {
+        let Some(value) = payload.get(key).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let room = SCHEMA_REPORT_CAP_BYTES.saturating_sub(total);
+        let (bytes, hit_cap) = serialised_len(value, room);
+        total = (total + bytes).min(SCHEMA_REPORT_CAP_BYTES);
+        capped |= hit_cap || total == SCHEMA_REPORT_CAP_BYTES;
+    }
+    (total, capped)
+}
+
+/// The length of a value's JSON form, giving up at `limit` bytes so a huge value
+/// is not serialised in full just to be measured.
+fn serialised_len(value: &Value, limit: usize) -> (usize, bool) {
+    let mut counter = CountingWriter { written: 0, limit };
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => (counter.written, false),
+        Err(_) => (limit, true),
+    }
+}
+
+/// A writer that counts bytes and fails once `limit` is passed, which stops
+/// `serde_json` early.
+struct CountingWriter {
+    written: usize,
+    limit: usize,
+}
+
+impl std::io::Write for CountingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.written += buf.len();
+        if self.written > self.limit {
+            return Err(std::io::Error::other("schema measurement cap reached"));
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Characters in messages that exactly repeat an earlier (role, content) pair.

@@ -27,6 +27,9 @@ pub struct Verdict {
     /// `None` when there are too few samples (or no percentile) to say.
     pub p50_met: Option<bool>,
     pub p95_met: Option<bool>,
+    /// ITEM-127: the median prompt size the verdict covered. Gateway time grows
+    /// with the payload, so the claim has to be read beside it.
+    pub prompt_tokens_p50: Option<i64>,
 }
 
 pub fn verdict(samples: i64, p50_us: Option<i64>, p95_us: Option<i64>) -> Verdict {
@@ -37,6 +40,15 @@ pub fn verdict(samples: i64, p50_us: Option<i64>, p95_us: Option<i64>) -> Verdic
         p95_us,
         p50_met: enough.then(|| p50_us.is_some_and(|p50| p50 < P50_BUDGET_US)),
         p95_met: enough.then(|| p95_us.is_some_and(|p95| p95 < P95_GUARD_US)),
+        prompt_tokens_p50: None,
+    }
+}
+
+impl Verdict {
+    /// Attach the payload size the percentiles were measured at (ITEM-127).
+    pub fn with_payload(mut self, prompt_tokens_p50: Option<i64>) -> Self {
+        self.prompt_tokens_p50 = prompt_tokens_p50;
+        self
     }
 }
 

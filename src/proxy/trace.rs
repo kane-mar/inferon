@@ -7,6 +7,10 @@ pub(super) struct RequestMeta {
     pub(super) model: String,
     pub(super) system_prompt_hash: Option<String>,
     pub(super) raw_prompt: Value,
+    /// ITEM-127: the body exactly as the client sent it. Forwarded unchanged when
+    /// routing rewrites nothing, so a large prompt is parsed once instead of being
+    /// cloned and re-serialised before it is even sent. `Bytes` clones are free.
+    pub(super) received: Option<axum::body::Bytes>,
     /// ITEM-045: set when a fallback chain changed the serving model.
     pub(super) routing_event: Option<Value>,
     /// ITEM-054: set when the heuristic router downshifted the model.
@@ -46,6 +50,14 @@ pub(super) struct RequestMeta {
 }
 
 impl RequestMeta {
+    /// The payload's size, without re-serialising it (ITEM-127). Estimated token
+    /// counts are built from this, and a 300k-token prompt is a megabyte.
+    pub(super) fn payload_bytes(&self) -> usize {
+        self.received
+            .as_ref()
+            .map_or_else(|| self.raw_prompt.to_string().len(), |bytes| bytes.len())
+    }
+
     /// The request-derived fields every trace shares. `system_prompt_hash` is
     /// passed in because the two ingress surfaces hash different things.
     pub(super) fn new(
@@ -59,6 +71,7 @@ impl RequestMeta {
             model: payload["model"].as_str().unwrap_or("unknown").to_string(),
             system_prompt_hash,
             raw_prompt: payload,
+            received: None,
             routing_event: None,
             router_event: None,
             cache_affinity: None,

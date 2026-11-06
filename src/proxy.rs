@@ -184,7 +184,7 @@ pub(crate) async fn proxy_chat_completions(
     stages.mark("auth");
     let session_id = session_id(&req);
 
-    let (_, payload) = match read_json_body(req).await {
+    let (body_bytes, payload) = match read_json_body(req).await {
         Ok(parsed) => parsed,
         Err(resp) => return resp,
     };
@@ -192,6 +192,7 @@ pub(crate) async fn proxy_chat_completions(
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     let prompt_hash = system_prompt_hash(&payload);
     let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
+    meta.received = Some(body_bytes);
     // ITEM-088: the tenant's consent decides whether payloads are stored at all.
     meta.capture_payloads = state.hotpath.capture_enabled(&state, tenant_id).await;
     meta.pii = state.hotpath.pii_plan(&state, tenant_id).await;
@@ -299,7 +300,7 @@ async fn dispatch_chain<'a>(
         // fallback to a provider that honours json_schema keeps the contract.
         let downgrade_schema = guard::request_schema(&meta.raw_prompt).is_some()
             && !providers::supports_json_schema(&step.route.kind, &model);
-        let body = match wire_body(&meta.raw_prompt, &step.route, &model, downgrade_schema) {
+        let body = match wire_body(&meta, &step.route, &model, downgrade_schema) {
             Ok(bytes) => bytes,
             Err(resp) => return Err(resp),
         };
@@ -503,6 +504,7 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     let prompt_hash = system_prompt_hash_anthropic(&payload);
     let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
+    meta.received = Some(body_bytes);
 
     // ITEM-123: the clock starts before routing, so a refusal is timed and traced.
     let started = Instant::now();
@@ -530,14 +532,11 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
     meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
     meta.proxy_us = Some(request_started.elapsed().as_micros() as i64);
     let request = provider_request(&state.http_client, &route);
-    let wire = match route.translate {
-        // Translated: the body is rebuilt in the provider's shape.
-        Some(_) => match wire_body(&meta.raw_prompt, &route, &meta.model, false) {
-            Ok(bytes) => bytes,
-            Err(resp) => return resp,
-        },
-        // Native Anthropic: forward the caller's bytes unchanged.
-        None => body_bytes,
+    // ITEM-127: `wire_body` forwards the caller's own bytes when nothing changes
+    // (the common case) and rebuilds the payload only for a translation.
+    let wire = match wire_body(&meta, &route, &meta.model, false) {
+        Ok(bytes) => bytes,
+        Err(resp) => return response::with_trace_id(resp, meta.id),
     };
     meta.translate_to = route.translate;
     if let Err(resp) = enforce_rate_limit(&state, &tenant, &mut meta).await {
