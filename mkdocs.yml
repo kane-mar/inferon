@@ -57,11 +57,33 @@ nav:
   - Getting started:
       - Your first request: using/first-request.md
       - Move an existing SDK: using/move-an-sdk.md
+  - Configuration:
+      - Add your own provider: config/01-providers.md
+      - Models and cheaper pairs: config/02-models-and-tier-pairs.md
+      - The output checker: config/03-output-checker.md
+      - The automatic router: config/04-auto-router-and-threshold.md
+      - Budgets and rate limits: config/05-budgets-and-rate-limits.md
+      - A fallback chain that fires: config/06-fallback-chain.md
+      - Prompt caching: config/07-prompt-caching.md
+      - Pruning and the comparison group: config/08-pruning-and-comparison.md
+      - Payloads, retention and PII: config/09-payloads-retention-pii.md
+      - Datasets, gold sets and evals: config/10-datasets-gold-sets-evals.md
+      - The cost audit's findings: config/11-cost-audit-findings.md
+      - Spend and sessions: config/12-sessions-and-spend.md
   - Troubleshooting:
       - '401 or 403: the key is not accepted': troubleshooting/401-403.md
       - 'no_provider: nowhere to send the request': troubleshooting/no-provider.md
       - '429: our limit, or the provider''s': troubleshooting/too-many-requests.md
       - '5xx and the fallback chain': troubleshooting/upstream-5xx.md
+      - Empty, refused or cut short: troubleshooting/empty-refused-truncated.md
+      - Quality dropped after a downgrade: troubleshooting/quality-dropped.md
+      - A provider that tests as unreachable: troubleshooting/provider-unreachable.md
+      - The dashboard is empty: troubleshooting/dashboard-empty.md
+      - The audit shows zero: troubleshooting/audit-shows-zero.md
+      - A sign-in loop: troubleshooting/sign-in-loop.md
+      - 502 from Caddy: troubleshooting/caddy-502.md
+      - Migrations did not apply: troubleshooting/migrations-not-applied.md
+      - Payloads were purged: troubleshooting/payloads-purged.md
   - Run it yourself:
       - Inferon on your own network: inferon-self-hosted.md
 

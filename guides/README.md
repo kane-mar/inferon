@@ -11,6 +11,15 @@ good result looks like, and says what to check when you get something else.
 | [Your first request](using/first-request.md) | Sign in, create a key, add a provider and see the request in the dashboard. About five minutes. |
 | [Move an existing SDK to Inferon](using/move-an-sdk.md) | Change two lines in Python, Node or curl. Nothing else in your code moves. |
 
+## Configuration, in the order a new workspace needs it
+
+| Page | Answers |
+|---|---|
+| [Add your own provider](config/01-providers.md) | The five types, the key, Test, models, a model on your own network |
+| [Models, cheaper pairs and what "expensive" means](config/02-models-and-tier-pairs.md) | Built-in pairs, your own pairs, why a pair goes inactive |
+| [Turning on the output checker](config/03-output-checker.md) | The schema contract, the replay, and streaming vs buffered |
+| [The automatic router and its threshold](config/04-auto-router-and-threshold.md) | How "simple" is scored, and where the move shows up |
+
 ## Troubleshooting
 
 One page per symptom. Same shape every time: what you see, what it means, the fix, how
@@ -22,6 +31,15 @@ to confirm it, and when to stop and ask.
 | [no_provider](troubleshooting/no-provider.md) | The workspace has nowhere to send the request — the most common first failure |
 | [429: our limit, or the provider's](troubleshooting/too-many-requests.md) | Our per-key limit versus the provider's own refusal |
 | [5xx and the fallback chain](troubleshooting/upstream-5xx.md) | A provider failure, a connection failure of ours, and what an exhausted chain returns |
+| [Empty, refused or cut short](troubleshooting/empty-refused-truncated.md) | `max_tokens`, reasoning tokens, and the four unusable-answer outcomes |
+| ["Quality dropped after a downgrade"](troubleshooting/quality-dropped.md) | Measure the drop, then roll back the one thing you changed |
+| [A provider that tests as unreachable](troubleshooting/provider-unreachable.md) | Local model, TLS, firewall, path prefix |
+| [The dashboard is empty](troubleshooting/dashboard-empty.md) | Wrong key, wrong workspace, wrong window, dropped traces |
+| [The audit shows $0.00](troubleshooting/audit-shows-zero.md) | A local model (free by design) or a model with no price |
+| [A sign-in loop](troubleshooting/sign-in-loop.md) | `SESSION_SECRET`, the cookie, the OAuth callback |
+| [502 from Caddy](troubleshooting/caddy-502.md) | Which container is down, and how to read its log |
+| [Migrations did not apply](troubleshooting/migrations-not-applied.md) | The order that avoids it |
+| [Payloads were purged](troubleshooting/payloads-purged.md) | Retention, purge, and pinning a gold set before it ages out |
 
 ## Running it yourself
 
