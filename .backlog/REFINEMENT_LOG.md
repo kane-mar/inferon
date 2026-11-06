@@ -1,5 +1,33 @@
 # Refinement Log
 
+## 2026-11-06 (late) — the guide suite is complete; evidence produced three defects
+
+The backlog's pullable region was the guide suite. It is delivered: 29 published pages
+(index, two getting-started, twelve configuration, thirteen troubleshooting, self-hosting),
+each written from the code and verified against the live gateway, each carrying its five
+sections where it is a troubleshooting page and a dated footer everywhere. `mkdocs.yml`
+carries the full nav so a page cannot ship without appearing on the site.
+
+Writing guides from the system rather than from memory is what made this worth doing: three
+real defects came out of it, none of which the backlog had.
+
+- **ITEM-127 (gateway time).** The Runtime page said 1.2 s while the product said
+  sub-millisecond. The number is proportional to the payload; three whole-payload passes
+  before dispatch were waste (a clone + re-serialisation, a schema serialised to be
+  measured, a prompt serialised to be counted). Fixed, and the claim now carries its
+  payload size everywhere. 1.2 MB went from 1.2 s to 23.8 ms p50 live.
+- **ITEM-128 (the checker).** The output checker verified only *streamed* answers, and
+  "cheap tier" was a hard-coded list of four model families — so the most common structured
+  request was unchecked and a workspace's own cheap model never was. Both fixed and
+  verified live, including the replay escalating instead of retrying itself.
+- **ITEM-129 (open).** Creating a keyless `local` provider over the API fails without a
+  `key` field, with a raw serde error. One line plus tests.
+
+Ordering decision: the defects outranked the remaining guide pages once found, because a
+guide that documents a limitation is a workaround and the fix is cheaper to read than the
+paragraph. That is the rule this session followed: **write the page, and when it needs a
+caveat, fix the caveat first.**
+
 ## 2026-11-06 — UI review: legibility, self-explaining screens, and a page that was 500
 
 PO: "the fonts are small, and often hard to read"; "if the user needs the documentation
