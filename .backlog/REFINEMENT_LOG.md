@@ -20,8 +20,8 @@ real defects came out of it, none of which the backlog had.
   "cheap tier" was a hard-coded list of four model families — so the most common structured
   request was unchecked and a workspace's own cheap model never was. Both fixed and
   verified live, including the replay escalating instead of retrying itself.
-- **ITEM-129 (open).** Creating a keyless `local` provider over the API fails without a
-  `key` field, with a raw serde error. One line plus tests.
+- **ITEM-129.** Creating a keyless `local` provider over the API failed without a `key`
+  field, with a raw serde error. One line plus two tests; delivered and verified live.
 
 Ordering decision: the defects outranked the remaining guide pages once found, because a
 guide that documents a limitation is a workaround and the fix is cheaper to read than the

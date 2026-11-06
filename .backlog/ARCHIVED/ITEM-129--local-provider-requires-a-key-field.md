@@ -1,3 +1,9 @@
+> **Delivered 2026-11-06.** `#[serde(default)]` on the provider body's `key`, so absent
+> means empty; `requires_key(kind)` still refuses an empty key on the four keyed kinds with
+> the typed `400 invalid_key`. Verified live on the rebuilt proxy: a `local` provider is
+> created without the field, and a `deepseek` one without it gets the typed refusal. Two
+> tests, 565 in total, clippy clean.
+
 ## ITEM-129: Creating a keyless `local` provider fails unless the body carries `key`
 
 **As an** API client adding a model on my own network
