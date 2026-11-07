@@ -1,3 +1,4 @@
+use super::route::Surface;
 use super::*;
 
 /// Buffer an upstream body, trace the completed request, and build the
@@ -382,6 +383,15 @@ pub(super) fn with_trace_id(mut response: Response, trace_id: Uuid) -> Response 
 /// Pipe an upstream byte stream through as text/event-stream, emitting the
 /// request trace once the stream is fully consumed. Chunks are yielded
 /// immediately (zero-copy; no buffering that would break TTFT) while bytes are
+/// Telemetry destinations and the surface the client speaks — what the tap needs
+/// beyond the response itself. Bundled so the tap keeps one readable signature;
+/// `client` is ITEM-130's: the last bytes of a stream are written in the shape
+/// the client asked for.
+pub(super) struct StreamTap {
+    pub(super) tx: mpsc::Sender<TraceMessage>,
+    pub(super) parse_usage: fn(&[u8]) -> Option<Usage>,
+    pub(super) client: Surface,
+}
 /// accumulated on the side solely for the final usage-frame parse (AC4).
 pub(super) fn stream_response(
     upstream: reqwest::Response,
@@ -389,8 +399,7 @@ pub(super) fn stream_response(
     meta: RequestMeta,
     tenant_id: Uuid,
     status: u16,
-    tx: mpsc::Sender<TraceMessage>,
-    parse_usage: fn(&[u8]) -> Option<Usage>,
+    tap: StreamTap,
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
@@ -399,7 +408,8 @@ pub(super) fn stream_response(
     let header_meta = meta.clone();
     // ITEM-094: when the provider speaks the other surface, the translator wraps
     // the raw stream *before* the telemetry tap — so usage parsing and completion
-    // capture read exactly the frames the client receives.
+    // capture read exactly the frames the client receives. ITEM-130 depends on
+    // the same ordering: the stream's tail is written in the client's surface.
     let stream = match meta.translate_to {
         Some(provider) => futures_util::future::Either::Left(stream_with_trace(
             crate::translate::sse::adapt(
@@ -412,8 +422,7 @@ pub(super) fn stream_response(
             meta,
             tenant_id,
             status,
-            tx,
-            parse_usage,
+            tap,
         )),
         None => futures_util::future::Either::Right(stream_with_trace(
             byte_stream,
@@ -421,8 +430,7 @@ pub(super) fn stream_response(
             meta,
             tenant_id,
             status,
-            tx,
-            parse_usage,
+            tap,
         )),
     };
     let mut response = Response::new(Body::from_stream(stream));
@@ -579,6 +587,29 @@ fn flush_guarded(
     guard_emit.note_completion(&bytes);
     guard_emit.note_guard(None, guard::guard_flushed_event(&guard_emit.meta.model));
     guard_emit.emit(usage, false, outcome, None);
+    // ITEM-130: the guard checks the container, not how the answer ends — a
+    // buffer that carries content but no `finish_reason` still reaches a client
+    // that cannot close it. Give it the terminal frame it was owed.
+    let bytes = match shape {
+        AnswerShape::Stream => {
+            let id = guard_emit.meta.id.to_string();
+            match crate::sse::tail(
+                &bytes,
+                false,
+                Surface::OpenAi,
+                &id,
+                &guard_emit.meta.model,
+            ) {
+                Some(tail) => {
+                    let mut body = bytes.to_vec();
+                    body.extend_from_slice(&tail.bytes);
+                    axum::body::Bytes::from(body)
+                }
+                None => bytes,
+            }
+        }
+        AnswerShape::Buffered => bytes,
+    };
     let mut response = Response::new(Body::from(bytes));
     *response.status_mut() = StatusCode::OK;
     response
@@ -1005,17 +1036,21 @@ impl Drop for StreamEmit {
 /// it immediately, and once the stream ends queue the trace with token counts
 /// parsed from the final usage frame. A client abort mid-stream still emits a
 /// truncated trace via StreamEmit's Drop.
+///
+/// ITEM-130: the last bytes of the body are decided by `sse::tail`, so a stream
+/// that stops before a `finish_reason` is never a silent end for the client.
 pub(super) fn stream_with_trace(
     byte_stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>>,
     started: Instant,
     meta: RequestMeta,
     tenant_id: Uuid,
     status: u16,
-    tx: mpsc::Sender<TraceMessage>,
-    parse_usage: fn(&[u8]) -> Option<Usage>,
+    tap: StreamTap,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> {
     async_stream::stream! {
-        let emit = StreamEmit::new(tx, meta, tenant_id, status, started);
+        let trace_id = meta.id.to_string();
+        let model = meta.model.clone();
+        let emit = StreamEmit::new(tap.tx, meta, tenant_id, status, started);
         let mut stream = Box::pin(byte_stream);
         let mut errored = false;
         while let Some(chunk) = stream.next().await {
@@ -1036,12 +1071,24 @@ pub(super) fn stream_with_trace(
             }
         }
         let accumulated = emit.raw.borrow().clone();
-        let usage = parse_usage(&accumulated).unwrap_or_default();
+        let tail = crate::sse::tail(&accumulated, errored, tap.client, &trace_id, &model);
+        let usage = (tap.parse_usage)(&accumulated).unwrap_or_default();
         let outcome = if errored {
             Outcome::Truncated
         } else {
             outcome_for_sse(status, &accumulated)
         };
-        emit.emit(usage, errored, outcome, errored.then_some(ErrorClass::Transport));
+        // A body that ended before the provider was done is a truncated trace,
+        // whatever it managed to say first (ITEM-130).
+        let truncated = errored || tail.as_ref().is_some_and(|t| t.truncated);
+        emit.emit(
+            usage,
+            truncated,
+            if truncated { Outcome::Truncated } else { outcome },
+            truncated.then_some(ErrorClass::Transport),
+        );
+        if let Some(tail) = tail {
+            yield Ok(axum::body::Bytes::from(tail.bytes));
+        }
     }
 }

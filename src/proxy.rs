@@ -19,7 +19,7 @@ use crate::{
 };
 
 mod response;
-mod route;
+pub(crate) mod route;
 mod trace;
 
 // The handlers live here; their pieces are re-exported so every existing
@@ -442,8 +442,11 @@ async fn finish_openai_response(
                 meta,
                 tenant_id,
                 status.as_u16(),
-                state.telemetry_tx.clone(),
-                usage_from_sse_bytes,
+                response::StreamTap {
+                    tx: state.telemetry_tx.clone(),
+                    parse_usage: usage_from_sse_bytes,
+                    client: route::Surface::OpenAi,
+                },
             )
         } else {
             let json_content_type = Some(HeaderValue::from_static("application/json"));
@@ -664,8 +667,11 @@ async fn finish_anthropic_response(
             meta,
             tenant_id,
             status.as_u16(),
-            state.telemetry_tx.clone(),
-            usage_from_anthropic_sse_bytes,
+            response::StreamTap {
+                tx: state.telemetry_tx.clone(),
+                parse_usage: usage_from_anthropic_sse_bytes,
+                client: route::Surface::Anthropic,
+            },
         )
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));

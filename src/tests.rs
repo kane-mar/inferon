@@ -9,13 +9,15 @@
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tower::ServiceExt;
 
-    const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
+    const SSE_BODY: &str = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"id\":\"1\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n";
     /// SSE body whose single delta content is `content_json` (a JSON object
     /// double-encoded inside the delta string, like a real chat completion).
+    /// It carries its `finish_reason`, as a provider's last chunk does — an
+    /// answer without one has to be closed by the proxy (ITEM-130).
     fn delta_only_stream(content_json: &str) -> String {
         let frame = serde_json::json!({
             "id": "1",
-            "choices": [{"delta": {"content": content_json}}]
+            "choices": [{"delta": {"content": content_json}, "finish_reason": "stop"}]
         });
         format!("data: {frame}\n\ndata: [DONE]\n\n")
     }
@@ -247,6 +249,20 @@
                         b"data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\ndata: [DONE]\n\n",
                     ));
                 }))
+                .unwrap(),
+            // ITEM-130: a body that just stops — content, no finish_reason,
+            // no [DONE] — is what an SDK reports as "stream ended without
+            // finish_reason".
+            "ends-early" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from(
+                    "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":null}]}\n\n",
+                ))
+                .unwrap(),
+            // ITEM-130: the provider finished and said nothing at all.
+            "empty-answer" => axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from("data: [DONE]\n\n"))
                 .unwrap(),
             "miderror" => axum::response::Response::builder()
                 .header("content-type", "text/event-stream")
@@ -2972,6 +2988,70 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(msg.truncated, "mid-stream upstream error must be flagged truncated");
     }
 
+    // ITEM-130: the client must be able to tell a finished answer from a cut
+    // one. Before this, a body that stopped early simply stopped: the SDK raised
+    // "stream ended without finish_reason" and the dashboard counted the request
+    // as fine.
+    #[tokio::test]
+    async fn a_stream_that_stops_before_finish_reason_names_the_failure() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"ends-early","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("content\":\"a\""), "the frames that did arrive: {text}");
+        assert!(text.contains("\"code\":\"stream_ended_early\""), "{text}");
+        assert!(text.ends_with("data: [DONE]\n\n"), "the body still terminates: {text}");
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        assert!(msg.truncated, "a cut stream is a truncated trace");
+        assert_eq!(msg.error_class, Some(crate::errors::ErrorClass::Transport));
+        assert_eq!(msg.outcome, crate::quality::Outcome::Truncated);
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_ends_with_no_answer_is_named() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"empty-answer","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("\"code\":\"empty_answer\""), "{text}");
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        assert_eq!(msg.outcome, crate::quality::Outcome::Empty, "already a tracked outcome");
+        assert!(!msg.truncated, "the provider finished; it just said nothing");
+    }
+
     #[tokio::test]
     async fn worker_lints_repeated_uncached_system_prompts_off_the_hot_path() {
         let (tx, rx) = mpsc::channel(256);
@@ -3258,6 +3338,9 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
     async fn unguarded_stream_stays_byte_for_byte_unchanged() {
         // Same cheap model but NO schema contract: pure passthrough, even for
         // a body the guard would reject (IT-023 AC2: unguarded = zero change).
+        // ITEM-130: zero change to the *upstream* bytes — but a body that never
+        // says why it stopped still gets a terminal frame, so the client is not
+        // left guessing.
         let body = r#"{"model":"nodone","stream":true,"messages":[{"role":"user","content":"hi"}]}"#;
         let (response, _rx) = traced_request(body, Some(CLIENT_KEY)).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -3266,9 +3349,14 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .unwrap();
         let text = String::from_utf8_lossy(&out);
         assert!(
-            text.contains("data: {") && !text.contains("[DONE]"),
-            "unguarded traffic pipes the truncated upstream body straight through"
+            text.starts_with("data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}"),
+            "the upstream bytes are piped through unchanged: {text}"
         );
+        assert!(
+            text.contains("\"code\":\"stream_ended_early\""),
+            "a stream with no finish_reason is named, not silently ended: {text}"
+        );
+        assert!(text.ends_with("data: [DONE]\n\n"), "the body terminates: {text}");
     }
 
     #[tokio::test]
