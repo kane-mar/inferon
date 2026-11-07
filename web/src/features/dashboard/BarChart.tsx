@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 export const BarChart = (props: {
   rows: { label: string; value: number; display: string }[];
   empty: string;

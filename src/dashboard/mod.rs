@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Dashboard data plane: read-only aggregate views over `traces`, always scoped
 //! to the authenticated tenant (AC5). No new write path (AC3).
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Semantic task signatures for dataset grouping (ITEM-089).
 //!
 //! Grouping by `system_prompt_hash` is exact-string grouping: a prompt that

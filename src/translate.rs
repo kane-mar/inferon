@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Cross-surface translation (ITEM-094).
 //!
 //! An Anthropic SDK should be able to talk to a DeepSeek/OpenAI-compatible

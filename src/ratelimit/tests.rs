@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::*;
 
 fn limits(rpm: i64, tpm: i64) -> Limits {

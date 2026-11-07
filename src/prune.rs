@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Opt-in context pruning (ITEM-091).
 //!
 //! The router rewrites the *model*; this rewrites the *messages*, and that

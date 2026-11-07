@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { Me } from './InferonApi';
 import { cookies } from 'next/headers';
 import { cache } from 'react';

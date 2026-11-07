@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Heuristic model router (Slice 2, ITEM-015).
 //!
 //! Scores a request payload for complexity (0.0 dead-simple .. 1.0 frontier):

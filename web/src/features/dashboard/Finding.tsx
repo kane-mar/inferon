@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { Card } from './Card';
 
 /** One named audit finding: what we detect, the headline, and the numbers. */

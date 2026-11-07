@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! In-process health metrics (ITEM-059 integrity counters + ITEM-060 throughput
 //! & capacity).
 //!

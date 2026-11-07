@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Capture the assistant output of a streamed response (ITEM-085).
 //!
 //! The stream tap already accumulates the upstream bytes to parse usage; this

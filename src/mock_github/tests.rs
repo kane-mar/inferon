@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
     use super::*;
     use axum::body::Body;
     use tower::ServiceExt;

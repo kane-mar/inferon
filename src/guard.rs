@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Schema guard (Slice 4, ITEM-023..027).
 //!
 //! Guarantees that cheap-tier responses honour the caller's JSON-schema

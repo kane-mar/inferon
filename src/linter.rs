@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Cost anti-pattern detection (ITEM-006, AC1–AC3/AC5). Runs in the
 //! background batch worker, never on the hot path.
 //!

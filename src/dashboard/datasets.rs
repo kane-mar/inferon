@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The dataset report (ITEM-086): verified examples per prompt and model.
 //!
 //! Counts, not payloads: the read model answers "how many usable pairs did this

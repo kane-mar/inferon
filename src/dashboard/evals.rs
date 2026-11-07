@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The eval surface (ITEM-098): pin a gold set, run a model against it, compare
 //! two runs.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Guards for the trace insert.
 //!
 //! A broken INSERT is invisible to the in-memory sink tests (they never reach

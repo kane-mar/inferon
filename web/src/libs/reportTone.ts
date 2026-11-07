@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /**
  * Report colours: a value is green when it is healthy, red when it is not.
  *

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /**
  * Shared presentation atoms for the report pages, so they read the same way.
  * Pure formatters only — the one component lives in `ReportStatus`.

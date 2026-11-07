@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The latency contract, as arithmetic (ITEM-092).
 //!
 //! `proxy_us` measures the proxy's own pre-dispatch work. The claim is **p50 <

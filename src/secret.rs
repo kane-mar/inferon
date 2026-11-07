@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! At-rest encryption for provider credentials (ITEM-043).
 //!
 //! XChaCha20-Poly1305 (AEAD) keyed by the env master key

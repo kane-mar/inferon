@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Eval harness on captured traffic (ITEM-098).
 //!
 //! A tenant pins a **gold set** from their own verified examples, runs a model

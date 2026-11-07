@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
     use super::*;
 
     fn th(mult: &str, floor: i64, waste: i64) -> AlertThresholds {

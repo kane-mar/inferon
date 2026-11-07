@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Pre-flight payload lint (ITEM-090).
 //!
 //! Before the call leaves the perimeter, look for the payload waste the

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { TimeseriesPoint } from './InferonApi';
 
 /** Metrics the time-series chart can plot. */

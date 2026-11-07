@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { getTranslations } from 'next-intl/server';
 import { errorClassKeys } from '@/libs/labels';
 import { formatInt } from '@/libs/dashboardMetrics';

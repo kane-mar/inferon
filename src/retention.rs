@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Payload retention (ITEM-088).
 //!
 //! Costs, outcomes and aggregates are kept forever; raw prompts/completions and

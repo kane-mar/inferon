@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { createEnv } from '@t3-oss/env-nextjs';
 import * as z from 'zod';
 

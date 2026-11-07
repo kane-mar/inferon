@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Prompt embedder for task-aware routing (ITEM-028).
 //!
 //! The semantic signal is an **opt-in build**: the `embedder` cargo feature

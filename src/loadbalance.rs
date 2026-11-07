@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Multi-provider load balancing (ITEM-100).
 //!
 //! When two providers serve the same model, one of them should not take all the

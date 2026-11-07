@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Tenant + API-key persistence (ITEM-034): the `TenantStore` seam and its
 //! two implementations — `InMemoryTenantStore` (unit tests) and
 //! `PostgresTenantStore` (production: tenants + api_keys rows).

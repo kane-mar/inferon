@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The operator surface: platform-wide, cross-tenant aggregates and the
 //! governance actions. Split from `mod.rs` so the tenant surface and the
 //! operator surface do not share a file.

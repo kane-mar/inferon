@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Per-request cost accounting (ITEM-006, AC4/AC6; cache-aware per ITEM-017).
 //!
 //! Prices are USD per 1M tokens. Math is rust_decimal — never float.

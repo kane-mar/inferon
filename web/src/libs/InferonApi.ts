@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /**
  * Typed client for the Inferon data plane — the Rust proxy's JSON APIs.
  *

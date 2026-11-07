@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The prompt registry surface (ITEM-097): name a hash, list versions, diff two.
 //!
 //! Read-only in v1 — labels are additive, and nothing here edits a prompt or

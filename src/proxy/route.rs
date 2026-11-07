@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::*;
 
 /// The resolved upstream target for one request (ITEM-043): the tenant's own

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Verified-example curation (ITEM-086).
 //!
 //! A trace becomes a dataset pair only when its completion is *verified*: the

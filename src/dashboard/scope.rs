@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Who is calling: a tenant key, the operator key, or a signed-in session.
 //!
 //! The two capabilities are independent — a platform operator who also belongs

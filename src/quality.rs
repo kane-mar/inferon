@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Response quality classification (ITEM-055).
 //!
 //! The proxy already records what a request cost and how fast it was; this module

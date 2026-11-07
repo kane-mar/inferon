@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Postgres budget circuit breaker (Slice 2, ITEM-016).
 //!
 //! Per project decision: the spend counter is Postgres (`tenant_configurations`,

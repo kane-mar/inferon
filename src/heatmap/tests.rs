@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::*;
 
 fn cell(requests: i64, errors: i64, p95: Option<f64>) -> Cell {

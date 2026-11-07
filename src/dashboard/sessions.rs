@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Transaction grouping (ITEM-093): the unit an agentic loop actually costs.
 //!
 //! A request may carry `X-Inferon-Session-Id`; this report groups by it and

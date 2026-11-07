@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::*;
 
 fn run(id: u8, scored: i64, passed: i64, failed: i64) -> RunScore {

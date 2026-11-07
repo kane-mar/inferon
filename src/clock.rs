@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Wall-clock helpers — one definition of "now" for the hot path and the
 //! background jobs, so the modules cannot drift on time bases.
 

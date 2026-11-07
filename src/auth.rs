@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Accounts: GitHub OAuth sign-in + signed-cookie sessions (ITEM-035).
 //!
 //! Humans get browser sessions; machines keep API keys (`/v1/chat` semantics

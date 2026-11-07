@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use inferon::{
     auth::PostgresUserStore,
     build_router, load_system_prompt_counts, parse_port, ping_health, telemetry_worker,

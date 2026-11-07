@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The hot path's read cache (ITEM-092).
 //!
 //! A request must not pay a database round trip per decision. Everything the

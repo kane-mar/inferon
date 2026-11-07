@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { PayloadsReport, Summary } from './InferonApi';
 import { metricTone, THRESHOLDS } from './reportTone';
 

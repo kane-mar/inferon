@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Things the product deliberately no longer has, and why.
 //!
 //! A retired surface is not dead code to be found later: it is a decision. These

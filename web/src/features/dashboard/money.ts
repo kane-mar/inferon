@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /** `1234` → `1,234` — grouping on the integer part only. */
 const grouped = (whole: string): string =>
   whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The data plane: the OpenAI-compatible and Anthropic Messages ingress.
 //!
 //! Everything between "a request arrived" and "a trace was queued": resolve the

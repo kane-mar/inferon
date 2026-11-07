@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { routing } from '@/libs/I18nRouting';
 import type messages from '@/locales/en.json';
 

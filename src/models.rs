@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Per-provider model selection (ITEM-044).
 //!
 //! There is no static catalog: the available models are whatever each provider

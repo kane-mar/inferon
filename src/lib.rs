@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Inferon — an OpenAI/Anthropic-compatible LLM proxy with cost telemetry, a
 //! budget breaker, a schema guard, and a tenant/operator control plane.
 //!

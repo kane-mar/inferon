@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Model × time heatmap (ITEM-099).
 //!
 //! Presentation over data that already exists: one bounded aggregate query over

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Telemetry pipeline (ITEM-005/006): batched, off-the-hot-path persistence of
 //! completed requests. Handlers only enqueue a `TraceMessage`; this module's
 //! worker batches messages and flushes them through the `TraceSink` seam

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Mock GitHub OAuth server (ITEM-036/039 smoke scenario). Runs inside the
 //! same binary (`inferon --mock-github`) so the deployment unit stays one
 //! image; the smoke stack starts it under the `mock` compose profile and

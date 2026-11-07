@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useTranslations } from 'next-intl';
 import { AuthLink } from '@/components/AuthLink';
 import { Logo } from '@/features/shell/Logo';

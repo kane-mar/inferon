@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Cache-affinity routing (ITEM-063).
 //!
 //! Provider prompt caches are prefix-based and per provider/model, so a routing

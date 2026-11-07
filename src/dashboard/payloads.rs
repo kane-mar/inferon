@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The payloads report (ITEM-103): what we do with prompts and completions.
 //!
 //! A different question from `runtime`'s "is the proxy fast?" — this one is

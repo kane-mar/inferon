@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Adaptive policy loop (ITEM-064) — the loop and its governance.
 //!
 //! The heuristics are otherwise static and open-loop: the router threshold is

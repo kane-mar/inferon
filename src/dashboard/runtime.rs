@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! The runtime report (ITEM-103): what the proxy itself adds, and whether the
 //! sub-millisecond contract holds.
 //!

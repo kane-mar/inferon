@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Error taxonomy (ITEM-057).
 //!
 //! "Errors" used to be one bucket (`status_code >= 400`). This classifies a

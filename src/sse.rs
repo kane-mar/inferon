@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! SSE frame parsing shared by usage and quality extraction.
 //!
 //! Both `usage` and `quality` walk an accumulated SSE buffer looking only at

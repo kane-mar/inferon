@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /** The window every report offers: `?days=7|30|90`, defaulting to 30. */
 export const WINDOWS = [7, 30, 90] as const;
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Velocity limits per API key (ITEM-095).
 //!
 //! Spend caps bound a month; this bounds a minute. One runaway client should

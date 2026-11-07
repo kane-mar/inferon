@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! ITEM-108: append-only audit of owner-only control-plane changes.
 //!
 //! `config_audit` records who changed a routing/budget setting, when, and the

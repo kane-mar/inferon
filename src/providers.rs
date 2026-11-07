@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Provider provisioning (ITEM-043): a tenant's own upstream credentials.
 //!
 //! The `ProviderStore` seam sits between the proxy/dashboard and Postgres.

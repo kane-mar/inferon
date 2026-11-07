@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Running an eval against the pinned gold set (ITEM-098 AC2/AC3).
 //!
 //! Each case is a real provider call with the pinned input. The call is traced

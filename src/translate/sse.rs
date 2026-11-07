@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Streaming translators (ITEM-094 AC4).
 //!
 //! Chunks arrive at arbitrary byte boundaries, so both directions buffer until a

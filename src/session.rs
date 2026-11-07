@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Session tokens + the session cookie (ITEM-035).
 //!
 //! A session token is `"<user_id>.<expiry_hex>.<hmac_hex>"` where the HMAC is

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Fallback & routing rules (ITEM-045/109): a tenant's ordered chain of steps
 //! tried when the primary request fails. Each step names the failures it
 //! handles (transport, 429, 5xx) and, optionally, the schema guard. An empty

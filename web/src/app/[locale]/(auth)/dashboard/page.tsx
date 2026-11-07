@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { DashboardView } from '@/features/dashboard/DashboardToolbar';
 import type { LineSeries, ValueFormat } from '@/features/dashboard/LineChart';
 import type { ChartMetric } from '@/libs/dashboardMetrics';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Read-only cost-audit shares.
 //!
 //! A tenant mints a high-entropy token and can hand the audit report to someone

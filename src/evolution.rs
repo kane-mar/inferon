@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! ITEM-031 slice 1 — drift detection and the evolution job queue.
 //!
 //! The guard already records, per trace, whether a cheap model's answer was

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import type { ChartMetric } from '@/libs/dashboardMetrics';
 import { CHART_METRICS } from '@/libs/dashboardMetrics';
 import { Link } from '@/libs/I18nNavigation';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /** slimicons ships no types: it is a set of SVG React components (MIT). */
 declare module 'slimicons' {
   import type { ComponentType } from 'react';

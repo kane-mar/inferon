@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Prompt registry (ITEM-097): name a content hash, list its versions, diff two.
 //!
 //! Identity stays content-derived — the label is additive metadata on

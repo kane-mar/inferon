@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Lying-guarded-upstream mock (ITEM-027 AC3 smoke scenario). Runs inside the
 //! same binary (`inferon --mock-upstream`) so the deployment unit stays one
 //! image; the smoke stack starts it under the `mock` compose profile.

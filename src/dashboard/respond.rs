@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Shared response shapes for the dashboard APIs: one window parser, one 500
 //! policy, one success envelope.
 

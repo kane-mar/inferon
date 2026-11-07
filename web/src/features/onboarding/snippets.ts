@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 export type SnippetLang = 'python' | 'node' | 'curl';
 
 export const SNIPPET_LANGS: SnippetLang[] = ['python', 'node', 'curl'];

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Kane Mar
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Named timings for the proxy's pre-dispatch work (ITEM-092 AC5).
 //!
 //! `proxy_us` says *how long* the proxy took; this says *where*. A regression
