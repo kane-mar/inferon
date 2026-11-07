@@ -403,7 +403,18 @@ Parts of `web/` come from an MIT-licensed template. Its notice is kept in
 
 If your organisation cannot use AGPL software, a commercial licence is available
 with warranty, indemnity, and a service-level agreement. Email
-<kane@inferon.dev>.
+<kane@inferon.dev>. It sells **terms, not features**: the paid build is the same
+build, because a feature held back from the free version is a feature nobody can
+audit.
+
+**What we will not do:** we will not relicense a release you already have. A
+published version stays under the licence it shipped with. Projects that changed
+their terms under their users bought a short-term gain and a permanent reputation
+cost, and this project will not repeat it.
+
+These guides (`guides/`) are published under **CC BY-4.0**, so quoting and
+translating them needs only credit. [`guides/licence.md`](guides/licence.md) states
+what hosting the code for others asks of you.
 
 The full text is in [`LICENSE`](LICENSE). [`LICENSES.md`](LICENSES.md) lists every
 dependency licence, why each one is allowed, and how to run the audit. Before you

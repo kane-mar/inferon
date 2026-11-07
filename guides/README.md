@@ -77,6 +77,13 @@ Two rules keep these pages from rotting:
    `pip install -r requirements-docs.txt`); CI builds it on every push and keeps the
    output as an artifact. `guides/` is the docs directory, so nothing is copied.
 
+## Licence
+
+The code is open source under **AGPL-3.0-only**, and these guides are **CC BY-4.0**.
+[What you may do](licence.md) covers hosting it for others, the commercial licence
+for organisations that cannot accept the AGPL, and what we will not do to a release
+you already have.
+
 Not published: `inferon-cost-audit.md` and `inferon-step2-materials.md` are sales and
 outreach working documents. They stay in the repository and out of the site, and no
 page here links to them.

@@ -13,13 +13,23 @@ it over a network, you must offer them the source of your modified version under
 the same licence.
 
 If your organisation cannot accept the AGPL, a commercial licence is available.
-See the "Licence" section of [`README.md`](README.md).
+See the "Licence" section of [`README.md`](README.md). It sells terms — warranty,
+indemnity, a support level — and never features: the paid build has nothing the
+free build lacks.
+
+Two commitments worth stating with the licence:
+
+- **A published release is not relicensed.** Existing terms stay, whatever the
+  project does later.
+- **The documentation is CC BY-4.0.** `guides/` may be quoted and translated with
+  credit; the code it describes stays AGPL-3.0-only.
 
 ## What each part of the repository is under
 
 | Part | Licence | Notice |
 |---|---|---|
 | Everything in this repository, except the parts listed below | AGPL-3.0-only | [`LICENSE`](LICENSE) |
+| The published guides in `guides/` (prose only — the code samples are AGPL like the code) | CC BY-4.0 | [creativecommons.org](https://creativecommons.org/licenses/by/4.0/) |
 | Parts of `web/` derived from the `ixartz/SaaS-Boilerplate` template | MIT | [`web/THIRD-PARTY-NOTICES.md`](web/THIRD-PARTY-NOTICES.md) |
 | Rust dependencies (crates.io) | Permissive licences only | allow-list in [`deny.toml`](deny.toml) |
 | npm dependencies | Permissive and weak-copyleft licences | allow-list in [`scripts/check-npm-licenses.mjs`](scripts/check-npm-licenses.mjs) |

@@ -86,6 +86,13 @@ nav:
       - Payloads were purged: troubleshooting/payloads-purged.md
   - Run it yourself:
       - Inferon on your own network: inferon-self-hosted.md
+  - Licence:
+      - What you may do: licence.md
+
+# The guides themselves are CC BY-4.0; the code they describe is AGPL-3.0-only.
+# MkDocs Material prints this line in the footer of every page.
+copyright: >-
+  Code: AGPL-3.0-only · These guides: CC BY-4.0 · Inferon is a trademark of Kane Mar
 
 # A new page must appear here as well as in guides/README.md; the nav is the site's
 # table of contents and MkDocs fails the build when a nav entry points at no file.
