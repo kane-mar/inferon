@@ -50,6 +50,14 @@ pub(super) struct RequestMeta {
     pub(super) pii: PiiPlan,
     /// ITEM-100: why the provider was chosen (`only`, `weight`, `round_robin`).
     pub(super) provider_selection: Option<&'static str>,
+    /// Whether the client asked for a stream. ITEM-131 reads it to decide
+    /// whether an attempt that has said nothing may still be abandoned.
+    pub(super) is_stream: bool,
+}
+
+/// The client's own `stream` flag, read once from the payload.
+fn payload_stream(payload: &serde_json::Value) -> bool {
+    payload["stream"].as_bool().unwrap_or(false)
 }
 
 impl RequestMeta {
@@ -69,6 +77,7 @@ impl RequestMeta {
         session_id: Option<String>,
         system_prompt_hash: Option<String>,
     ) -> Self {
+        let is_stream = payload_stream(&payload);
         Self {
             id: Uuid::new_v4(),
             model: payload["model"].as_str().unwrap_or("unknown").to_string(),
@@ -93,6 +102,7 @@ impl RequestMeta {
             rate_limit: None,
             pii: PiiPlan::default(),
             provider_selection: None,
+            is_stream,
         }
     }
 }

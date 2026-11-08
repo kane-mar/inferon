@@ -42,6 +42,44 @@ pub fn data_frames(bytes: &[u8]) -> impl Iterator<Item = Value> + '_ {
     })
 }
 
+/// Whether these bytes already carry something a client will use (ITEM-131).
+///
+/// The test is deliberately *not* `quality`'s "is this answer usable": the
+/// question here is "has this stream started saying anything", so a reasoning
+/// delta or a tool call counts. A provider that streams 10 s of
+/// `reasoning_content` before its first `content` chunk must not be buffered for
+/// those 10 s — that would trade one defect for a latency regression.
+pub(crate) fn saying_something(raw: &[u8]) -> bool {
+    data_frames(raw).any(|frame| {
+        let choice = frame["choices"].as_array().and_then(|c| c.first());
+        if let Some(delta) = choice.map(|c| &c["delta"]) {
+            const FIELDS: [&str; 3] = ["content", "reasoning_content", "function_call"];
+            if FIELDS
+                .iter()
+                .any(|f| delta[f].as_str().is_some_and(|text| !text.is_empty()))
+            {
+                return true;
+            }
+            if delta["tool_calls"].as_array().is_some_and(|c| !c.is_empty()) {
+                return true;
+            }
+        }
+        // The Anthropic envelope, translated after this tap.
+        match frame["type"].as_str() {
+            Some("content_block_delta") => ["text", "partial_json", "thinking"]
+                .iter()
+                .any(|f| frame["delta"][f].as_str().is_some_and(|text| !text.is_empty())),
+            Some("content_block_start") => {
+                matches!(
+                    frame["content_block"]["type"].as_str(),
+                    Some("tool_use" | "text" | "thinking")
+                )
+            }
+            _ => false,
+        }
+    })
+}
+
 /// The bytes to append to a stream that did not end the way a client needs, and
 /// whether the trace must be marked truncated.
 pub(crate) struct StreamTail {

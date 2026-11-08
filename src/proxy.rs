@@ -269,10 +269,46 @@ fn session_id(req: &Request) -> Option<String> {
     )
 }
 
+/// What the first chunks of a streaming attempt showed (ITEM-131).
+enum Peek {
+    /// The provider started saying something; these bytes belong to the client.
+    Spoke(axum::body::Bytes),
+    /// The stream ended, or died, without a word. Nothing reached the client, so
+    /// the next chain step may still serve this request.
+    Silent,
+}
+
+/// Read the first chunks of a stream until it says something or ends.
+///
+/// Bounded twice: by the first frame that carries payload, and by `PEEK_CAP` in
+/// case a provider sends a large preamble it never follows with an answer. The
+/// response stays usable — `chunk()` borrows it and the caller keeps streaming
+/// from where this stopped.
+async fn peek(response: &mut reqwest::Response) -> Peek {
+    const PEEK_CAP: usize = 64 * 1024;
+    let mut seen = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                seen.extend_from_slice(&chunk);
+                if crate::sse::saying_something(&seen) || seen.len() >= PEEK_CAP {
+                    return Peek::Spoke(axum::body::Bytes::from(seen));
+                }
+            }
+            // Ended, or severed, before a single payload frame: nothing reached
+            // the client, whatever the provider meant by it.
+            Ok(None) | Err(_) => return Peek::Silent,
+        }
+    }
+}
+
 /// The served attempt and everything the response path still needs.
 struct Dispatch<'a> {
     meta: RequestMeta,
     upstream: reqwest::Response,
+    /// Bytes read while deciding whether this attempt was empty (ITEM-131).
+    /// Yielded before the live stream; empty when no peek ran.
+    prefix: axum::body::Bytes,
     served: usize,
     route: &'a Route,
     chain: &'a [ChainStep],
@@ -318,13 +354,42 @@ async fn dispatch_chain<'a>(
                 .await
         };
         match attempt {
-            Ok(response) => {
+            Ok(mut response) => {
                 let status = response.status();
                 let next = routing::fallback_reason(status.as_u16()).and_then(|reason| {
                     let trigger = routing::FallbackTrigger::from(reason);
                     routing::next_handling(&triggers, index, trigger)
                 });
                 let Some(next_index) = next else {
+                    // ITEM-131: an attempt that has not said anything yet has
+                    // not reached the client, so the chain may still move on. It
+                    // only moves when a later step accepts this class, and only
+                    // after the provider has been silent — never while it speaks.
+                    let mut prefix = axum::body::Bytes::new();
+                    if meta.is_stream {
+                        if let Some(retry) = routing::next_handling(
+                            &triggers,
+                            index,
+                            routing::FallbackTrigger::Transport,
+                        ) {
+                            match peek(&mut response).await {
+                                Peek::Spoke(bytes) => prefix = bytes,
+                                Peek::Silent => {
+                                    tracing::warn!(
+                                        "routing fallback: {model} said nothing, advancing to step {retry}"
+                                    );
+                                    routing_event = Some(json!({
+                                        "from_model": primary,
+                                        "to_model": chain[retry].model,
+                                        "reason": routing::FallbackReason::Transport.label(),
+                                        "step": retry,
+                                    }));
+                                    index = retry;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     // ITEM-133: the step that serves owns the attribution. The
                     // trace was naming the primary's provider (and `is_local`,
                     // so a local fallback was priced as if it were the cloud
@@ -338,6 +403,7 @@ async fn dispatch_chain<'a>(
                     return Ok(Dispatch {
                         meta,
                         upstream: response,
+                        prefix,
                         served: index,
                         route,
                         chain,
@@ -409,6 +475,7 @@ async fn finish_openai_response(
     let Dispatch {
         meta,
         upstream,
+        prefix,
         served,
         route,
         chain,
@@ -457,6 +524,7 @@ async fn finish_openai_response(
                     parse_usage: usage_from_sse_bytes,
                     client: route::Surface::OpenAi,
                 },
+                prefix,
             )
         } else {
             let json_content_type = Some(HeaderValue::from_static("application/json"));
@@ -483,6 +551,7 @@ async fn finish_openai_response(
         tenant_id,
         started,
         upstream,
+        prefix,
         context,
         tx: state.telemetry_tx.clone(),
     })
@@ -682,6 +751,7 @@ async fn finish_anthropic_response(
                 parse_usage: usage_from_anthropic_sse_bytes,
                 client: route::Surface::Anthropic,
             },
+            axum::body::Bytes::new(),
         )
     } else {
         let json_content_type = Some(HeaderValue::from_static("application/json"));

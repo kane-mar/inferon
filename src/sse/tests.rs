@@ -87,3 +87,31 @@
         let sse = "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
         assert!(tail(sse.as_bytes(), false, Surface::Anthropic, "trace-1", "m").is_none());
     }
+
+    // ITEM-131: "has this stream started saying anything" decides whether an
+    // attempt may still be abandoned. Reasoning and tool calls count — buffering
+    // them would trade a silent failure for a latency regression.
+
+    #[test]
+    fn a_reasoning_delta_counts_as_speaking() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\"}}]}\n\n";
+        assert!(saying_something(sse.as_bytes()));
+    }
+
+    #[test]
+    fn a_tool_call_counts_as_speaking() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\"}]}}]}\n\n";
+        assert!(saying_something(sse.as_bytes()));
+        let anthropic = "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"a\\\"\"}}\n\n";
+        assert!(saying_something(anthropic.as_bytes()));
+    }
+
+    #[test]
+    fn silence_is_silence() {
+        // A role frame, a usage frame and the sentinel say nothing a client reads.
+        let role = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null}}]}\n\n";
+        assert!(!saying_something(role.as_bytes()));
+        let usage = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5}}\n\ndata: [DONE]\n\n";
+        assert!(!saying_something(usage.as_bytes()));
+        assert!(!saying_something(b""));
+    }

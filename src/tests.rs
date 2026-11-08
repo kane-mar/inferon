@@ -3260,6 +3260,147 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         );
     }
 
+    /// ITEM-131: a stream that ends without saying anything has not reached the
+    /// client, so the chain may still serve the request. Before this the empty
+    /// body was served and the caller got "stream ended without finish_reason".
+    #[tokio::test]
+    async fn a_stream_that_says_nothing_is_retried_on_the_next_step() {
+        let silent_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let answer_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let silent_url = fixed_upstream(
+            silent_seen.clone(),
+            200,
+            "data: [DONE]\n\n".to_string(),
+            "text/event-stream",
+        )
+        .await;
+        let answer_url = fixed_upstream(
+            answer_seen.clone(),
+            200,
+            SSE_BODY.to_string(),
+            "text/event-stream",
+        )
+        .await;
+
+        let tenant = seeded_tenant();
+        let providers = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        for (name, url, model) in [
+            ("silent", &silent_url, "primary-model"),
+            ("answer", &answer_url, "fallback-model"),
+        ] {
+            let id = crate::providers::ProviderStore::insert(
+                &*providers,
+                tenant.id,
+                &crate::providers::NewProvider {
+                    kind: "openai".to_string(),
+                    name: name.to_string(),
+                    base_url: url.trim_end_matches("/chat/completions").to_string(),
+                    key: "sk-x".to_string(),
+                    metadata: Default::default(),
+                    spend_limit_cents: 0,
+                },
+            )
+            .await
+            .unwrap();
+            crate::providers::ProviderStore::record_models(&*providers, id, &[model.to_string()])
+                .await
+                .unwrap();
+        }
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: providers,
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_fallbacks(
+                tenant.id,
+                &["fallback-model"],
+            )),
+            telemetry_tx: tx,
+            ..base_state(&silent_url)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"primary-model","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(body.as_ref(), SSE_BODY.as_bytes(), "the second step served it");
+        assert_eq!(silent_seen.lock().unwrap().len(), 1);
+        assert_eq!(answer_seen.lock().unwrap().len(), 1, "the silent step was retried once");
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        assert_eq!(msg.request_model, "fallback-model");
+        assert_eq!(
+            msg.routing_event.unwrap()["to_model"], "fallback-model",
+            "the retry is recorded"
+        );
+    }
+
+    /// ITEM-131's other half: the retry happens only while the provider is
+    /// silent. An attempt that speaks is served, even with a step available.
+    #[tokio::test]
+    async fn a_stream_that_speaks_is_never_retried() {
+        let primary_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let unused_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let primary_url =
+            fixed_upstream(primary_seen.clone(), 200, SSE_BODY.to_string(), "text/event-stream").await;
+        let unused_url =
+            fixed_upstream(unused_seen.clone(), 200, SSE_BODY.to_string(), "text/event-stream").await;
+
+        let tenant = seeded_tenant();
+        let providers = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        for (name, url, model) in [
+            ("primary", &primary_url, "primary-model"),
+            ("other", &unused_url, "fallback-model"),
+        ] {
+            let id = crate::providers::ProviderStore::insert(
+                &*providers,
+                tenant.id,
+                &crate::providers::NewProvider {
+                    kind: "openai".to_string(),
+                    name: name.to_string(),
+                    base_url: url.trim_end_matches("/chat/completions").to_string(),
+                    key: "sk-x".to_string(),
+                    metadata: Default::default(),
+                    spend_limit_cents: 0,
+                },
+            )
+            .await
+            .unwrap();
+            crate::providers::ProviderStore::record_models(&*providers, id, &[model.to_string()])
+                .await
+                .unwrap();
+        }
+        let (tx, _rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: providers,
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_fallbacks(
+                tenant.id,
+                &["fallback-model"],
+            )),
+            telemetry_tx: tx,
+            ..base_state(&primary_url)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"primary-model","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(body.as_ref(), SSE_BODY.as_bytes());
+        assert_eq!(primary_seen.lock().unwrap().len(), 1);
+        assert!(
+            unused_seen.lock().unwrap().is_empty(),
+            "a speaking provider is never abandoned for the next step"
+        );
+    }
+
     #[tokio::test]
     async fn worker_lints_repeated_uncached_system_prompts_off_the_hot_path() {
         let (tx, rx) = mpsc::channel(256);

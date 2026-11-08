@@ -403,6 +403,7 @@ pub(super) fn stream_response(
     tenant_id: Uuid,
     status: u16,
     tap: StreamTap,
+    prefix: axum::body::Bytes,
 ) -> Response {
     let byte_stream = upstream.bytes_stream();
     let trace_id = meta.id;
@@ -426,6 +427,7 @@ pub(super) fn stream_response(
             tenant_id,
             status,
             tap,
+            prefix.clone(),
         )),
         None => futures_util::future::Either::Right(stream_with_trace(
             byte_stream,
@@ -434,6 +436,7 @@ pub(super) fn stream_response(
             tenant_id,
             status,
             tap,
+            prefix,
         )),
     };
     let mut response = Response::new(Body::from_stream(stream));
@@ -520,6 +523,8 @@ pub(super) struct GuardedAnswer<'a> {
     pub(super) upstream: reqwest::Response,
     pub(super) context: GuardContext<'a>,
     pub(super) tx: mpsc::Sender<TraceMessage>,
+    /// Bytes already read while deciding the attempt was not empty (ITEM-131).
+    pub(super) prefix: axum::body::Bytes,
 }
 
 /// Buffer the answer, check it against the request's contract, then either flush
@@ -534,9 +539,10 @@ pub(super) async fn guarded_response(answer: GuardedAnswer<'_>) -> Response {
         upstream,
         context,
         tx,
+        prefix,
     } = answer;
     let mut guard_emit = BufferedGuard::new(tx, meta, tenant_id, started);
-    let bytes = match read_guarded_body(&mut guard_emit, state, &context, shape, upstream).await {
+    let bytes = match read_guarded_body(&mut guard_emit, state, &context, shape, upstream, prefix).await {
         Ok(bytes) => bytes,
         Err(response) => return response,
     };
@@ -560,8 +566,15 @@ async fn read_guarded_body(
     context: &GuardContext<'_>,
     shape: AnswerShape,
     upstream: reqwest::Response,
+    prefix: axum::body::Bytes,
 ) -> Result<axum::body::Bytes, Response> {
     match upstream.bytes().await {
+        // The peeked bytes are the start of this answer, not a discard.
+        Ok(rest) if !prefix.is_empty() => {
+            let mut bytes = prefix.to_vec();
+            bytes.extend_from_slice(&rest);
+            Ok(axum::body::Bytes::from(bytes))
+        }
         Ok(bytes) => Ok(bytes),
         Err(e) => {
             tracing::error!("guarded upstream body read failed: {e}");
@@ -1049,11 +1062,20 @@ pub(super) fn stream_with_trace(
     tenant_id: Uuid,
     status: u16,
     tap: StreamTap,
+    prefix: axum::body::Bytes,
 ) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> {
     async_stream::stream! {
         let trace_id = meta.id.to_string();
         let model = meta.model.clone();
         let emit = StreamEmit::new(tap.tx, meta, tenant_id, status, started);
+        // ITEM-131: bytes read while deciding the attempt was not empty are the
+        // provider's first words — the client receives them before the live
+        // stream, and they count for usage and the captured completion.
+        if !prefix.is_empty() {
+            emit.note_ttft(started.elapsed().as_millis() as i64);
+            emit.note_chunk(&prefix);
+            yield Ok(prefix);
+        }
         let mut stream = Box::pin(byte_stream);
         let mut errored = false;
         while let Some(chunk) = stream.next().await {
