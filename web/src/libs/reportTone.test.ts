@@ -45,7 +45,7 @@ describe('metricTone — a value is green when it is good, red when it is not', 
 
   it('gives the verdict glyph the same ink as the value', () => {
     expect(toneGlyphClass('bad')).toContain('text-destructive');
-    expect(toneGlyphClass('warn')).toContain('text-amber-700');
+    expect(toneGlyphClass('warn')).toContain('text-warning');
     expect(toneGlyphClass('good')).toBe('');
     expect(toneGlyphClass(undefined)).toBe('');
   });
@@ -53,7 +53,7 @@ describe('metricTone — a value is green when it is good, red when it is not', 
   it('colours only the text of a table cell, never its surface', () => {
     expect(toneText('good')).toBe('');
     expect(toneText('bad')).toContain('text-destructive');
-    expect(toneText('warn')).toContain('text-amber-700');
+    expect(toneText('warn')).toContain('text-warning');
     expect(toneText('neutral')).toBe('');
   });
 });

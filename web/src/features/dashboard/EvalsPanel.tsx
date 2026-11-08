@@ -17,7 +17,7 @@ const when = (value: string) => value.slice(0, 16).replace('T', ' ');
 
 /** The gate's verdict, coloured by what it means. */
 const VERDICT_CLASS: Record<EvalVerdict['verdict'], string> = {
-  improved: 'text-emerald-700 dark:text-emerald-300',
+  improved: 'text-success',
   unchanged: 'text-muted-foreground',
   regressed: 'text-destructive',
   insufficient: 'text-muted-foreground',

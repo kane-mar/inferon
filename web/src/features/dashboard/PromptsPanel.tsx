@@ -17,7 +17,7 @@ import { pct, shortHash } from './reportFormat';
 /** The three diff kinds, and how each reads. */
 const DIFF_CLASS: Record<PromptDiff['changes'][number]['kind'], string> = {
   same: 'text-muted-foreground',
-  added: 'text-emerald-700 dark:text-emerald-300',
+  added: 'text-success',
   removed: 'text-destructive',
 };
 

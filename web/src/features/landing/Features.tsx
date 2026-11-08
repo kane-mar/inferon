@@ -52,7 +52,7 @@ export const Features = () => {
               "
             >
               <div className="
-                size-12 rounded-md bg-linear-to-br from-accent to-chart-2 p-2
+                size-12 rounded-md bg-accent/15 p-2 text-accent-ink
                 [&_svg]:stroke-white [&_svg]:stroke-2
               "
               >

@@ -52,11 +52,7 @@ export const Hero = () => {
       >
         {t.rich('title', {
           important: chunks => (
-            <span className="
-              bg-linear-to-r from-accent to-chart-2 bg-clip-text
-              text-transparent
-            "
-            >
+            <span className="text-accent-ink">
               {chunks}
             </span>
           ),

@@ -45,13 +45,13 @@ const KIND_STYLE: Record<string, { initials: string; monogram: string; badge: st
   },
   'openai': {
     initials: 'OA',
-    monogram: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
-    badge: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+    monogram: 'bg-success/15 text-success',
+    badge: 'bg-success/10 text-success',
   },
   'anthropic': {
     initials: 'AN',
-    monogram: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
-    badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-300',
+    monogram: 'bg-warning/15 text-warning',
+    badge: 'bg-warning/10 text-warning',
   },
   'local': {
     initials: 'LM',
@@ -143,7 +143,7 @@ type HealthState = 'ok' | 'fail' | 'unknown' | 'pending';
 const HealthPill = (props: { state: HealthState; title?: string }) => {
   const t = useTranslations('ProvidersPage');
   const tone: Record<HealthState, string> = {
-    ok: 'text-emerald-600 dark:text-emerald-400',
+    ok: 'text-success',
     fail: 'text-destructive',
     unknown: 'text-muted-foreground',
     pending: 'text-muted-foreground',
@@ -463,8 +463,7 @@ export const ProvidersPanel = (props: {
                   'text-sm',
                   probe.status === 'ok'
                     ? `
-                      text-emerald-600
-                      dark:text-emerald-400
+                      text-success
                     `
                     : 'text-destructive',
                 )}
@@ -692,8 +691,7 @@ export const ProvidersPanel = (props: {
                           'border-t px-4 py-2 text-xs',
                           result.ok
                             ? `
-                              text-emerald-600
-                              dark:text-emerald-400
+                              text-success
                             `
                             : 'text-destructive',
                         )}

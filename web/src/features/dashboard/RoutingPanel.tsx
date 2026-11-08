@@ -152,8 +152,7 @@ export const RoutingPanel = (props: { data: RoutingResponse; modelIds: string[] 
 
       {saved && (
         <p className="
-          text-sm text-emerald-700
-          dark:text-emerald-400
+          text-sm text-success
         "
         >
           {t('saved')}

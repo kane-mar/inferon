@@ -14,7 +14,7 @@ export type Tone = 'good' | 'warn' | 'bad' | 'neutral';
 export type MetricSpec = {
   /** At or beyond this value the number is green. */
   good: number;
-  /** Between `good` and `warn` it is amber; beyond it, red. */
+  /** Between `good` and `warn` it is the warning ink; beyond it, the destructive one. */
   warn: number;
   direction: 'lower' | 'higher';
 };
@@ -35,7 +35,7 @@ export const kpiValueClass = (tone: Tone | undefined): string => {
     case 'bad':
       return 'text-2xl font-semibold tabular-nums text-destructive';
     case 'warn':
-      return 'text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-400';
+      return 'text-2xl font-semibold tabular-nums text-warning';
     default:
       return 'text-2xl font-semibold tabular-nums';
   }
@@ -63,7 +63,7 @@ export const toneGlyphClass = (tone: Tone | undefined): string => {
     case 'bad':
       return 'text-destructive';
     case 'warn':
-      return 'text-amber-700 dark:text-amber-400';
+      return 'text-warning';
     default:
       return '';
   }
@@ -78,7 +78,7 @@ export const kpiDeltaClass = (tone: Tone | undefined, improved: boolean): string
     return 'text-xs font-medium opacity-75';
   }
   return improved
-    ? 'text-xs font-medium text-emerald-700 dark:text-emerald-400'
+    ? 'text-xs font-medium text-success'
     : 'text-xs font-medium text-destructive';
 };
 
@@ -91,7 +91,7 @@ export const toneText = (tone: Tone | undefined): string => {
     case 'bad':
       return 'text-destructive font-medium';
     case 'warn':
-      return 'text-amber-700 dark:text-amber-400 font-medium';
+      return 'text-warning font-medium';
     default:
       return '';
   }

@@ -51,6 +51,12 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  /* The accent as *text* (the signature pink is a fill: 2.2:1 on the canvas). */
+  --color-accent-ink: var(--accent-ink);
+  /* Verdict ink. One pair of names for both themes, so a component never
+     carries a `dark:` variant of its own. */
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
@@ -62,63 +68,93 @@
   --color-chart-5: var(--chart-5);
 }
 
-/* Light — the default: near-white canvas, near-black ink. */
+/*
+ * Light — the default: a tinted near-white canvas, near-black ink.
+ *
+ * Research applied (2026-11-07): pure grey (#fefefe/#1e1e1e/#e0e0e0) is what a
+ * page looks like when nobody chose a colour. Every neutral here carries ~2-6%
+ * chroma on one cool hue (264), which is invisible one token at a time and is
+ * what makes the surface read as designed rather than default. The steps are
+ * even in OKLCH lightness, so "one step darker" means the same thing everywhere.
+ *
+ * The colour budget is 90/8/2: neutrals carry the page, the single accent
+ * carries state (active, focus, selection), and a verdict colour appears only
+ * where something is actually wrong. Ratios are measured and enforced by
+ * `src/libs/contrast.test.ts`.
+ */
 :root {
   --radius: 0.25rem;
-  --background: #fefefe;
-  --foreground: #1e1e1e;
+  --background: #fcfdff;
+  --foreground: #1b1e25; /* 16.4:1 */
   --card: #ffffff;
-  --card-foreground: #1e1e1e;
+  --card-foreground: #1b1e25;
   --popover: #ffffff;
-  --popover-foreground: #1e1e1e;
-  --primary: #1e1e1e;
-  --primary-foreground: #fefefe;
-  --secondary: #f4f4f4;
-  --secondary-foreground: #1e1e1e;
-  --muted: #f4f4f4;
-  /* ITEM-124: 6.2:1 on the canvas (was #6f6f6f, 4.98:1 — the floor for 12px text). */
-  --muted-foreground: #575757;
-  --accent: #f386a1;
-  --accent-foreground: #1e1e1e;
-  /* ITEM-124: 5.4:1, AA for small text (was 4.27:1). */
-  --destructive: #c02b45;
-  --border: #e0e0e0;
-  --input: #e5e5e5;
-  --ring: #1e1e1e;
-  --chart-1: #f386a1;
-  --chart-2: #d45bb6;
-  --chart-3: #09aea1;
-  --chart-4: #03aa5c;
-  --chart-5: #1e1e1e;
+  --popover-foreground: #1b1e25;
+  --primary: #1b1e25;
+  --primary-foreground: #fcfdff;
+  --secondary: #f2f4f7;
+  --secondary-foreground: #1b1e25;
+  --muted: #f2f4f7;
+  /* 6.1:1 on the canvas — the floor for small text. */
+  --muted-foreground: #5b616b;
+  --accent: #f386a1; /* fill only: 2.2:1, never text */
+  --accent-foreground: #1b1e25;
+  /* 7.7:1 — the accent as text: active nav, links, the one emphasis per page. */
+  --accent-ink: #932b45;
+  --success: #156f41; /* 6.1:1 */
+  --warning: #945a00; /* 5.5:1 */
+  /* 6.4:1 — AA for small text. */
+  --destructive: #af2938;
+  --border: #dde0e4;
+  --input: #d5d7dc;
+  --ring: #932b45; /* focus is the one place the accent always appears */
+  /* One hue family, ordered by prominence: a pink step, its deep ink, a
+     desaturated teal, a slate, and plain ink. A five-colour rainbow is the
+     fastest way to make a minimal report look noisy.
+     chart-1 is *not* --accent: the accent is a 2.2:1 wash, and a 2 px data mark
+     needs 3:1 (WCAG 1.4.11), so the series uses the same hue one step deeper. */
+  --chart-1: #e86885;
+  --chart-2: #932b45;
+  --chart-3: #2f6f70;
+  --chart-4: #5b616b;
+  --chart-5: #1b1e25;
 }
 
-/* Dark — near-black canvas, near-white ink, same pink accent. */
+/*
+ * Dark — not an inversion: lower chroma, no pure black, and borders carry the
+ * structure that the light theme gets from shadow. The accent is legible as text
+ * here (7.8:1), so the soft-wash treatment uses a deeper mix instead of a paler
+ * one; the tokens keep the same names either way.
+ */
 .dark {
-  --background: #1e1e1e;
-  --foreground: #fefefe;
-  --card: #262626;
-  --card-foreground: #fefefe;
-  --popover: #262626;
-  --popover-foreground: #fefefe;
-  --primary: #fefefe;
-  --primary-foreground: #1e1e1e;
-  --secondary: #2e2e2e;
-  --secondary-foreground: #fefefe;
-  --muted: #2e2e2e;
-  /* ITEM-124: 9.4:1 on the canvas — the dark theme had room to spare. */
-  --muted-foreground: #c2cfcd;
+  --background: #15171c;
+  --foreground: #f9fafb; /* 17.2:1 */
+  --card: #1d2026;
+  --card-foreground: #f9fafb;
+  --popover: #1d2026;
+  --popover-foreground: #f9fafb;
+  --primary: #f9fafb;
+  --primary-foreground: #15171c;
+  --secondary: #25282f;
+  --secondary-foreground: #f9fafb;
+  --muted: #25282f;
+  /* 9.6:1 on the canvas. */
+  --muted-foreground: #babec6;
   --accent: #f386a1;
-  --accent-foreground: #1e1e1e;
-  /* ITEM-124: AA for small text on the dark canvas. */
-  --destructive: #f78ba1;
+  --accent-foreground: #15171c;
+  /* 9.2:1 — a paler pink, so it reads as ink rather than as a highlight block. */
+  --accent-ink: #f1a6b0;
+  --success: #73ce95; /* 9.4:1 */
+  --warning: #ebb25f; /* 9.5:1 */
+  --destructive: #f88d96; /* 7.9:1 */
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: #fefefe;
+  --ring: #f1a6b0;
   --chart-1: #f386a1;
-  --chart-2: #d45bb6;
-  --chart-3: #09aea1;
-  --chart-4: #03aa5c;
-  --chart-5: #fefefe;
+  --chart-2: #f1a6b0;
+  --chart-3: #7cc4c5;
+  --chart-4: #babec6;
+  --chart-5: #f9fafb;
 }
 
 @layer base {
@@ -127,6 +163,20 @@
   }
   body {
     @apply bg-background font-sans text-base text-foreground antialiased;
+  }
+  /*
+   * Colour belongs to interaction, not to the furniture: a selected string and a
+   * hovered row are the two places a reader's own action is visible, so they get
+   * the accent — at 5–25%, which is a wash, not a block.
+   */
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+  }
+  tbody tr {
+    transition: background-color 120ms ease-out;
+  }
+  tbody tr:hover {
+    background: color-mix(in oklab, var(--accent) 5%, transparent);
   }
   /* ITEM-124: prose breathes; the default leading was tuned for 12px labels. */
   p,

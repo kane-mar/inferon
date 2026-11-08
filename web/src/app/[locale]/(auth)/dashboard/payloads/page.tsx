@@ -24,8 +24,7 @@ const State = (props: { label: string; value: string; tone?: 'good' | 'off' }) =
         text-sm font-medium
         ${props.tone === 'good'
     ? `
-      text-emerald-700
-      dark:text-emerald-400
+      text-success
     `
     : ''}
         ${props.tone === 'off' ? 'text-muted-foreground' : ''}

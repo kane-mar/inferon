@@ -80,8 +80,8 @@ export const KeysPanel = (props: { data: KeysResponse }) => {
       {created
         ? (
             <div className="
-              rounded-sm border border-amber-400 bg-amber-50 p-3 text-sm
-              text-amber-950
+              rounded-sm border border-warning/40 bg-warning/10 p-3 text-sm
+              text-warning
             "
             >
               <div className="font-medium">{t('key_created')}</div>

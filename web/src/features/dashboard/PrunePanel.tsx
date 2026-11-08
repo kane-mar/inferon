@@ -115,8 +115,7 @@ export const PrunePanel = (props: { policy: PrunePolicy | null; canEdit: boolean
               </Button>
               {saved && (
                 <span className="
-                  text-sm text-emerald-600
-                  dark:text-emerald-400
+                  text-sm text-success
                 "
                 >
                   {t('saved')}

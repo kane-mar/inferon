@@ -9,10 +9,7 @@ export const Status = (props: { ok: boolean | null; met: string; missed: string 
   return (
     <span
       className={props.ok
-        ? `
-          text-sm font-medium text-emerald-700
-          dark:text-emerald-400
-        `
+        ? 'text-sm font-medium text-success'
         : 'text-sm font-medium text-destructive'}
     >
       {props.ok ? props.met : props.missed}

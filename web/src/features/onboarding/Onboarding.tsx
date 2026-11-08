@@ -126,8 +126,7 @@ export const Onboarding = (props: {
           ${
     connected
       ? `
-        border-emerald-600/30 bg-emerald-600/10 text-emerald-700
-        dark:text-emerald-400
+        border-success/30 bg-success/10 text-success
       `
       : 'text-muted-foreground'
     }
