@@ -325,8 +325,15 @@ async fn dispatch_chain<'a>(
                     routing::next_handling(&triggers, index, trigger)
                 });
                 let Some(next_index) = next else {
+                    // ITEM-133: the step that serves owns the attribution. The
+                    // trace was naming the primary's provider (and `is_local`,
+                    // so a local fallback was priced as if it were the cloud
+                    // model that failed).
                     meta.model = model;
                     meta.translate_to = step.route.translate;
+                    meta.provider_id = step.route.provider_id;
+                    meta.is_local = step.route.is_local;
+                    meta.provider_selection = step.route.selection;
                     meta.routing_event = routing_event;
                     return Ok(Dispatch {
                         meta,

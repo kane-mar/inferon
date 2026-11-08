@@ -70,6 +70,15 @@ impl Default for Ttls {
 pub struct Decision {
     pub(crate) route: Route,
     pub(crate) disabled: bool,
+    /// Whether this route can actually answer *this* model (ITEM-132).
+    ///
+    /// `false` when a provider was chosen but does not advertise the model —
+    /// `resolve_for` falls back to the tenant's default provider, which turns a
+    /// fallback step into "send this model to an upstream that never offered
+    /// it" and the caller sees the provider's own confusing 4xx. A route with no
+    /// provider is the shared platform upstream, whose model set Inferon cannot
+    /// claim to know, so it is left `true`.
+    pub(crate) serves: bool,
 }
 
 struct TenantEntry {
@@ -730,7 +739,12 @@ impl HotPath {
                 .is_disabled(route.provider_id, model)
                 .await
                 .unwrap_or(false);
-            return Ok(Decision { route, disabled });
+            let serves = serves(state, tenant, &route, model).await;
+            return Ok(Decision {
+                route,
+                disabled,
+                serves,
+            });
         }
         let entry = self.entry(tenant.id);
         if let Some(hit) = entry
@@ -749,7 +763,12 @@ impl HotPath {
             .is_disabled(route.provider_id, model)
             .await
             .unwrap_or(false);
-        let decision = Decision { route, disabled };
+        let serves = serves(state, tenant, &route, model).await;
+        let decision = Decision {
+            route,
+            disabled,
+            serves,
+        };
         entry
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -799,4 +818,23 @@ impl HotPath {
             .insert(hash.to_string(), (target.clone(), Instant::now()));
         target
     }
+}
+
+/// Whether the resolved route can answer this model (ITEM-132).
+///
+/// A provider was chosen: it must advertise the model, or the route is the
+/// tenant's default provider standing in for a model nobody offers. A route with
+/// no provider is the shared platform upstream, which Inferon does not model —
+/// treat it as served, since the platform key's model list is not ours to claim.
+async fn serves(state: &Arc<AppState>, tenant: &Tenant, route: &Route, model: &str) -> bool {
+    let Some(provider_id) = route.provider_id else {
+        return true;
+    };
+    state
+        .provider_store
+        .providers_for_model(tenant.id, model)
+        .await
+        .map(|ids| ids.contains(&provider_id))
+        // A store error must not drop a step that may work.
+        .unwrap_or(true)
 }

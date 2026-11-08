@@ -260,9 +260,10 @@ pub(crate) struct ChainStep {
 
 /// The ordered, de-duplicated chain to attempt: the primary (after any
 /// router/budget override), then the tenant's fallback steps, dropping models
-/// the tenant disabled (ITEM-044). Each entry carries the provider that owns
-/// it, so a fallback to another provider's model hits the right upstream.
-/// Always contains at least the primary.
+/// the tenant disabled (ITEM-044) and steps no provider can serve (ITEM-132).
+/// Each entry carries the provider that owns it, so a fallback to another
+/// provider's model hits the right upstream. Always contains at least the
+/// primary.
 pub(super) async fn build_model_chain(
     state: &Arc<AppState>,
     tenant: &Tenant,
@@ -283,18 +284,36 @@ pub(super) async fn build_model_chain(
             crate::hotpath::Decision {
                 route: route.clone(),
                 disabled: false,
+                serves: true,
             }
         } else {
-            state
+            // ITEM-132: a step owns its provider. Neither an unresolvable step
+            // nor one no provider serves may borrow the primary's route — that
+            // dispatches a model to an upstream that never offered it, and the
+            // caller reads the provider's own confusing 4xx.
+            match state
                 .hotpath
                 .route(state, tenant, &step.model, Surface::OpenAi, weights)
                 .await
-                .unwrap_or_else(|_| crate::hotpath::Decision {
-                    route: route.clone(),
-                    disabled: false,
-                })
+            {
+                Ok(decision) => decision,
+                Err(_) => {
+                    tracing::warn!(
+                        "fallback step {} dropped: its route could not be resolved",
+                        step.model
+                    );
+                    continue;
+                }
+            }
         };
         if decision.disabled {
+            continue;
+        }
+        if !decision.serves {
+            tracing::warn!(
+                "fallback step {} dropped: no provider for this workspace advertises it",
+                step.model
+            );
             continue;
         }
         chain.push(ChainStep {

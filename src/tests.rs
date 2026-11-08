@@ -405,6 +405,36 @@ data: [DONE]\n\n",
     }
 
 
+    /// An upstream that records each request body and always answers the same
+    /// status and body. Two of these make a fallback cross a provider boundary,
+    /// which no fixture could express before (ITEM-132).
+    async fn fixed_upstream(
+        seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+        status: u16,
+        body: String,
+        content_type: &'static str,
+    ) -> String {
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move |bytes: axum::body::Bytes| {
+                let seen = seen.clone();
+                let body = body.clone();
+                async move {
+                    seen.lock().unwrap().push(bytes.to_vec());
+                    axum::response::Response::builder()
+                        .status(axum::http::StatusCode::from_u16(status).unwrap())
+                        .header("content-type", content_type)
+                        .body(Body::from(body))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{addr}/v1/chat/completions")
+    }
+
     /// An upstream that records the exact bytes it received, so a test can assert
     /// what actually went on the wire (ITEM-127).
     async fn recording_upstream(seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>) -> String {
@@ -3053,6 +3083,181 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
             .expect("channel open");
         assert_eq!(msg.outcome, crate::quality::Outcome::Empty, "already a tracked outcome");
         assert!(!msg.truncated, "the provider finished; it just said nothing");
+    }
+
+    /// ITEM-132 + ITEM-133: a fallback step must reach the provider that serves
+    /// *its* model, and the trace must name that provider. Before this, the step
+    /// carried the right route but the trace kept the primary's attribution — and
+    /// `is_local`, so a locally served fallback was priced as the cloud model that
+    /// failed.
+    #[tokio::test]
+    async fn a_fallback_step_crosses_to_the_provider_that_serves_its_model() {
+        let primary_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let fallback_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let primary_url = fixed_upstream(primary_seen.clone(), 500, "upstream boom".into(), "text/plain").await;
+        let fallback_url = fixed_upstream(
+            fallback_seen.clone(),
+            200,
+            SSE_BODY.to_string(),
+            "text/event-stream",
+        )
+        .await;
+
+        let tenant = seeded_tenant();
+        let providers = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        let primary_id = crate::providers::ProviderStore::insert(
+            &*providers,
+            tenant.id,
+            &crate::providers::NewProvider {
+                kind: "openai".to_string(),
+                name: "cloud".to_string(),
+                base_url: primary_url.trim_end_matches("/chat/completions").to_string(),
+                key: "sk-cloud".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        crate::providers::ProviderStore::record_models(
+            &*providers,
+            primary_id,
+            &["primary-model".to_string()],
+        )
+        .await
+        .unwrap();
+        // The fallback's provider is a *local* one: free, and a different host.
+        let fallback_id = crate::providers::ProviderStore::insert(
+            &*providers,
+            tenant.id,
+            &crate::providers::NewProvider {
+                kind: "local".to_string(),
+                name: "studio".to_string(),
+                base_url: fallback_url.trim_end_matches("/chat/completions").to_string(),
+                key: String::new(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        crate::providers::ProviderStore::record_models(
+            &*providers,
+            fallback_id,
+            &["fallback-model".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: providers,
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_fallbacks(
+                tenant.id,
+                &["fallback-model"],
+            )),
+            telemetry_tx: tx,
+            ..base_state(&primary_url)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"primary-model","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(body.as_ref(), SSE_BODY.as_bytes(), "the second provider served it");
+
+        let asked = |seen: &std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>| -> Vec<String> {
+            seen.lock()
+                .unwrap()
+                .iter()
+                .map(|b| serde_json::from_slice::<Value>(b).unwrap()["model"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(asked(&primary_seen), vec!["primary-model"]);
+        assert_eq!(
+            asked(&fallback_seen),
+            vec!["fallback-model"],
+            "the step went to the provider that advertises it"
+        );
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        assert_eq!(msg.provider_id, Some(fallback_id), "the serving provider is named");
+        assert_ne!(msg.provider_id, Some(primary_id), "not the model that failed");
+        assert_eq!(msg.request_model, "fallback-model");
+        assert!(msg.is_local, "a local fallback is priced as local, not as the cloud model");
+    }
+
+    /// ITEM-132: a step no provider serves is dropped, not dispatched to the
+    /// tenant's default provider or the shared upstream. The caller reads the
+    /// primary's failure instead of an unrelated 4xx about a model it never asked
+    /// for.
+    #[tokio::test]
+    async fn a_fallback_step_no_provider_serves_is_dropped() {
+        let primary_seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let primary_url = fixed_upstream(primary_seen.clone(), 500, "upstream boom".into(), "text/plain").await;
+
+        let tenant = seeded_tenant();
+        let providers = std::sync::Arc::new(crate::providers::InMemoryProviderStore::default());
+        let primary_id = crate::providers::ProviderStore::insert(
+            &*providers,
+            tenant.id,
+            &crate::providers::NewProvider {
+                kind: "openai".to_string(),
+                name: "cloud".to_string(),
+                base_url: primary_url.trim_end_matches("/chat/completions").to_string(),
+                key: "sk-cloud".to_string(),
+                metadata: Default::default(),
+                spend_limit_cents: 0,
+            },
+        )
+        .await
+        .unwrap();
+        crate::providers::ProviderStore::record_models(
+            &*providers,
+            primary_id,
+            &["primary-model".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let (tx, _rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            provider_store: providers,
+            routing_store: std::sync::Arc::new(crate::routing::InMemoryRoutingStore::with_fallbacks(
+                tenant.id,
+                &["ghost-model"],
+            )),
+            telemetry_tx: tx,
+            ..base_state(&primary_url)
+        });
+        let response = build_router(state)
+            .oneshot(chat_request_builder(
+                r#"{"model":"primary-model","stream":true,"messages":[{"role":"user","content":"hi"}]}"#,
+                Some(CLIENT_KEY),
+            ))
+            .await
+            .unwrap();
+        // The primary failed and there is nowhere else: its error is forwarded.
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+
+        let asked: Vec<String> = primary_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|b| serde_json::from_slice::<Value>(b).unwrap()["model"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            asked,
+            vec!["primary-model"],
+            "ghost-model was never dispatched to a provider that does not serve it"
+        );
     }
 
     #[tokio::test]
