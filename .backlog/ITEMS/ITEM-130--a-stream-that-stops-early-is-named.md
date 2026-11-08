@@ -7,6 +7,15 @@ no cause and no id
 
 **Reported** 2026-11-07 (PO): `Error: Stream ended without finish_reason`.
 
+**Delivered and verified live 2026-11-07** on the rebuilt proxy, through a
+deliberately broken upstream on the compose network: `ends-early` answered a
+content frame then closed → the client received the frame plus
+`{"error":{"code":"stream_ended_early","message":"… (request id 051ea3e1-…)"}}` and
+`[DONE]`, and the trace read `truncated=t, class=transport`; `empty-answer` → 
+`empty_answer` with the trace `outcome=empty, truncated=f`; a real `deepseek-flash`
+stream still ends on the provider's own `finish_reason` with nothing injected. The
+temporary tenant, provider and mock container were removed afterwards.
+
 **What was happening.** A client asking for `deepseek-flash` with `stream: true`
 got a transient upstream 5xx; the fallback chain (ITEM-109) stepped to
 `qwen/qwen3.8-27b`, which that provider does not serve. After ~17 s the upstream
