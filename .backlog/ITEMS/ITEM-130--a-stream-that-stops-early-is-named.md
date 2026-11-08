@@ -18,12 +18,19 @@ temporary tenant, provider and mock container were removed afterwards.
 
 **What was happening.** A client asking for `deepseek-flash` with `stream: true`
 got a transient upstream 5xx; the fallback chain (ITEM-109) stepped to
-`qwen/qwen3.8-27b`, which that provider does not serve. After ~17 s the upstream
-body simply closed. The proxy forwarded it — the client received SSE headers, one
-late chunk, no `finish_reason` and no error — so its SDK raised a message that
-names nothing. Four such traces on the live host, `ttft` equal to
-`total_duration_ms` to the millisecond (one chunk, at the very end), 0 tokens, no
-captured completion.
+`qwen/qwen3.8-27b` and **resolved it to the right provider** (`local-llm`, the
+Mac Studio on the tailnet — it advertises exactly that model). After ~17 s the
+local model's upstream body simply closed. The proxy forwarded it — the client
+received SSE headers, one late chunk, no `finish_reason` and no error — so its SDK
+raised a message that names nothing. Four such traces on the live host, `ttft`
+equal to `total_duration_ms` to the millisecond (one chunk, at the very end), 0
+tokens, no captured completion.
+
+The first draft of this item said the chain stepped to "a model that provider does
+not serve". That was wrong, and the trace is why: `provider_id` is stamped from the
+*primary* route and never updated when a fallback serves, so the row named Deepseek
+for a request that went to `local-llm` (ITEM-133). The correct story is a local
+model that stalled and was cut — not a misroute.
 
 Two defects, one fix:
 
