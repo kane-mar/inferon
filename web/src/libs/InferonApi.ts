@@ -154,6 +154,8 @@ export type PerformanceModelRow = {
   total_p95_ms: number | null;
   /** Gateway time grows with the payload, so it is never shown alone (ITEM-127). */
   prompt_tokens_p50: number | null;
+  /** ITEM-136: the client's median send time for this model's requests. */
+  body_p50_ms: number | null;
 };
 
 export type RuntimeReport = {

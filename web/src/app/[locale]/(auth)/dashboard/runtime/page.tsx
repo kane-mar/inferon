@@ -381,6 +381,7 @@ export default async function RuntimePage(props: {
                   <th className={HEAD}>{t('model')}</th>
                   <th className={HEAD}>{t('requests')}</th>
                   <th className={HEAD}>{t('payload_column')}</th>
+                  <th className={HEAD}>{t('upload_column')}</th>
                   <th className={HEAD}>{t('overhead_p50')}</th>
                   <th className={HEAD}>{t('overhead_p95')}</th>
                   <th className={HEAD}>{t('total_p50')}</th>
@@ -405,6 +406,9 @@ export default async function RuntimePage(props: {
                     </td>
                     <td className={CELL}>{formatInt(row.requests)}</td>
                     <td className={CELL}>{formatInt(row.prompt_tokens_p50 ?? 0)}</td>
+                    <td className={cn(CELL, 'text-muted-foreground')}>
+                      {row.body_p50_ms == null ? '—' : ms(row.body_p50_ms)}
+                    </td>
                     <td className={CELL}>{us(row.proxy_p50_us)}</td>
                     <td className={CELL}>{us(row.proxy_p95_us)}</td>
                     <td className={CELL}>{ms(row.total_p50_ms)}</td>

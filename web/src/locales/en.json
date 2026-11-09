@@ -674,7 +674,8 @@
     "band_huge": "Huge",
     "band_under": "up to {tokens} tokens",
     "band_over": "over {tokens} tokens",
-    "bands_note": "Upload is the median time clients spent sending the body. It is never counted as gateway time: a slow link is not a slow proxy. An empty band is hidden rather than shown as zero."
+    "bands_note": "Upload is the median time clients spent sending the body. It is never counted as gateway time: a slow link is not a slow proxy. An empty band is hidden rather than shown as zero.",
+    "upload_column": "Your upload, p50"
   },
   "PayloadsPage": {
     "title_bar": "Payloads",

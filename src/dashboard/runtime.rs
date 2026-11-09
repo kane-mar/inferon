@@ -49,7 +49,8 @@ type LatencyRow = (
 
 /// `(model, requests, proxy_p50_us, proxy_p95_us, total_p50_ms, total_p95_ms)`.
 /// `(model, requests, proxy_p50_us, proxy_p95_us, total_p50_ms, total_p95_ms,
-/// prompt_tokens_p50)` — the payload context rides with the gateway time.
+/// prompt_tokens_p50, body_p50_ms)` — the payload context and the client's upload
+/// ride with the gateway time (ITEM-136).
 type ModelRow = (
     String,
     i64,
@@ -57,6 +58,7 @@ type ModelRow = (
     Option<i64>,
     Option<f64>,
     Option<f64>,
+    Option<i64>,
     Option<i64>,
 );
 
@@ -347,12 +349,17 @@ async fn model_rows(
                 round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
                 round(percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms))::float8,
-                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY body_ms))::bigint
          FROM traces
          WHERE tenant_id = $1
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
            AND created_at < NOW() - ($3 * INTERVAL '1 day')
            AND proxy_us IS NOT NULL
+           -- ITEM-136: same era rule as the headline. A per-model table that
+           -- averages rows from before the clock change reintroduces the exact
+           -- misreport the bands exist to remove.
+           AND body_ms IS NOT NULL
          GROUP BY request_model ORDER BY 2 DESC LIMIT 10",
         )
         .bind(tenant_id)
@@ -364,7 +371,7 @@ async fn model_rows(
     Ok(rows
         .into_iter()
         .map(
-            |(model, requests, proxy_p50, proxy_p95, total_p50, total_p95, tokens_p50)| {
+            |(model, requests, proxy_p50, proxy_p95, total_p50, total_p95, tokens_p50, upload)| {
                 json!({
                     "model": model,
                     "requests": requests,
@@ -373,6 +380,7 @@ async fn model_rows(
                     "total_p50_ms": total_p50,
                     "total_p95_ms": total_p95,
                     "prompt_tokens_p50": tokens_p50,
+                    "body_p50_ms": upload,
                 })
             },
         )
