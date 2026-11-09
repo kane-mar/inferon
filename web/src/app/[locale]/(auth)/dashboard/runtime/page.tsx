@@ -21,6 +21,11 @@ import { formatInt } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
+import { cn } from '@/utils/Helpers';
+
+/** Table column classes, the same pair every other report page uses. */
+const LEFT = `${HEAD} text-left`;
+const RIGHT = `${HEAD} text-right`;
 
 /**
  * Runtime (ITEM-092/099/103): is the proxy fast? The contract, the proxy's own
@@ -42,7 +47,14 @@ export default async function RuntimePage(props: {
 
   const t = await getTranslations({ locale, namespace: 'RuntimePage' });
   const data = await InferonApi.fromEnv().runtime(days, session.cookie);
-  const { overhead, contract, latency } = data;
+  const { overhead, contract, latency, bands } = data;
+  // ITEM-136: the claim's own basis is the small-prompt band. Everything the
+  // headline says about the contract is read from that band, never from a blend
+  // that averages a 4 KB prompt with a 1.2 MB one.
+  const small = {
+    band: bands.find(b => b.max_tokens === contract.basis.max_tokens)
+      ?? { band: 'small', max_tokens: contract.basis.max_tokens, requests: 0, under_1ms_rate: null, p50_us: null, p95_us: null, prompt_tokens_p50: null, body_p50_ms: null },
+  };
   const hasSamples = contract.samples >= contract.min_samples;
 
   return (
@@ -59,28 +71,33 @@ export default async function RuntimePage(props: {
         lg:grid-cols-4
       "
       >
+        {/* ITEM-136: the headline is the claim's own basis — small prompts. A
+            blended percentile over 4 KB and 1.2 MB requests describes neither,
+            and comparing the blend to a 1 ms budget was the report's worst lie. */}
         <KpiCard
-          label={t('overhead_p50')}
+          label={t('claim_p50_kpi')}
           icon="latency"
-          value={us(overhead.p50_us)}
+          value={us(small.band.p50_us)}
           window={days}
           definition={t('overhead_help')}
-          tone={metricTone(overhead.p50_us, THRESHOLDS.proxyP50Us)}
-          hint={`${contract.p50_met == null
-            ? t('not_enough_samples', { count: contract.min_samples })
-            : contract.p50_met
-              ? t('within_contract')
-              : t('over_contract')} · ${t('at_payload', {
-            tokens: formatInt(overhead.prompt_tokens_p50 ?? 0),
-          })}`}
+          tone={metricTone(small.band.p50_us, THRESHOLDS.proxyP50Us)}
+          hint={small.band.requests === 0
+            ? t('no_small_prompts', { tokens: formatInt(contract.basis.max_tokens) })
+            : `${contract.p50_met == null
+              ? t('not_enough_samples', { count: contract.min_samples })
+              : contract.p50_met
+                ? t('within_contract')
+                : t('over_contract')} · ${t('at_payload', {
+              tokens: formatInt(small.band.prompt_tokens_p50 ?? 0),
+            })}`}
         />
         <KpiCard
-          label={t('overhead_p95')}
+          label={t('claim_p95_kpi')}
           icon="latency"
-          value={us(overhead.p95_us)}
+          value={us(small.band.p95_us)}
           window={days}
           definition={t('overhead_help')}
-          tone={metricTone(overhead.p95_us, THRESHOLDS.proxyP95Us)}
+          tone={metricTone(small.band.p95_us, THRESHOLDS.proxyP95Us)}
           hint={overhead.body_p95_ms == null
             ? undefined
             : t('upload_beside', { ms: formatInt(overhead.body_p95_ms) })}
@@ -88,10 +105,11 @@ export default async function RuntimePage(props: {
         <KpiCard
           label={t('under_1ms')}
           icon="ok"
-          value={pct(overhead.under_1ms_rate)}
+          value={pct(small.band.under_1ms_rate)}
           window={days}
           definition={t('under_1ms_help')}
-          tone={metricTone(overhead.under_1ms_rate, THRESHOLDS.under1msRate)}
+          tone={metricTone(small.band.under_1ms_rate, THRESHOLDS.under1msRate)}
+          hint={t('small_only', { tokens: formatInt(contract.basis.max_tokens) })}
         />
         <KpiCard
           label={t('samples')}
@@ -122,8 +140,62 @@ export default async function RuntimePage(props: {
                 tokens: formatInt(contract.prompt_tokens_p50 ?? 0),
               })}
             </p>
+            <p className="text-xs text-muted-foreground">
+              {t('claim_basis', { tokens: formatInt(contract.basis.max_tokens) })}
+            </p>
             <p className="text-xs text-muted-foreground">{t('claim_note')}</p>
           </div>
+        </Card>
+      </div>
+
+      {/* ITEM-136: one blended percentile describes neither end of the traffic.
+          Each payload band is measured on its own, with the client's upload
+          beside it, so "the gateway got slower" and "we are sending bigger
+          prompts" cannot be confused again. */}
+      <div className="mt-4">
+        <Card title={t('bands_title')} icon="latency">
+          {bands.length === 0
+            ? <p className="text-sm text-muted-foreground">{t('bands_empty')}</p>
+            : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className={LEFT}>{t('band')}</th>
+                      <th className={RIGHT}>{t('requests')}</th>
+                      <th className={RIGHT}>{t('band_p50')}</th>
+                      <th className={RIGHT}>{t('band_p95')}</th>
+                      <th className={RIGHT}>{t('band_upload')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bands.map(row => (
+                      <tr
+                        key={row.band}
+                        className="
+                          border-b
+                          last:border-0
+                        "
+                      >
+                        <td className={CELL}>
+                          <span className="font-medium">{t(`band_${row.band}`)}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {row.max_tokens == null
+                              ? t('band_over', { tokens: formatInt(150_000) })
+                              : t('band_under', { tokens: formatInt(row.max_tokens) })}
+                          </span>
+                        </td>
+                        <td className={RIGHT}>{formatInt(row.requests)}</td>
+                        <td className={RIGHT}>{us(row.p50_us)}</td>
+                        <td className={RIGHT}>{us(row.p95_us)}</td>
+                        <td className={cn(RIGHT, 'text-muted-foreground')}>
+                          {row.body_p50_ms == null ? '—' : ms(row.body_p50_ms)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+          <p className="mt-3 text-xs text-muted-foreground">{t('bands_note')}</p>
         </Card>
       </div>
 

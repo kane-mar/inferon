@@ -11,7 +11,10 @@
 
 use super::*;
 
-use crate::latency::{CONTRACT_WINDOW_HOURS, MIN_SAMPLES, P50_BUDGET_US, P95_GUARD_US};
+use crate::latency::{
+    band_bounds, BANDS, CONTRACT_WINDOW_HOURS, MIN_SAMPLES, P50_BUDGET_US, P95_GUARD_US,
+    SMALL_PROMPT_TOKENS,
+};
 
 /// ITEM-099: one model's bucket — `(model, bucket, requests, errors, p95_ms)`.
 type HeatCellRow = (String, String, i64, i64, Option<f64>);
@@ -93,6 +96,8 @@ pub async fn runtime(
     let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95) =
         latency(&state, tenant_id, days, offset).await?;
     let models = model_rows(&state, tenant_id, days, offset).await?;
+    let bands = bands(&state, tenant_id, days, offset).await?;
+    let since = measured_since(&state, tenant_id).await?;
     let (bucket_expr, buckets, matrix) = heatmap(&state, tenant_id, days, &step).await?;
 
     Ok(json_ok(json!({
@@ -108,6 +113,12 @@ pub async fn runtime(
             "prompt_tokens_p50": verdict.prompt_tokens_p50,
             "p50_met": verdict.p50_met,
             "p95_met": verdict.p95_met,
+            // ITEM-136: what the verdict was actually computed over. Without this
+            // an operator cannot tell "no small-prompt traffic" from "failing".
+            "basis": {
+                "max_tokens": SMALL_PROMPT_TOKENS,
+                "measured_since": since,
+            },
         },
         "overhead": {
             "samples": samples,
@@ -136,6 +147,8 @@ pub async fn runtime(
             "models": matrix,
         },
         "by_model": models,
+        // ITEM-136: the gateway's cost, band by band, with the client's upload.
+        "bands": bands,
     })))
 }
 
@@ -159,7 +172,11 @@ async fn overhead(
          WHERE tenant_id = $1
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
            AND created_at < NOW() - ($3 * INTERVAL '1 day')
-           AND proxy_us IS NOT NULL",
+           AND proxy_us IS NOT NULL
+           -- ITEM-135/136: rows written before `body_ms` existed measured the
+           -- client's upload as gateway time. Blending the two eras turns a
+           -- measurement change into an apparent regression.
+           AND body_ms IS NOT NULL",
         )
         .bind(tenant_id)
         .bind(days)
@@ -175,6 +192,12 @@ async fn contract_verdict(
     state: &Arc<AppState>,
     tenant_id: uuid::Uuid,
 ) -> Result<crate::latency::Verdict, Response> {
+    // ITEM-136: the claim is p50 < 1 ms "for a warm request carrying a small
+    // prompt". Judging a 285k-token request against it was the report's worst
+    // lie — the number was real, the comparison was not. So the verdict reads
+    // only traffic inside the claim's own payload basis, and only traffic
+    // measured by the current clock (ITEM-135: rows before `body_ms` include the
+    // client's upload).
     let (samples, p50, p95, prompt_tokens_p50): (i64, Option<i64>, Option<i64>, Option<i64>) =
         stored(
         sqlx::query_as(
@@ -185,14 +208,104 @@ async fn contract_verdict(
              FROM traces
              WHERE tenant_id = $1
                AND created_at >= NOW() - ($2 * INTERVAL '1 hour')
-               AND proxy_us IS NOT NULL",
+               AND proxy_us IS NOT NULL
+               AND body_ms IS NOT NULL
+               AND prompt_tokens <= $3",
         )
         .bind(tenant_id)
         .bind(CONTRACT_WINDOW_HOURS)
+        .bind(SMALL_PROMPT_TOKENS)
         .fetch_one(&state.db)
         .await,
     )?;
     Ok(crate::latency::verdict(samples, p50, p95).with_payload(prompt_tokens_p50))
+}
+
+/// ITEM-136: `(requests, under_1ms, p50_us, p95_us, prompt_tokens_p50,
+/// body_p50_ms)` for one payload band; the band's name comes from the constant,
+/// not the database.
+type BandRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+
+/// Gateway time per payload band, with the client's upload beside it.
+///
+/// One blended percentile describes neither end of the traffic: with a 1.2 MB
+/// prompt in the mix the p50 is the parse cost of a big body, and an operator
+/// cannot tell a regression from a change in what people send. Each band is
+/// measured on its own, and the upload column says how much of the elapsed time
+/// was never ours.
+async fn bands(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+    days: i64,
+    offset: i64,
+) -> Result<Vec<Value>, Response> {
+    let mut out = Vec::new();
+    for (index, band) in BANDS.iter().enumerate() {
+        let (lower, upper) = band_bounds(index);
+        let row: BandRow = stored(
+            sqlx::query_as(
+                "SELECT COUNT(*),
+                    COUNT(*) FILTER (WHERE proxy_us < 1000),
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                    round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint,
+                    round(percentile_cont(0.5) WITHIN GROUP (ORDER BY body_ms))::bigint
+                 FROM traces
+                 WHERE tenant_id = $1
+                   AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+                   AND created_at < NOW() - ($3 * INTERVAL '1 day')
+                   AND proxy_us IS NOT NULL
+                   AND body_ms IS NOT NULL
+                   AND prompt_tokens >= $4
+                   AND ($5::bigint IS NULL OR prompt_tokens <= $5)",
+            )
+            .bind(tenant_id)
+            .bind(days)
+            .bind(offset)
+            .bind(lower)
+            .bind(upper)
+            .fetch_one(&state.db)
+            .await,
+        )?;
+        let (requests, under_1ms, p50_us, p95_us, tokens, upload) = row;
+        // An empty band is not a zero: say nothing rather than print a healthy
+        // 0 ms for traffic nobody sent.
+        if requests == 0 {
+            continue;
+        }
+        out.push(json!({
+            "band": band.label,
+            "max_tokens": band.max_tokens,
+            "requests": requests,
+            "under_1ms_rate": rate(under_1ms, requests),
+            "p50_us": p50_us,
+            "p95_us": p95_us,
+            "prompt_tokens_p50": tokens,
+            "body_p50_ms": upload,
+        }));
+    }
+    Ok(out)
+}
+
+/// When this tenant's traffic started being measured by the current clock
+/// (ITEM-135). `null` when no row has been written since.
+async fn measured_since(
+    state: &Arc<AppState>,
+    tenant_id: uuid::Uuid,
+) -> Result<Option<String>, Response> {
+    // Rendered as ISO-8601 in SQL: the pool's type set has no timestamp decoder,
+    // and a string is what the page prints anyway.
+    let row: (Option<String>,) = stored(
+        sqlx::query_as(
+            "SELECT to_char(MIN(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+             FROM traces
+             WHERE tenant_id = $1 AND body_ms IS NOT NULL",
+        )
+        .bind(tenant_id)
+        .fetch_one(&state.db)
+        .await,
+    )?;
+    Ok(row.0)
 }
 
 async fn latency(

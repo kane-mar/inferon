@@ -21,6 +21,54 @@ pub const MIN_SAMPLES: i64 = 20;
 /// rather than the report's display window.
 pub const CONTRACT_WINDOW_HOURS: i64 = 24;
 
+/// The claim is about a **small prompt**. Anything above this had its own
+/// measured cost long before the claim was written, so judging a 285k-token
+/// request against a 1 ms budget is not a verdict about our code — it is a
+/// verdict about the client's payload. The deploy gate and the unit suite use
+/// ~35-token requests, which is what "small" was calibrated on.
+pub const SMALL_PROMPT_TOKENS: i64 = 4_000;
+
+/// ITEM-136: gateway time is proportional to the payload, so one blended number
+/// describes neither end of the traffic. These are the bands the report shows;
+/// each carries its own percentiles and its own share of requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Band {
+    /// Upper bound in prompt tokens; the last band has `None`.
+    pub max_tokens: Option<i64>,
+    /// The label a reader sees.
+    pub label: &'static str,
+}
+
+pub const BANDS: &[Band] = &[
+    Band { max_tokens: Some(SMALL_PROMPT_TOKENS), label: "small" },
+    Band { max_tokens: Some(50_000), label: "medium" },
+    Band { max_tokens: Some(150_000), label: "large" },
+    Band { max_tokens: None, label: "huge" },
+];
+
+/// Which band a prompt of `tokens` belongs to. A trace with no recorded token
+/// count is "unknown" — never silently folded into a band it was not measured in.
+pub fn band_of(tokens: Option<i64>) -> &'static str {
+    let Some(tokens) = tokens else {
+        return "unknown";
+    };
+    for band in BANDS {
+        match band.max_tokens {
+            Some(max) if tokens <= max => return band.label,
+            Some(_) => {}
+            None => return band.label,
+        }
+    }
+    "unknown"
+}
+
+/// The SQL predicate that keeps a band's rows, so the query and the label can
+/// never disagree about where a boundary sits.
+pub fn band_bounds(index: usize) -> (i64, Option<i64>) {
+    let lower = if index == 0 { 0 } else { BANDS[index - 1].max_tokens.unwrap_or(0) + 1 };
+    (lower, BANDS[index].max_tokens)
+}
+
 /// One evaluation of the claim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Verdict {

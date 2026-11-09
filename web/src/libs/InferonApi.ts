@@ -172,7 +172,31 @@ export type RuntimeReport = {
     prompt_tokens_p50: number | null;
     p50_met: boolean | null;
     p95_met: boolean | null;
+    /**
+     * ITEM-136: what the verdict was computed over — the claim is about small
+     * prompts, so the verdict reads only those. `measured_since` is when this
+     * workspace's traffic started being timed from the completed body (ITEM-135);
+     * older rows include the client's upload.
+     */
+    basis: {
+      max_tokens: number;
+      measured_since: string | null;
+    };
   };
+  /**
+   * ITEM-136: gateway time per payload band with the client's upload beside it.
+   * An empty band is absent, never a zero.
+   */
+  bands: {
+    band: 'small' | 'medium' | 'large' | 'huge';
+    max_tokens: number | null;
+    requests: number;
+    under_1ms_rate: number | null;
+    p50_us: number | null;
+    p95_us: number | null;
+    prompt_tokens_p50: number | null;
+    body_p50_ms: number | null;
+  }[];
   overhead: {
     samples: number;
     under_1ms: number;
