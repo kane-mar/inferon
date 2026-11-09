@@ -183,6 +183,8 @@ export type RuntimeReport = {
     basis: {
       max_tokens: number;
       measured_since: string | null;
+      /** Traffic excluded because it predates the clock change (ITEM-136). */
+      excluded_requests: number;
     };
   };
   /**

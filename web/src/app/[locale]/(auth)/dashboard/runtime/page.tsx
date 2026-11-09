@@ -121,6 +121,17 @@ export default async function RuntimePage(props: {
         />
       </div>
 
+      {/* ITEM-136: an empty report has to explain itself. The clock changed on
+          2026-11-08, so older requests are excluded rather than averaged in. */}
+      {contract.basis.measured_since != null && contract.basis.excluded_requests > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {t('era_note', {
+            since: contract.basis.measured_since.slice(0, 10),
+            count: formatInt(contract.basis.excluded_requests),
+          })}
+        </p>
+      )}
+
       <div className="mt-4">
         <Card title={t('claim')} icon="ok">
           <div className="space-y-3">

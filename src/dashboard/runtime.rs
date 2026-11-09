@@ -99,7 +99,7 @@ pub async fn runtime(
         latency(&state, tenant_id, days, offset).await?;
     let models = model_rows(&state, tenant_id, days, offset).await?;
     let bands = bands(&state, tenant_id, days, offset).await?;
-    let since = measured_since(&state, tenant_id).await?;
+    let (since, pre_era) = measured_since(&state, tenant_id).await?;
     let (bucket_expr, buckets, matrix) = heatmap(&state, tenant_id, days, &step).await?;
 
     Ok(json_ok(json!({
@@ -120,6 +120,9 @@ pub async fn runtime(
             "basis": {
                 "max_tokens": SMALL_PROMPT_TOKENS,
                 "measured_since": since,
+                // ITEM-136: traffic the report excludes because it predates the
+                // clock change, so an empty page can explain itself.
+                "excluded_requests": pre_era,
             },
         },
         "overhead": {
@@ -290,24 +293,33 @@ async fn bands(
 }
 
 /// When this tenant's traffic started being measured by the current clock
-/// (ITEM-135). `null` when no row has been written since.
+/// (ITEM-135), and how much traffic the report now excludes as a result.
+///
+/// Returning the excluded count is the difference between a report that looks
+/// empty and a report that explains itself: without it a reader sees zero
+/// samples and assumes the page is broken, when in fact their traffic predates
+/// the measurement change.
 async fn measured_since(
     state: &Arc<AppState>,
     tenant_id: uuid::Uuid,
-) -> Result<Option<String>, Response> {
+) -> Result<(Option<String>, i64), Response> {
     // Rendered as ISO-8601 in SQL: the pool's type set has no timestamp decoder,
     // and a string is what the page prints anyway.
-    let row: (Option<String>,) = stored(
+    let row: (Option<String>, i64) = stored(
         sqlx::query_as(
-            "SELECT to_char(MIN(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+            "SELECT to_char(MIN(created_at) FILTER (WHERE body_ms IS NOT NULL)
+                            AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),
+                    COUNT(*) FILTER (WHERE body_ms IS NULL)
              FROM traces
-             WHERE tenant_id = $1 AND body_ms IS NOT NULL",
+             WHERE tenant_id = $1
+               AND proxy_us IS NOT NULL
+               AND created_at >= NOW() - INTERVAL '30 days'",
         )
         .bind(tenant_id)
         .fetch_one(&state.db)
         .await,
     )?;
-    Ok(row.0)
+    Ok(row)
 }
 
 async fn latency(
