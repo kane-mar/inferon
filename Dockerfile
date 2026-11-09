@@ -20,13 +20,27 @@ RUN cargo build --release --bin inferon --features embedder
 # model, its tokenizer, and the ONNX Runtime `ort` loads dynamically. ~33 MB
 # against the ~25 GB snapshot story. Pinned to ORT 1.19.2, the version whose
 # `api-19` bindings the crate is compiled against.
+#
+# EMBEDDER_MIRROR lets a build fetch the same three artifacts from anywhere else
+# — an air-gapped install (ITEM-083), or a day when GitHub's CDN answers 504 and
+# the build has to get done. The files are pinned by version, so a mirror serves
+# byte-identical bytes; `scripts/fetch-embedder.sh` lays one out in this shape.
+ARG EMBEDDER_MIRROR=""
 RUN set -eux; \
     mkdir -p /opt/embedder; \
-    curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-1.19.2.tgz" -o /tmp/ort.tgz; \
+    ort="https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-1.19.2.tgz"; \
+    model="https://huggingface.co/TaylorAI/bge-micro-v2/resolve/main/onnx/model_quantized.onnx"; \
+    tokenizer="https://huggingface.co/TaylorAI/bge-micro-v2/resolve/main/tokenizer.json"; \
+    if [ -n "$EMBEDDER_MIRROR" ]; then \
+        ort="$EMBEDDER_MIRROR/onnxruntime-linux-x64-1.19.2.tgz"; \
+        model="$EMBEDDER_MIRROR/model_quantized.onnx"; \
+        tokenizer="$EMBEDDER_MIRROR/tokenizer.json"; \
+    fi; \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$ort" -o /tmp/ort.tgz; \
     tar -xzf /tmp/ort.tgz -C /tmp; \
     mv /tmp/onnxruntime-linux-x64-1.19.2 /opt/embedder/ort; \
-    curl -fsSL "https://huggingface.co/TaylorAI/bge-micro-v2/resolve/main/onnx/model_quantized.onnx" -o /opt/embedder/model.onnx; \
-    curl -fsSL "https://huggingface.co/TaylorAI/bge-micro-v2/resolve/main/tokenizer.json" -o /opt/embedder/tokenizer.json
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$model" -o /opt/embedder/model.onnx; \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$tokenizer" -o /opt/embedder/tokenizer.json
 
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 # The AGPL treats shipping an image as distribution, so the licence text travels

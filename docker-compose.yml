@@ -1,6 +1,12 @@
 services:
   proxy:
-    build: .
+    build:
+      context: .
+      # Empty by default: the Dockerfile fetches the pinned artifacts from the
+      # public URLs. Set it to a mirror for an air-gapped install (ITEM-083) or
+      # when the CDN is having a bad day.
+      args:
+        EMBEDDER_MIRROR: ${EMBEDDER_MIRROR:-}
     ports:
       - "${PORT:-8080}:8080"
     restart: unless-stopped
