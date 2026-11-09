@@ -1,0 +1,11 @@
+-- ITEM-135: how long the client took to send the request body.
+--
+-- `proxy_us` used to be measured from the moment the request headers arrived,
+-- so a 1.2 MB prompt (≈285k tokens) uploaded from a home uplink was billed to
+-- the gateway: 1.5–2 s typical, 7.7 s at p95 — for work the proxy does in 8 ms.
+-- The gateway's clock now starts when the body is complete; this column keeps
+-- the receive time, because a slow client is worth seeing.
+--
+-- Nullable: rows written before this migration have no separate measurement, and
+-- their `proxy_us` still includes the upload. Do not read across 2026-11-08.
+ALTER TABLE traces ADD COLUMN IF NOT EXISTS body_ms BIGINT;

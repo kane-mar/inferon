@@ -624,7 +624,7 @@
     "claim_p50": "surcoût médian sous 1 ms",
     "claim_p95": "surcoût au 95e centile sous 5 ms (repère une baisse du cache)",
     "claim_window": "Mesuré sur cette version : les {hours} dernières heures ({samples} échantillon(s), médiane {observed} pour une invite médiane de {tokens} jetons). Les cartes ci-dessus décrivent la fenêtre choisie.",
-    "claim_note": "Mesuré comme le temps de la passerelle : du début de la requête jusqu’au moment juste avant l’envoi au fournisseur, donc le temps du fournisseur et le corps de la réponse ne sont pas comptés. Une requête « chaude » arrive dans la fenêtre du cache ; la première après une période d’inactivité doit aussi charger la configuration.",
+    "claim_note": "Le temps de la passerelle est mesuré du moment où le corps de la requête a fini d’arriver jusqu’à juste avant l’envoi au fournisseur : l’envoi par le client, le temps du fournisseur et le corps de la réponse sont donc exclus. Les requêtes « chaudes » arrivent dans la fenêtre de cache ; la première après une période d’inactivité doit aussi charger la configuration.",
     "met": "tenue",
     "not_met": "non tenue",
     "end_to_end": "Bout en bout",
@@ -645,7 +645,7 @@
     "model": "Modèle",
     "requests": "Requêtes",
     "no_samples": "Aucune requête mesurée sur cette période.",
-    "overhead_help": "Du début de la requête jusqu’à l’instant où elle part chez le fournisseur. L’analyse du corps de la requête en fait partie : ce temps croît donc avec la taille de l’invite — la taille indiquée à côté est celle de la mesure.",
+    "overhead_help": "Le travail du relais : du moment où votre requête a fini d’arriver jusqu’à juste avant son envoi au fournisseur. Le temps que vous mettez à envoyer le corps n’est pas compté — un envoi lent vient de votre réseau, pas de notre latence.",
     "under_1ms_help": "Part des requêtes mesurées dont la surcharge est restée sous la promesse de 1 ms.",
     "samples_help": "Requêtes dont le surcoût a été mesuré sur cette période. C’est la base de tous les chiffres de cette page.",
     "total_help": "De bout en bout : du début de la requête au dernier octet de la réponse.",
@@ -655,7 +655,8 @@
     "legend_failing": "Teinte foncée : 20 % d’erreurs ou plus, ou 5 % les plus lents au-delà de 10 s",
     "legend_empty": "point : aucun trafic sur cette période",
     "at_payload": "invite médiane {tokens} jetons",
-    "payload_column": "Taille d’invite, médiane"
+    "payload_column": "Taille d’invite, médiane",
+    "upload_beside": "les clients ont mis {ms} ms (médiane) à envoyer le corps (non compté ci-dessus)"
   },
   "PayloadsPage": {
     "title_bar": "Charges utiles",

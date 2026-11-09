@@ -1722,6 +1722,7 @@ async fn a_chain_that_does_not_handle_the_failure_serves_it() {
             policy_version: None,
             proxy_ms: None,
                 proxy_us: None,
+        body_ms: None,
                 example_state: None,
                 example_reason: None,
                 completion_hash: None,
@@ -3398,6 +3399,57 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
         assert!(
             unused_seen.lock().unwrap().is_empty(),
             "a speaking provider is never abandoned for the next step"
+        );
+    }
+
+    /// ITEM-135: the gateway's clock starts when the body is complete.
+    ///
+    /// A 1.2 MB prompt (≈285k tokens) takes 1.5–2 s to upload from a home
+    /// connection. Measured from the request line, that upload was reported as
+    /// proxy overhead — 7.7 s at p95 on the live host for work the proxy does in
+    /// 8 ms. Here the client sends its body in two pieces 300 ms apart: the
+    /// upload is visible on the trace, and the gateway's own time stays small.
+    #[tokio::test]
+    async fn a_slow_upload_is_not_counted_as_gateway_time() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let state = std::sync::Arc::new(AppState {
+            telemetry_tx: tx,
+            ..base_state(&mock_upstream().await)
+        });
+
+        let head = r#"{"model":"deepseek-chat","messages":[{"role":"user","content":""#;
+        let tail = r#""}]}"#;
+        let body = async_stream::stream! {
+            yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(head.to_string()));
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(tail.to_string()));
+        };
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {CLIENT_KEY}"))
+            .body(Body::from_stream(body))
+            .unwrap();
+
+        let response = build_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let _ = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("trace should be emitted")
+            .expect("channel open");
+        let body_ms = msg.body_ms.expect("the upload is measured");
+        let proxy_us = msg.proxy_us.expect("gateway time is measured");
+        assert!(body_ms >= 300, "the 300 ms upload is on the trace: {body_ms} ms");
+        assert!(
+            proxy_us < 100_000,
+            "gateway work excludes the upload: {proxy_us} µs for a 300 ms send"
+        );
+        assert!(
+            (proxy_us as i64) < body_ms * 200,
+            "proxy time ({proxy_us} µs) is unrelated to the client's slowness ({body_ms} ms)"
         );
     }
 

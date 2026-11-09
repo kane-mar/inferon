@@ -38,6 +38,7 @@ fn trace(completion: Option<Value>, outcome: Outcome) -> TraceMessage {
         policy_version: None,
         proxy_ms: Some(1),
         proxy_us: Some(1000),
+        body_ms: None,
         example_state: None,
         example_reason: None,
         completion_hash: None,

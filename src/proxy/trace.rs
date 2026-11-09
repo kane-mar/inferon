@@ -22,10 +22,15 @@ pub(super) struct RequestMeta {
     pub(super) cache_affinity: Option<Value>,
     /// ITEM-064: the adaptive policy version in force for this request.
     pub(super) policy_version: Option<i64>,
-    /// ITEM-066/092: the proxy's own pre-upstream time (request-received →
-    /// dispatch), in ms for the dashboard and µs for the performance suite.
+    /// ITEM-066/092/135: the proxy's own pre-upstream time, in ms for the
+    /// dashboard and µs for the performance suite. Measured from the moment the
+    /// request body is complete — the time a client spends uploading its prompt
+    /// is `body_ms`, not gateway work.
     pub(super) proxy_ms: Option<i64>,
     pub(super) proxy_us: Option<i64>,
+    /// ITEM-135: request start → body complete. The client's upload, kept so a
+    /// slow sender is visible without being mistaken for proxy latency.
+    pub(super) body_ms: Option<i64>,
     /// ITEM-067: set when the wire format was downgraded (json_schema →
     /// json_object) because the target cannot honour a schema contract.
     pub(super) wire_format: Option<&'static str>,
@@ -90,6 +95,7 @@ impl RequestMeta {
             policy_version: None,
             proxy_ms: None,
             proxy_us: None,
+            body_ms: None,
             wire_format: None,
             provider_id: None,
             api_key_id: tenant.api_key_id,
@@ -254,6 +260,7 @@ pub(super) fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOut
         policy_version: meta.policy_version,
         proxy_ms: meta.proxy_ms,
         proxy_us: meta.proxy_us,
+        body_ms: meta.body_ms,
         example_state: None,
         example_reason: None,
         completion_hash: None,

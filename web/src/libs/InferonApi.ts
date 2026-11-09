@@ -182,6 +182,14 @@ export type RuntimeReport = {
     p99_us: number | null;
     /** Gateway time grows with the payload, so the size travels with it. */
     prompt_tokens_p50: number | null;
+    /**
+     * ITEM-135: how long these clients took to send their bodies. The gateway's
+     * clock starts when the body is complete, so this is never folded into the
+     * numbers above — it is shown so a slow sender is visible rather than
+     * mistaken for proxy latency.
+     */
+    body_p50_ms: number | null;
+    body_p95_ms: number | null;
   };
   latency: {
     total_p50_ms: number | null;

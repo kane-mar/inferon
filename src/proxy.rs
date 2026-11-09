@@ -191,6 +191,10 @@ pub(crate) async fn proxy_chat_completions(
         Ok(parsed) => parsed,
         Err(resp) => return resp,
     };
+    // ITEM-135: the client's upload ends here. Everything the gateway does is
+    // timed from this instant — a 1.2 MB prompt sent from a home uplink spends
+    // 1.5–2 s on the wire, and that was being reported as proxy overhead.
+    let body_complete = Instant::now();
     stages.mark("body");
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     let prompt_hash = system_prompt_hash(&payload);
@@ -231,11 +235,13 @@ pub(crate) async fn proxy_chat_completions(
     // actually sent. A deterministic share is held out to measure the effect.
     redact_wire(&mut meta, tenant_id);
 
-    // ITEM-066: the proxy's own pre-upstream time, recorded before the first
-    // dispatch (a subset of the trace's total duration).
+    // ITEM-066/135: the proxy's own pre-upstream time, recorded before the first
+    // dispatch (a subset of the trace's total duration) and measured from the
+    // completed body, never from the request line.
     stages.mark("prune");
-    meta.proxy_ms = Some(started.elapsed().as_millis() as i64);
-    meta.proxy_us = Some(started.elapsed().as_micros() as i64);
+    meta.body_ms = Some(body_complete.duration_since(started).as_millis() as i64);
+    meta.proxy_ms = Some(body_complete.elapsed().as_millis() as i64);
+    meta.proxy_us = Some(body_complete.elapsed().as_micros() as i64);
     tracing::debug!(
         stages = %stages.summary(),
         pre_dispatch_us = meta.proxy_us.unwrap_or_default(),
@@ -602,6 +608,9 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         Ok(parsed) => parsed,
         Err(resp) => return resp,
     };
+    // ITEM-135: same rule as the OpenAI surface — the gateway's own clock starts
+    // when the body is complete, not when the request line arrived.
+    let body_complete = Instant::now();
     let is_stream = payload["stream"].as_bool().unwrap_or(false);
     let prompt_hash = system_prompt_hash_anthropic(&payload);
     let mut meta = RequestMeta::new(payload, &tenant, session_id, prompt_hash);
@@ -629,9 +638,11 @@ pub(crate) async fn proxy_messages(State(state): State<Arc<AppState>>, req: Requ
         );
         return response::with_trace_id(resp, meta.id);
     }
-    // ITEM-066: the proxy's own pre-upstream time, recorded before dispatch.
-    meta.proxy_ms = Some(request_started.elapsed().as_millis() as i64);
-    meta.proxy_us = Some(request_started.elapsed().as_micros() as i64);
+    // ITEM-066/135: the proxy's own pre-upstream time, recorded before dispatch
+    // and measured from the completed body.
+    meta.body_ms = Some(body_complete.duration_since(request_started).as_millis() as i64);
+    meta.proxy_ms = Some(body_complete.elapsed().as_millis() as i64);
+    meta.proxy_us = Some(body_complete.elapsed().as_micros() as i64);
     let request = provider_request(&state.http_client, &route);
     // ITEM-127: `wire_body` forwards the caller's own bytes when nothing changes
     // (the common case) and rebuilds the payload only for a translation.

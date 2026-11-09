@@ -80,6 +80,8 @@ pub struct TraceMessage {
     pub proxy_ms: Option<i64>,
     /// ITEM-092: the same overhead in microseconds (the performance contract).
     pub proxy_us: Option<i64>,
+    /// ITEM-135: request start → body complete (the client's upload).
+    pub body_ms: Option<i64>,
     /// ITEM-086: dataset qualification, decided at write time. `None` when no
     /// completion was captured (there is no pair to qualify or exclude).
     pub example_state: Option<&'static str>,
@@ -148,10 +150,10 @@ const TRACE_INSERT: &str = r#"INSERT INTO traces (
                     upstream_cost_usd, waste_detected, truncated, guard_event, routing_event,
                     provider_id, api_key_id, cached_prompt_tokens, cache_savings_usd, router_event,
                     outcome, error_class, savings_usd, savings_kind, cache_affinity, policy_version,
-                    proxy_ms, proxy_us,
+                    proxy_ms, proxy_us, body_ms,
                     example_state, example_reason, completion_hash, session_id,
                     request_lint, prune_event, pii, provider_selection
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)"#;
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)"#;
 
 #[async_trait::async_trait]
 impl TraceSink for PostgresTraceSink {
@@ -198,6 +200,7 @@ impl TraceSink for PostgresTraceSink {
                 .bind(msg.policy_version)
                 .bind(msg.proxy_ms.map(|t| t as i32))
                 .bind(msg.proxy_us)
+                .bind(msg.body_ms)
                 .bind(msg.example_state)
                 .bind(msg.example_reason)
                 .bind(msg.completion_hash.as_deref())

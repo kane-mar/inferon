@@ -62,10 +62,18 @@ Caddy sends `/v1/*`, `/auth/*` and `/healthz` to `proxy`, and everything else to
 
 The proxy's own overhead is **p50 under 1 ms and p95 under 2 ms for a warm request
 carrying a small prompt** (the suite and the deploy gate use ~35-token requests).
-Overhead means the time from the start of a request to just before it is sent to the
-provider, recorded as `traces.proxy_us`. It leaves out the provider and the response
-body, and counts auth, workspace config, routing, the budget and router decision, and
-**parsing the request body**.
+Overhead means the time from **the moment the request body has finished arriving** to
+just before it is sent to the provider, recorded as `traces.proxy_us`. It leaves out
+the provider, the response body, and the client's upload, and counts auth, workspace
+config, routing, the budget and router decision, and **parsing the request body**.
+
+How long a client takes to send its body is recorded separately as `traces.body_ms`
+and shown on the Runtime page, because it is the one part of a request the gateway
+cannot influence. This distinction was a real defect until 2026-11-08 (ITEM-135): the
+clock started at the request line, so a 1.2 MB prompt uploaded from a home connection
+was reported as gateway overhead — 1.5–2 s at the median and 7.7 s at p95, for work
+the proxy does in about 8 ms. Rows written before that date still include the
+upload; do not read a trend across it.
 
 That last part is why the claim carries a payload size. Parsing is unavoidable work
 and it is proportional to the payload: the gateway adds a few microseconds on a 4 KB

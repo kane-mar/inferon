@@ -16,13 +16,24 @@ use crate::latency::{CONTRACT_WINDOW_HOURS, MIN_SAMPLES, P50_BUDGET_US, P95_GUAR
 /// ITEM-099: one model's bucket — `(model, bucket, requests, errors, p95_ms)`.
 type HeatCellRow = (String, String, i64, i64, Option<f64>);
 
-/// `(samples, under_1ms, p50, p95, p99)` of the proxy's own overhead.
+/// `(samples, under_1ms, p50, p95, p99, prompt_tokens_p50, receipt_p50)` of the
+/// proxy's own overhead, plus how long clients took to send their bodies
+/// (ITEM-135 — a slow upload is not gateway work).
 /// `(samples, under_1ms, p50_us, p95_us, p99_us, prompt_tokens_p50)`.
 ///
 /// ITEM-127: gateway time is proportional to the payload — parsing the body is
 /// unavoidable work — so the number is meaningless without the prompt size it
 /// was measured at. It travels with the percentile, never apart from it.
-type OverheadRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+type OverheadRow = (
+    i64,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
 
 /// `(total_p50, total_p95, total_p99, ttft_p50, ttft_p95)` in ms.
 type LatencyRow = (
@@ -76,7 +87,7 @@ pub async fn runtime(
     let offset = query.offset();
     let step = query.step.clone().unwrap_or_else(|| "day".to_string());
 
-    let (samples, under_1ms, p50_us, p95_us, p99_us, prompt_tokens_p50) =
+    let (samples, under_1ms, p50_us, p95_us, p99_us, prompt_tokens_p50, body_p50, body_p95) =
         overhead(&state, tenant_id, days, offset).await?;
     let verdict = contract_verdict(&state, tenant_id).await?;
     let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95) =
@@ -106,6 +117,10 @@ pub async fn runtime(
             "p95_us": p95_us,
             "p99_us": p99_us,
             "prompt_tokens_p50": prompt_tokens_p50,
+            // ITEM-135: the client's side of the same requests, so an operator can
+            // see a slow sender instead of reading it as proxy latency.
+            "body_p50_ms": body_p50,
+            "body_p95_ms": body_p95,
         },
         "latency": {
             "total_p50_ms": total_p50,
@@ -137,7 +152,9 @@ async fn overhead(
                 round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                 round(percentile_cont(0.99) WITHIN GROUP (ORDER BY proxy_us))::bigint,
-                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY prompt_tokens))::bigint,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY body_ms))::bigint,
+                round(percentile_cont(0.95) WITHIN GROUP (ORDER BY body_ms))::bigint
          FROM traces
          WHERE tenant_id = $1
            AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')

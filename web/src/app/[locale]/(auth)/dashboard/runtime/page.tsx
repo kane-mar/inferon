@@ -81,6 +81,9 @@ export default async function RuntimePage(props: {
           window={days}
           definition={t('overhead_help')}
           tone={metricTone(overhead.p95_us, THRESHOLDS.proxyP95Us)}
+          hint={overhead.body_p95_ms == null
+            ? undefined
+            : t('upload_beside', { ms: formatInt(overhead.body_p95_ms) })}
         />
         <KpiCard
           label={t('under_1ms')}
@@ -209,7 +212,10 @@ export default async function RuntimePage(props: {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b text-muted-foreground">
-                    <th className="py-2.5 pr-3 font-medium text-muted-foreground">
+                    <th className="
+                      py-2.5 pr-3 font-medium text-muted-foreground
+                    "
+                    >
                       {t('heatmap_model')}
                     </th>
                     {data.heatmap.buckets.map(bucket => (

@@ -624,7 +624,7 @@
     "claim_p50": "median overhead under 1 ms",
     "claim_p95": "95th percentile overhead under 5 ms (catches a cache slowdown)",
     "claim_window": "Measured on this build: the last {hours} h ({samples} sample(s), median {observed} at a median prompt of {tokens} tokens). The cards above describe the window you selected.",
-    "claim_note": "Gateway time is measured from the start of the request to just before it is sent to the provider, so provider time and the response body are not counted. Warm requests arrive within the cache window; the first request after an idle period also has to load the config.",
+    "claim_note": "Gateway time is measured from the moment the request body has finished arriving to just before it is sent to the provider, so the client's upload, the provider's time and the response body are all excluded. Warm requests arrive within the cache window; the first request after an idle period also has to load the config.",
     "met": "met",
     "not_met": "not met",
     "end_to_end": "End to end",
@@ -645,7 +645,7 @@
     "model": "Model",
     "requests": "Requests",
     "no_samples": "No requests measured in this window.",
-    "overhead_help": "From the start of the request to just before it is sent to the provider. Parsing the request body is part of it, so this grows with the size of the prompt — the payload beside the number is the one it was measured at.",
+    "overhead_help": "The gateway's own work: from the moment your request has finished arriving to just before it is sent to the provider. The time you spend sending the body is not included — a slow upload is your network, not our latency.",
     "under_1ms_help": "Share of measured requests whose own overhead stayed under the 1 ms claim.",
     "samples_help": "Requests with a measured overhead in this window. This is the base for every number on this page.",
     "total_help": "End to end: from the start of the request to the last byte of the response.",
@@ -655,7 +655,8 @@
     "legend_failing": "Dark tint: 20% or more errors, or the slowest 5% over 10 s",
     "legend_empty": "dot: no traffic in that period",
     "at_payload": "median prompt {tokens} tokens",
-    "payload_column": "Prompt size, median"
+    "payload_column": "Prompt size, median",
+    "upload_beside": "clients took a median {ms} ms to send the body (not counted above)"
   },
   "PayloadsPage": {
     "title_bar": "Payloads",
