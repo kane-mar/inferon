@@ -6,7 +6,9 @@ import { Card } from './Card';
 /** One named audit finding: what we detect, the headline, and the numbers. */
 export const Finding = (props: {
   title: string;
-  description: string;
+  /** ITEM-138: none. A finding states what it found and what it is worth; the
+   *  reasoning lives in the guides, linked once at the top of the report. */
+  description?: string;
   highlight: string;
   metrics: { label: string; value: string }[];
 }) => (
@@ -14,7 +16,9 @@ export const Finding = (props: {
     title={props.title}
     action={<span className="text-lg font-semibold tabular-nums">{props.highlight}</span>}
   >
-    <p className="text-sm text-muted-foreground">{props.description}</p>
+    {props.description && (
+      <p className="text-sm text-muted-foreground">{props.description}</p>
+    )}
     <dl className="mt-4 space-y-1.5 text-sm">
       {props.metrics.map(metric => (
         <div

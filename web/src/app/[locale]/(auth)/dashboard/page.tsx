@@ -124,9 +124,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-2xl font-semibold">{t('title_bar')}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t('title_bar_description', { days: view.days })}
-        </p>
       </div>
       <div className="flex items-center gap-2">
         <WindowChip days={view.days} />
@@ -174,7 +171,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={formatInt(summary.requests)}
           window={view.days}
           delta={requestsDelta}
-          definition={t('requests_help')}
         />
         <KpiCard
           label={t('total_cost')}
@@ -183,7 +179,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           window={view.days}
           delta={costDelta}
           goodWhen="down"
-          definition={t('total_cost_help')}
         />
         <KpiCard
           label={t('error_rate')}
@@ -191,7 +186,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={errorRate == null ? '—' : `${errorRate.toFixed(1)}%`}
           window={view.days}
           tone={metricTone(errorRate == null ? null : errorRate / 100, THRESHOLDS.errorRate)}
-          definition={t('error_rate_help')}
         />
         <KpiCard
           label={t('p95_ttft')}
@@ -199,9 +193,8 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           value={formatMs(summary.ttft_p95_ms)}
           window={view.days}
           delta={ttftDelta}
-          definition={t('p95_ttft_help')}
           goodWhen="down"
-          hint={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
+          verdict={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
           tone={metricTone(summary.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
         />
         <KpiCard
@@ -209,8 +202,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           icon="down"
           value={money(summary.total_savings_usd)}
           window={view.days}
-          hint={`${t('cache_savings')} ${money(summary.cache_savings_usd)}`}
-          definition={t('total_savings_help')}
+          verdict={`${t('cache_savings')} ${money(summary.cache_savings_usd)}`}
         />
       </div>
 

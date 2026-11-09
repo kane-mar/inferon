@@ -35,7 +35,6 @@ export const Features = () => {
       <Section
         subtitle={t('section_subtitle')}
         title={t('section_title')}
-        description={t('section_description')}
       >
         <div className="
           grid grid-cols-1 gap-x-6 gap-y-8

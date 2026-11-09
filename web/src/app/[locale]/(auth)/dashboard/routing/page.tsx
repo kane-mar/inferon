@@ -59,7 +59,7 @@ export default async function RoutingPage(props: RoutingPageProps) {
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader title={t('title_bar')} />
       <Card title={t('chain')} icon="layers">
         <RoutingPanel data={data} modelIds={modelIds} />
       </Card>
@@ -89,7 +89,6 @@ export default async function RoutingPage(props: RoutingPageProps) {
       {data.role === 'owner' && (
         <div className="mt-4">
           <Card title={t('audit')} icon="lock">
-            <p className="mb-3 text-sm text-muted-foreground">{t('audit_help')}</p>
             {data.audit.length === 0
               ? <p className="text-sm text-muted-foreground">{t('audit_empty')}</p>
               : (

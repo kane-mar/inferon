@@ -35,9 +35,12 @@ export const GUARD_OUTCOMES = ['flushed', 'fallback', 'fallback_failed'] as cons
 
 export type GuardOutcomeCode = (typeof GUARD_OUTCOMES)[number];
 
-/** i18n keys: `ErrorClass.<code>` is the phrase, `ErrorClass.<code>_help` the line. */
-export type ErrorLabelKey = ErrorClassCode | `${ErrorClassCode}_help`;
-export type OutcomeLabelKey = GuardOutcomeCode | `${GuardOutcomeCode}_help`;
+/**
+ * ITEM-138: one phrase per code. The second "line of meaning" is gone — it was a
+ * sentence on a screen. The phrase has to stand alone; anything more is a guide.
+ */
+export type ErrorLabelKey = ErrorClassCode;
+export type OutcomeLabelKey = GuardOutcomeCode;
 
 export const isErrorClass = (value: string): value is ErrorClassCode =>
   (ERROR_CLASSES as readonly string[]).includes(value);
@@ -45,13 +48,9 @@ export const isErrorClass = (value: string): value is ErrorClassCode =>
 export const isGuardOutcome = (value: string): value is GuardOutcomeCode =>
   (GUARD_OUTCOMES as readonly string[]).includes(value);
 
-/** The keys to ask the locale for, or `null` when the code is unknown. */
-export const errorClassKeys = (
-  value: string,
-): { label: ErrorLabelKey; help: ErrorLabelKey } | null =>
-  isErrorClass(value) ? { label: value, help: `${value}_help` } : null;
+/** The locale key for a code, or `null` when the code is unknown. */
+export const errorClassKeys = (value: string): ErrorLabelKey | null =>
+  isErrorClass(value) ? value : null;
 
-export const guardOutcomeKeys = (
-  value: string,
-): { label: OutcomeLabelKey; help: OutcomeLabelKey } | null =>
-  isGuardOutcome(value) ? { label: value, help: `${value}_help` } : null;
+export const guardOutcomeKeys = (value: string): OutcomeLabelKey | null =>
+  isGuardOutcome(value) ? value : null;

@@ -70,7 +70,6 @@ export default async function DatasetsPage(props: {
     <>
       <PageHeader
         title={t('title_bar')}
-        description={t('title_bar_description')}
         action={<WindowChip days={days} />}
       />
 
@@ -84,21 +83,18 @@ export default async function DatasetsPage(props: {
           icon="layers"
           value={formatInt(examples)}
           window={days}
-          hint={t('examples_help')}
         />
         <KpiCard
           label={t('clusters')}
           icon="datasets"
           value={formatInt(clusters.length)}
           window={days}
-          definition={t('clusters_help')}
         />
         <KpiCard
           label={t('spend')}
           icon="cost"
           value={money(spend)}
           window={days}
-          hint={t('spend_help')}
         />
         <KpiCard
           label={t('excluded')}
@@ -106,9 +102,8 @@ export default async function DatasetsPage(props: {
           value={formatInt(excluded)}
           window={days}
           goodWhen="down"
-          definition={t('excluded_help')}
         />
-        <KpiCard label={t('grouping')} icon="layers" value={groupingLabel} hint={t('grouping_help')} />
+        <KpiCard label={t('grouping')} icon="layers" value={groupingLabel} />
       </div>
 
       <div className="mt-4">
@@ -202,9 +197,6 @@ export default async function DatasetsPage(props: {
 
       <div className="mt-4">
         <Card title={promptsCopy('title_bar')} icon="layers">
-          <p className="mb-4 text-sm text-muted-foreground">
-            {promptsCopy('title_bar_description')}
-          </p>
           <PromptsPanel
             prompts={prompts.prompts}
             canEdit={prompts.role === 'owner'}

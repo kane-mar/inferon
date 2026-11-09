@@ -149,7 +149,6 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
           />
           {t('capture')}
         </label>
-        <p className="text-xs text-muted-foreground">{t('capture_help')}</p>
         <label className="text-sm">
           <span className="text-muted-foreground">{t('retention')}</span>
           <input
@@ -160,7 +159,6 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
             onChange={event => setRetention(event.target.value)}
           />
         </label>
-        <p className="text-xs text-muted-foreground">{t('retention_help')}</p>
       </div>
 
       <div className="space-y-1">
@@ -200,7 +198,6 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
           />
           {t('lint')}
         </label>
-        <p className="text-xs text-muted-foreground">{t('lint_help')}</p>
         <div className="space-y-1.5 pl-6">
           {LINT_RULES.map(entry => (
             <label key={entry.rule} className="flex items-start gap-2 text-sm">

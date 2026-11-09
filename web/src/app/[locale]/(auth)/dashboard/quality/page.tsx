@@ -49,18 +49,14 @@ export default async function QualityPage(props: {
   // the secondary hint support replies and log lines use.
   const causes = await getTranslations({ locale, namespace: 'ErrorClass' });
   const cause = (code: string) => {
-    const keys = errorClassKeys(code);
-    if (!keys) {
-      return { label: code, help: null, code: null };
-    }
-    return { label: causes(keys.label), help: causes(keys.help), code };
+    const key = errorClassKeys(code);
+    return { label: key ? causes(key) : code, code: key ? code : null };
   };
 
   return (
     <>
       <PageHeader
         title={t('title_bar')}
-        description={t('title_bar_description')}
         action={<WindowChip days={days} />}
       />
 
@@ -76,7 +72,6 @@ export default async function QualityPage(props: {
           value={pct(overall.success_rate)}
           window={days}
           tone={metricTone(overall.success_rate, THRESHOLDS.okRate)}
-          hint={t('success_rate_help')}
         />
         <KpiCard
           label={t('empty_rate')}
@@ -84,7 +79,6 @@ export default async function QualityPage(props: {
           value={pct(overall.empty_rate)}
           window={days}
           goodWhen="down"
-          definition={t('empty_rate_help')}
         />
         <KpiCard
           label={t('refusal_rate')}
@@ -92,7 +86,6 @@ export default async function QualityPage(props: {
           value={pct(overall.refusal_rate)}
           window={days}
           goodWhen="down"
-          definition={t('refusal_rate_help')}
         />
         <KpiCard
           label={t('error_rate')}
@@ -101,7 +94,6 @@ export default async function QualityPage(props: {
           window={days}
           goodWhen="down"
           tone={metricTone(overall.error_rate, THRESHOLDS.errorRate)}
-          definition={t('error_rate_help')}
         />
         <KpiCard
           label={t('truncated_rate')}
@@ -110,7 +102,6 @@ export default async function QualityPage(props: {
           window={days}
           goodWhen="down"
           tone={metricTone(overall.truncated_rate, THRESHOLDS.truncatedRate)}
-          definition={t('truncated_rate_help')}
         />
         <KpiCard
           label={t('guard_fallback_rate')}
@@ -118,7 +109,6 @@ export default async function QualityPage(props: {
           value={pct(overall.guard_fallback_rate)}
           window={days}
           goodWhen="down"
-          definition={t('guard_fallback_rate_help')}
         />
       </div>
 
@@ -134,7 +124,7 @@ export default async function QualityPage(props: {
               </thead>
               <tbody>
                 {Object.entries(overall.errors_by_class).map(([errorClass, count]) => {
-                  const { label, help, code } = cause(errorClass);
+                  const { label, code } = cause(errorClass);
                   return (
                     <tr
                       key={errorClass}
@@ -145,11 +135,6 @@ export default async function QualityPage(props: {
                     >
                       <td className={CELL}>
                         <div className="font-medium">{label}</div>
-                        {help && (
-                          <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
-                            {help}
-                          </p>
-                        )}
                         {code && (
                           <code className="mt-1 block text-xs text-muted-foreground">
                             {code}
@@ -261,9 +246,6 @@ export default async function QualityPage(props: {
       </div>
       <div className="mt-4">
         <Card title={evalsCopy('title_bar')} icon="ok">
-          <p className="mb-4 text-sm text-muted-foreground">
-            {evalsCopy('title_bar_description')}
-          </p>
           <EvalsPanel
             goldSets={evals.gold_sets}
             runs={evals.runs}

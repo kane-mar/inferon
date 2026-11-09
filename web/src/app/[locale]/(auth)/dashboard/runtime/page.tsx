@@ -3,6 +3,7 @@
 
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
+import { DocsLink } from '@/components/DocsLink';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import {
@@ -71,8 +72,12 @@ export default async function RuntimePage(props: {
     <>
       <PageHeader
         title={t('title_bar')}
-        description={t('title_bar_description')}
-        action={<WindowChip days={days} />}
+        action={(
+          <div className="flex items-center gap-3">
+            <DocsLink guide="config/04-auto-router-and-threshold" label={t('docs')} />
+            <WindowChip days={days} />
+          </div>
+        )}
       />
 
       {/* The headline: what the proxy itself adds. */}
@@ -89,37 +94,28 @@ export default async function RuntimePage(props: {
           icon="latency"
           value={us(small.band.p50_us)}
           window={days}
-          definition={t('overhead_help')}
           tone={metricTone(small.band.p50_us, THRESHOLDS.proxyP50Us)}
-          hint={small.band.requests === 0
-            ? t('no_small_prompts', { tokens: formatInt(contract.basis.max_tokens) })
-            : `${contract.p50_met == null
-              ? t('not_enough_samples', { count: contract.min_samples })
+          verdict={small.band.requests === 0
+            ? t('no_traffic')
+            : contract.p50_met == null
+              ? t('too_few')
               : contract.p50_met
-                ? t('within_contract')
-                : t('over_contract')} · ${t('at_payload', {
-              tokens: formatInt(small.band.prompt_tokens_p50 ?? 0),
-            })}`}
+                ? t('within_claim')
+                : t('over_claim')}
         />
         <KpiCard
           label={t('claim_p95_kpi')}
           icon="latency"
           value={us(small.band.p95_us)}
           window={days}
-          definition={t('overhead_help')}
           tone={metricTone(small.band.p95_us, THRESHOLDS.proxyP95Us)}
-          hint={overhead.body_p95_ms == null
-            ? undefined
-            : t('upload_beside', { ms: formatInt(overhead.body_p95_ms) })}
         />
         <KpiCard
           label={t('under_1ms')}
           icon="ok"
           value={pct(small.band.under_1ms_rate)}
           window={days}
-          definition={t('under_1ms_help')}
           tone={metricTone(small.band.under_1ms_rate, THRESHOLDS.under1msRate)}
-          hint={t('small_only', { tokens: formatInt(contract.basis.max_tokens) })}
         />
         <KpiCard
           label={t('samples')}
@@ -127,15 +123,13 @@ export default async function RuntimePage(props: {
           value={formatInt(overhead.samples)}
           unit={t('requests')}
           window={days}
-          definition={t('samples_help')}
         />
       </div>
 
-      {/* ITEM-136: an empty report has to explain itself. The clock changed on
-          2026-11-08, so older requests are excluded rather than averaged in. */}
+      {/* ITEM-138: a fact about the data, not an explanation of it. */}
       {contract.basis.measured_since != null && contract.basis.excluded_requests > 0 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          {t('era_note', {
+        <p className="mt-3 text-xs text-muted-foreground tabular-nums">
+          {t('era_fact', {
             since: contract.basis.measured_since.slice(0, 10),
             count: formatInt(contract.basis.excluded_requests),
           })}
@@ -153,18 +147,14 @@ export default async function RuntimePage(props: {
               <span>{t('claim_p95')}</span>
               <Status ok={hasSamples ? contract.p95_met : null} met={t('met')} missed={t('not_met')} />
             </div>
-            <p className="text-xs text-muted-foreground">
-              {t('claim_window', {
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {t('claim_data', {
                 hours: contract.window_hours,
                 samples: formatInt(contract.samples),
                 observed: us(contract.observed_p50_us),
                 tokens: formatInt(contract.prompt_tokens_p50 ?? 0),
               })}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {t('claim_basis', { tokens: formatInt(contract.basis.max_tokens) })}
-            </p>
-            <p className="text-xs text-muted-foreground">{t('claim_note')}</p>
           </div>
         </Card>
       </div>
@@ -174,9 +164,13 @@ export default async function RuntimePage(props: {
           beside it, so "the gateway got slower" and "we are sending bigger
           prompts" cannot be confused again. */}
       <div className="mt-4">
-        <Card title={t('bands_title')} icon="latency">
+        <Card
+          title={t('bands_title')}
+          icon="latency"
+          action={<DocsLink guide="config/04-auto-router-and-threshold" label={t('docs')} />}
+        >
           {bands.length === 0
-            ? <p className="text-sm text-muted-foreground">{t('bands_empty')}</p>
+            ? <p className="text-sm text-muted-foreground">{t('no_traffic')}</p>
             : (
                 <table className="w-full text-sm">
                   <thead>
@@ -216,7 +210,6 @@ export default async function RuntimePage(props: {
                   </tbody>
                 </table>
               )}
-          <p className="mt-3 text-xs text-muted-foreground">{t('bands_note')}</p>
         </Card>
       </div>
 
@@ -275,7 +268,6 @@ export default async function RuntimePage(props: {
                 ))}
               </tbody>
             </table>
-            <p className="mt-3 text-xs text-muted-foreground">{t('drift_note')}</p>
             <ul className="
               mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground
             "
@@ -317,14 +309,12 @@ export default async function RuntimePage(props: {
               icon="latency"
               value={ms(latency.total_p50_ms)}
               window={days}
-              definition={t('total_help')}
             />
             <KpiCard
               label={t('total_p95')}
               icon="latency"
               value={ms(latency.total_p95_ms)}
               window={days}
-              definition={t('total_help')}
               tone={metricTone(latency.total_p95_ms, THRESHOLDS.totalP95Ms)}
             />
             <KpiCard
@@ -332,21 +322,18 @@ export default async function RuntimePage(props: {
               icon="latency"
               value={ms(latency.total_p99_ms)}
               window={days}
-              definition={t('total_help')}
             />
             <KpiCard
               label={t('ttft_p50')}
               icon="latency"
               value={ms(latency.ttft_p50_ms)}
               window={days}
-              definition={t('ttft_help')}
             />
             <KpiCard
               label={t('ttft_p95')}
               icon="latency"
               value={ms(latency.ttft_p95_ms)}
               window={days}
-              definition={t('ttft_help')}
               tone={metricTone(latency.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
             />
             <KpiCard
@@ -354,7 +341,6 @@ export default async function RuntimePage(props: {
               icon="cost"
               value={pct(latency.proxy_share)}
               window={days}
-              hint={t('proxy_share_help')}
             />
           </div>
         </Card>
@@ -384,7 +370,6 @@ export default async function RuntimePage(props: {
               </div>
             )}
           >
-            <p className="mb-3 text-xs text-muted-foreground">{t('heatmap_help')}</p>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -451,14 +436,14 @@ export default async function RuntimePage(props: {
             >
               <span className="flex items-center gap-1.5">
                 <span className="inline-block size-3 rounded-sm border" />
-                {t('legend_healthy')}
+                {t('legend_ok')}
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="
                   inline-block size-3 rounded-sm bg-destructive/5
                 "
                 />
-                {t('legend_degraded')}
+                {t('legend_slow')}
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="

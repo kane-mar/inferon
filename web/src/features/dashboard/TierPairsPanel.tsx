@@ -59,7 +59,6 @@ export const TierPairsPanel = (props: {
   return (
     <div className="space-y-4">
       {error && <p className="text-sm text-destructive">{error}</p>}
-      <p className="text-sm text-muted-foreground">{t('tier_pairs_help')}</p>
 
       <ul className="space-y-2">
         {pairs.map(pair => (

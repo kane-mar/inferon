@@ -54,8 +54,8 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
     if (!top) {
       return t('none');
     }
-    const keys = errorClassKeys(top[0]);
-    return keys ? `${causes(keys.label)} · ${formatInt(top[1])}` : `${top[0]} · ${formatInt(top[1])}`;
+    const key = errorClassKeys(top[0]);
+    return key ? `${causes(key)} · ${formatInt(top[1])}` : `${top[0]} · ${formatInt(top[1])}`;
   })();
   const over = data.waste.over_provisioned;
   const misuse = data.waste.model_misuse;
@@ -72,7 +72,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
     >
       <Finding
         title={t('f1_title')}
-        description={t('f1_desc')}
         highlight={money(over?.savings_est_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(over?.requests ?? 0) },
@@ -82,7 +81,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f2_title')}
-        description={t('f2_desc')}
         highlight={money(misuse?.savings_est_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(misuse?.requests ?? 0) },
@@ -92,7 +90,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f3_title')}
-        description={t('f3_desc')}
         highlight={money(cached?.spend_usd ?? '0')}
         metrics={[
           { label: t('requests'), value: formatInt(cached?.requests ?? 0) },
@@ -101,7 +98,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f4_title')}
-        description={t('f4_desc')}
         highlight={money(data.savings.total)}
         metrics={[
           { label: t('router'), value: money(data.savings.router) },
@@ -112,7 +108,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f5_title')}
-        description={t('f5_desc')}
         highlight={money(data.cost)}
         metrics={[
           { label: t('top_model'), value: named(data.top.model) },
@@ -122,7 +117,6 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f6_title')}
-        description={t('f6_desc')}
         highlight={pct(data.quality.errorRate)}
         metrics={[
           { label: t('truncated_rate'), value: pct(data.quality.truncatedRate) },

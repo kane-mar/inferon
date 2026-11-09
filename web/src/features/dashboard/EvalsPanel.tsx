@@ -68,7 +68,6 @@ export const EvalsPanel = (props: {
       {/* Gold sets */}
       <section className="space-y-2">
         <h3 className="text-sm font-medium">{t('gold_sets')}</h3>
-        <p className="text-xs text-muted-foreground">{t('gold_help')}</p>
         {props.goldSets.length === 0
           ? <p className="text-sm text-muted-foreground">{t('no_gold')}</p>
           : (
@@ -116,7 +115,6 @@ export const EvalsPanel = (props: {
       {/* One run */}
       <section className="space-y-2 border-t pt-4">
         <h3 className="text-sm font-medium">{t('run_a_model')}</h3>
-        <p className="text-xs text-muted-foreground">{t('run_help')}</p>
         {props.canEdit && (
           <form
             className="flex flex-wrap items-end gap-2"
@@ -194,7 +192,6 @@ export const EvalsPanel = (props: {
       {/* The gate */}
       <section className="space-y-2 border-t pt-4">
         <h3 className="text-sm font-medium">{t('regression_gate')}</h3>
-        <p className="text-xs text-muted-foreground">{t('gate_help')}</p>
         {props.canEdit && finished.length >= 2 && (
           <form
             className="flex flex-wrap items-end gap-2"

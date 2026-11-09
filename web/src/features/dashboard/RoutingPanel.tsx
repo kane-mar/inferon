@@ -63,7 +63,6 @@ export const RoutingPanel = (props: { data: RoutingResponse; modelIds: string[] 
     <div className="space-y-4">
       {error && <p className="text-sm text-destructive">{error}</p>}
       <p className="text-sm text-muted-foreground">{t('help')}</p>
-      <p className="text-sm text-muted-foreground">{t('triggers_help')}</p>
 
       <ol className="space-y-2">
         <li className="

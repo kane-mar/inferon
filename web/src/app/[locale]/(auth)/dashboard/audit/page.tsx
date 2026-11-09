@@ -81,7 +81,6 @@ export default async function AuditPage(props: {
     <>
       <PageHeader
         title={t('title_bar')}
-        description={t('title_bar_description', { days })}
         action={(
           <div className="flex items-center gap-3">
             <AutoRefresh label={t('live')} />

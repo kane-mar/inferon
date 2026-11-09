@@ -93,7 +93,7 @@ export default async function SettingsPage(props: {
 
   return (
     <>
-      <PageHeader title={t('title_bar')} description={t('title_bar_description')} />
+      <PageHeader title={t('title_bar')} />
 
       <div className="
         mt-6 grid grid-cols-1 items-start gap-4
@@ -117,12 +117,10 @@ export default async function SettingsPage(props: {
           </Card>
 
           <Card title={t('keys_title')} icon="lock">
-            <p className="mb-4 text-sm text-muted-foreground">{t('keys_help')}</p>
             <KeysPanel data={keysData} />
           </Card>
 
           <Card title={t('members_title')} icon="store">
-            <p className="mb-4 text-sm text-muted-foreground">{t('members_help')}</p>
             <MembersPanel data={membersData} />
           </Card>
         </div>

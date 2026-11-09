@@ -87,7 +87,6 @@ export default async function SpendReportPage(props: {
     <>
       <PageHeader
         title={heading('title_bar')}
-        description={heading('title_bar_description', { days })}
         action={(
           <div className="flex items-center gap-3">
             <Suspense fallback={null}>
@@ -257,24 +256,20 @@ export default async function SpendReportPage(props: {
               icon="latency"
               value={money(sessions.distribution.p50_cost_usd)}
               window={days}
-              definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_p95')}
               icon="latency"
               value={money(sessions.distribution.p95_cost_usd)}
               window={days}
-              definition={heading('transactions_help')}
             />
             <KpiCard
               label={heading('transactions_count')}
               icon="activity"
               value={formatInt(sessions.distribution.sessions)}
               window={days}
-              definition={heading('transactions_help')}
             />
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">{heading('transactions_help')}</p>
           {sessions.sessions.length > 0 && (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full">

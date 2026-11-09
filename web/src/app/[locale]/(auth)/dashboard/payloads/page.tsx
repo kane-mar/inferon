@@ -3,6 +3,7 @@
 
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
+import { DocsLink } from '@/components/DocsLink';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
@@ -61,7 +62,6 @@ export default async function PayloadsPage(props: {
     <>
       <PageHeader
         title={t('title_bar')}
-        description={t('title_bar_description')}
         action={<WindowChip days={days} />}
       />
 
@@ -75,7 +75,7 @@ export default async function PayloadsPage(props: {
           icon="store"
           value={capture.enabled ? t('on') : t('off')}
           tone={capture.enabled ? 'good' : undefined}
-          hint={capture.enabled
+          verdict={capture.enabled
             ? t('retention', { days: capture.retention_days })
             : t('capture_off_help')}
         />
@@ -84,8 +84,7 @@ export default async function PayloadsPage(props: {
           icon="lint"
           value={coverage(lint.preflight.scanned, data.requests)}
           window={days}
-          definition={t('lint_coverage_help')}
-          hint={t('lint_scanned', {
+          verdict={t('lint_scanned', {
             scanned: formatInt(lint.preflight.scanned),
             total: formatInt(data.requests),
           })}
@@ -95,16 +94,14 @@ export default async function PayloadsPage(props: {
           icon="warning"
           value={formatInt(lint.preflight.findings)}
           window={days}
-          definition={t('lint_findings_help')}
-          hint={money(lint.preflight.wasted_usd)}
+          verdict={money(lint.preflight.wasted_usd)}
         />
         <KpiCard
           label={t('prune_removed')}
           icon="prune"
           value={formatInt(pruning.rewritten)}
           window={days}
-          definition={t('prune_removed_help')}
-          hint={pruning.policy?.enabled ? t('prune_on') : t('prune_off')}
+          verdict={pruning.policy?.enabled ? t('prune_on') : t('prune_off')}
         />
       </div>
 
@@ -114,8 +111,10 @@ export default async function PayloadsPage(props: {
       "
       >
         {/* Capture and retention */}
-        <Card title={t('capture')} icon="store">
-          <p className="mb-3 text-xs text-muted-foreground">{t('capture_help')}</p>
+        <Card
+          title={t('capture')}
+          action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
+          icon="store">
           <State
             label={t('storing')}
             value={capture.enabled ? t('on') : t('off')}
@@ -134,8 +133,10 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* The lint */}
-        <Card title={t('lint')} icon="lint">
-          <p className="mb-3 text-xs text-muted-foreground">{t('lint_help')}</p>
+        <Card
+          title={t('lint')}
+          action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
+          icon="lint">
           <State
             label={t('lint_state')}
             value={lint.enabled ? t('on') : t('off')}
@@ -176,8 +177,10 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* Pruning */}
-        <Card title={t('pruning')} icon="prune">
-          <p className="mb-3 text-xs text-muted-foreground">{t('pruning_help')}</p>
+        <Card
+          title={t('pruning')}
+          action={<DocsLink guide="config/08-pruning-and-comparison" label={t('docs')} />}
+          icon="prune">
           {pruning.policy == null || !pruning.policy.enabled
             ? <p className="text-sm text-muted-foreground">{t('pruning_off')}</p>
             : (
@@ -219,8 +222,10 @@ export default async function PayloadsPage(props: {
         </Card>
 
         {/* PII */}
-        <Card title={t('pii')} icon="pii">
-          <p className="mb-3 text-xs text-muted-foreground">{t('pii_help')}</p>
+        <Card
+          title={t('pii')}
+          action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
+          icon="pii">
           <State
             label={t('detection')}
             value={pii.detection ? t('on') : t('off')}

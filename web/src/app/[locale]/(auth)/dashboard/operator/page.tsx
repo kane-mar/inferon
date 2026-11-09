@@ -69,7 +69,6 @@ export default async function OperatorPage(props: OperatorPageProps) {
       <div className="flex items-start justify-between gap-4">
         <PageHeader
           title={t('title_bar')}
-          description={t('title_bar_description', { days })}
         />
         <WindowChip days={days} />
       </div>
@@ -79,9 +78,9 @@ export default async function OperatorPage(props: OperatorPageProps) {
         sm:grid-cols-3
       "
       >
-        <KpiCard label={t('requests')} icon="activity" value={String(summary.requests)} unit={t('requests_unit')} window={days} definition={t('requests_help')} />
-        <KpiCard label={t('errors')} icon="warning" value={String(summary.errors)} unit={t('requests_unit')} window={days} definition={t('errors_help')} />
-        <KpiCard label={t('total_cost')} icon="cost" value={money(summary.total_cost_usd)} window={days} definition={t('total_cost_help')} />
+        <KpiCard label={t('requests')} icon="activity" value={String(summary.requests)} unit={t('requests_unit')} window={days} />
+        <KpiCard label={t('errors')} icon="warning" value={String(summary.errors)} unit={t('requests_unit')} window={days} />
+        <KpiCard label={t('total_cost')} icon="cost" value={money(summary.total_cost_usd)} window={days} />
       </div>
 
       <div className="
@@ -200,13 +199,13 @@ export default async function OperatorPage(props: OperatorPageProps) {
                         >
                           <td className="py-2">
                             {(() => {
-                              const keys = guardOutcomeKeys(outcome.outcome);
-                              if (!keys) {
+                              const key = guardOutcomeKeys(outcome.outcome);
+                              if (!key) {
                                 return outcome.outcome;
                               }
                               return (
                                 <div>
-                                  <div>{outcomes(keys.label)}</div>
+                                  <div>{outcomes(key)}</div>
                                   <code className="text-xs text-muted-foreground">
                                     {outcome.outcome}
                                   </code>

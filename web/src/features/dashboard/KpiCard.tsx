@@ -12,7 +12,6 @@ import {
   toneGlyph,
   toneGlyphClass,
 } from '@/libs/reportTone';
-import { kpiCaption } from '@/libs/kpiCaption';
 import { cn } from '@/utils/Helpers';
 import { Icon } from './Icon';
 
@@ -24,9 +23,10 @@ import { Icon } from './Icon';
  * `tone` highlights a value that needs attention — the card is not tinted, only
  * the value and its glyph, so colour stays a highlight rather than decoration.
  *
- * ITEM-124/125: the label is sans and sentence case at 15px, and the definition is
- * printed on the card. It used to live in a `title` attribute, which a touch device
- * never shows and nobody hovers to discover — the page has to explain itself.
+ * ITEM-138: the card states the number and nothing else. A definition on a card is
+ * prose on a screen: the label carries the scope (payload, window), the value and
+ * unit carry the quantity, and anything that still needs a sentence is a
+ * `DocsLink` in the section header instead.
  */
 export const KpiCard = (props: {
   label: string;
@@ -37,11 +37,10 @@ export const KpiCard = (props: {
   unit?: string;
   /** The days this value covers — stated on the card, never inferred. */
   window?: number;
-  /** What the metric means; falls back to the hint. Shown on hover. */
-  definition?: string;
   delta?: number | null;
   goodWhen?: 'up' | 'down';
-  hint?: string;
+  /** A verdict, not an explanation: "over the claim", "no traffic". */
+  verdict?: string;
   tone?: Tone;
 }) => {
   const delta = props.delta ?? null;
@@ -90,20 +89,11 @@ export const KpiCard = (props: {
           </span>
         )}
       </div>
-      {/* ITEM-125/127: the verdict and the definition are both printed — the
-          caller's line first, the explanation under it. */}
-      {kpiCaption(props).map((line, index) => (
-        <p
-          key={line}
-          className={cn(
-            'text-xs leading-relaxed',
-            index === 0 ? 'mt-2' : 'mt-1',
-            index > 0 && KPI_SUBTLE,
-          )}
-        >
-          {line}
-        </p>
-      ))}
+      {/* One short line, and only when it says something about the value itself.
+          ITEM-138: never a definition — that is what the docs link is for. */}
+      {props.verdict && (
+        <p className={cn('mt-2 text-xs', KPI_SUBTLE)}>{props.verdict}</p>
+      )}
     </div>
   );
 };

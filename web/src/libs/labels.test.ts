@@ -6,31 +6,33 @@ import en from '@/locales/en.json';
 import fr from '@/locales/fr.json';
 import {
   ERROR_CLASSES,
-  GUARD_OUTCOMES,
   errorClassKeys,
+  GUARD_OUTCOMES,
   guardOutcomeKeys,
   isErrorClass,
   isGuardOutcome,
 } from './labels';
 
 /**
- * ITEM-125: the screen explains itself. A code the backend stores must arrive as a
- * phrase plus a line of meaning in both locales — otherwise the reader is back to
- * reading the guides to understand their own dashboard.
+ * ITEM-125/138: a stored code arrives as a phrase in both locales, and the phrase
+ * has to stand alone. There is no second "line of meaning" on the screen any more;
+ * a term that needs one is a term that needs renaming.
  */
 describe('error class labels', () => {
-  it.each(ERROR_CLASSES)('has a phrase and a help line in en and fr: %s', (code) => {
+  it.each(ERROR_CLASSES)('has a phrase in en and fr: %s', (code) => {
     expect(en.ErrorClass[code]).toBeTruthy();
-    expect(en.ErrorClass[`${code}_help`]).toBeTruthy();
     expect((fr.ErrorClass as Record<string, string>)[code]).toBeTruthy();
-    expect((fr.ErrorClass as Record<string, string>)[`${code}_help`]).toBeTruthy();
   });
 
-  it('maps a known code to its two keys', () => {
-    expect(errorClassKeys('upstream_429')).toEqual({
-      label: 'upstream_429',
-      help: 'upstream_429_help',
-    });
+  it.each(ERROR_CLASSES)('keeps the phrase short enough to read at a glance: %s', (code) => {
+    // ITEM-138: the interface states, it does not explain. A phrase running into a
+    // clause is the start of a paragraph.
+    expect(en.ErrorClass[code]?.length ?? 0).toBeLessThanOrEqual(30);
+    expect((fr.ErrorClass as Record<string, string>)[code]?.length ?? 0).toBeLessThanOrEqual(36);
+  });
+
+  it('maps a known code to its key', () => {
+    expect(errorClassKeys('upstream_429')).toBe('upstream_429');
   });
 
   it('keeps an unknown code readable instead of blanking the cell', () => {
@@ -42,9 +44,7 @@ describe('error class labels', () => {
 describe('guard outcome labels', () => {
   it.each(GUARD_OUTCOMES)('has a phrase and a help line in en and fr: %s', (code) => {
     expect(en.Outcome[code]).toBeTruthy();
-    expect(en.Outcome[`${code}_help`]).toBeTruthy();
     expect((fr.Outcome as Record<string, string>)[code]).toBeTruthy();
-    expect((fr.Outcome as Record<string, string>)[`${code}_help`]).toBeTruthy();
   });
 
   it('rejects a value the backend does not write', () => {
