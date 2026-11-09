@@ -4,6 +4,7 @@
 import type { OperatorGuard } from '@/libs/InferonApi';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
+import { Adaptation } from '@/features/dashboard/Adaptation';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
@@ -88,6 +89,8 @@ export default async function OperatorPage(props: OperatorPageProps) {
         lg:grid-cols-2
       "
       >
+        <Adaptation tenants={tenants.tenants} auth={auth} />
+
         <Card title={t('engagement')} icon="activity">
           <div className="
             grid grid-cols-2 gap-3
@@ -206,7 +209,10 @@ export default async function OperatorPage(props: OperatorPageProps) {
                               return (
                                 <div>
                                   <div>{outcomes(key)}</div>
-                                  <code className="text-xs text-muted-foreground">
+                                  <code className="
+                                    text-xs text-muted-foreground
+                                  "
+                                  >
                                     {outcome.outcome}
                                   </code>
                                 </div>

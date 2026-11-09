@@ -268,7 +268,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/v1/dashboard/api/operator/policy/:tenant_id",
-            get(dashboard::operator_policy),
+            get(dashboard::operator_policy).put(dashboard::operator_policy_set),
         )
         .route(
             "/v1/dashboard/api/operator/policy/:tenant_id/freeze",

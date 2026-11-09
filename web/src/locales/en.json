@@ -220,7 +220,18 @@
     "fallback_rate": "Fallback share",
     "detected_at": "Detected",
     "no_data": "No data for this window yet.",
-    "requests_unit": "requests"
+    "requests_unit": "requests",
+    "adaptation": "Adaptation",
+    "workspace": "Workspace",
+    "threshold": "Router threshold",
+    "apply": "Apply",
+    "freeze": "Freeze",
+    "rollback": "Roll back",
+    "version": "Version",
+    "adapting": "Adapting",
+    "frozen": "Frozen",
+    "weights": "Provider weights",
+    "no_opinion": "No opinion"
   },
   "ProvidersPage": {
     "title_bar": "Providers",

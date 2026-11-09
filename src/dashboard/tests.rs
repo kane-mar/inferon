@@ -87,6 +87,17 @@
         builder.body(Body::from(body.to_string())).unwrap()
     }
 
+    fn put(uri: &str, key: Option<&str>, body: &str) -> axum::http::Request<Body> {
+        let mut builder = Request::builder()
+            .method("PUT")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(key) = key {
+            builder = builder.header("authorization", format!("Bearer {key}"));
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    }
+
     #[tokio::test]
     async fn operator_key_endpoints_gate_then_manage_keys() {
         // ITEM-034 AC2/AC3: the operator key API is gated like the other
@@ -2097,6 +2108,89 @@ async fn the_new_report_surfaces_are_session_scoped() {
             scoped.status(),
             axum::http::StatusCode::UNAUTHORIZED,
             "{uri} rejected a session"
+        );
+    }
+}
+
+/// ITEM-139: the adaptive loop is steerable by an operator, and a steer is a
+/// version like any other — auditable, reversible, and bounded.
+#[tokio::test]
+async fn an_operator_can_set_the_adaptive_policy() {
+    const TID: &str = "22222222-2222-2222-2222-222222222222";
+    let uri = format!("/v1/dashboard/api/operator/policy/{TID}");
+    let state = dashboard_state();
+    let store = state.policy_store.clone();
+
+    // A tenant key is not an operator.
+    let refused = crate::build_router(state.clone())
+        .oneshot(put(&uri, Some("sk-dashboard-dev"), r#"{"enabled":false}"#))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), axum::http::StatusCode::FORBIDDEN);
+
+    // A partial body changes only what it names.
+    let ok = crate::build_router(state.clone())
+        .oneshot(put(
+            &uri,
+            Some("op-secret"),
+            r#"{"router_threshold":0.4,"provider_weights":{"p1":0.6}}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), axum::http::StatusCode::OK);
+    let json: Value = body_json(ok).await;
+    assert_eq!(json["policy"]["router_threshold"], json!(0.4));
+    assert_eq!(json["policy"]["provider_weights"]["p1"], json!(0.6));
+    assert_eq!(json["policy"]["evidence"]["source"], json!("operator"));
+    let first_version = json["policy"]["version"].as_i64().expect("a version");
+
+    let tenant = uuid::Uuid::parse_str(TID).unwrap();
+    let second = crate::build_router(state.clone())
+        .oneshot(put(&uri, Some("op-secret"), r#"{"enabled":true}"#))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), axum::http::StatusCode::OK);
+    let json: Value = body_json(second).await;
+    // The threshold the operator set survived a body that did not mention it.
+    assert_eq!(json["policy"]["router_threshold"], json!(0.4));
+    assert_eq!(json["policy"]["provider_weights"]["p1"], json!(0.6));
+    assert!(json["policy"]["version"].as_i64().unwrap() > first_version);
+
+    // The loop reads it back, and a rollback still works on an operator version.
+    let active = store.active(tenant).await.unwrap().expect("active policy");
+    assert_eq!(active.router_threshold, Some(0.4));
+    let rolled = crate::build_router(state)
+        .oneshot(post(
+            &format!("/v1/dashboard/api/operator/policy/{TID}/rollback/{first_version}"),
+            Some("op-secret"),
+            "",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rolled.status(), axum::http::StatusCode::OK);
+}
+
+/// ITEM-139: out-of-range values are refused, never clamped — a number the
+/// operator did not type is a number they cannot debug.
+#[tokio::test]
+async fn an_out_of_range_policy_value_is_refused() {
+    const TID: &str = "22222222-2222-2222-2222-222222222222";
+    let uri = format!("/v1/dashboard/api/operator/policy/{TID}");
+    let state = dashboard_state();
+
+    for body in [
+        r#"{"router_threshold":0.95}"#,
+        r#"{"router_threshold":-0.1}"#,
+        r#"{"provider_weights":{"p1":1.5}}"#,
+    ] {
+        let response = crate::build_router(state.clone())
+            .oneshot(put(&uri, Some("op-secret"), body))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "refused: {body}"
         );
     }
 }

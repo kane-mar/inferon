@@ -220,7 +220,18 @@
     "fallback_rate": "Part de repli",
     "detected_at": "Détecté",
     "no_data": "Aucune donnée pour cette fenêtre.",
-    "requests_unit": "requêtes"
+    "requests_unit": "requêtes",
+    "adaptation": "Adaptation",
+    "workspace": "Espace",
+    "threshold": "Seuil du routeur",
+    "apply": "Appliquer",
+    "freeze": "Figer",
+    "rollback": "Revenir en arrière",
+    "version": "Version",
+    "adapting": "En adaptation",
+    "frozen": "Figé",
+    "weights": "Poids des fournisseurs",
+    "no_opinion": "Aucun avis"
   },
   "ProvidersPage": {
     "title_bar": "Fournisseurs",

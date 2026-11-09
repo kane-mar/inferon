@@ -739,6 +739,19 @@ export type OperatorTenantRow = {
   cost_usd: string;
 };
 
+/**
+ * ITEM-064/139: one version of the adaptive policy. `provider_weights` empty means
+ * "no opinion" — the static provider ordering applies. `evidence` is why this
+ * version exists (the loop's own reasoning, or the operator who set it).
+ */
+export type OperatorPolicy = {
+  version: number;
+  router_threshold: number | null;
+  provider_weights: Record<string, number>;
+  enabled: boolean;
+  evidence: Record<string, unknown>;
+};
+
 /** ITEM-062: operator engagement view — active tenants/keys, funnel, WoW. */
 export type OperatorActivation = {
   window_days: number;
@@ -1128,6 +1141,30 @@ export class InferonApi {
     return this.request('POST', '/v1/dashboard/api/config', body, { cookie });
   }
 
+  /**
+   * ITEM-139: the adaptive loop an operator steers. `policy` is the active
+   * version; a change publishes a new one with `evidence.source = "operator"`.
+   */
+  operatorPolicy(tenantId: string, auth: Auth): Promise<{ tenant_id: string; policy: OperatorPolicy | null }> {
+    return this.request('GET', `/v1/dashboard/api/operator/policy/${tenantId}`, undefined, auth);
+  }
+
+  operatorPolicySet(
+    tenantId: string,
+    body: { enabled?: boolean; router_threshold?: number; provider_weights?: Record<string, number> },
+    auth: Auth,
+  ): Promise<{ ok: boolean; policy: OperatorPolicy }> {
+    return this.request('PUT', `/v1/dashboard/api/operator/policy/${tenantId}`, body, auth);
+  }
+
+  operatorPolicyFreeze(tenantId: string, auth: Auth): Promise<{ ok: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/operator/policy/${tenantId}/freeze`, {}, auth);
+  }
+
+  operatorPolicyRollback(tenantId: string, version: number, auth: Auth): Promise<{ ok: boolean }> {
+    return this.request('POST', `/v1/dashboard/api/operator/policy/${tenantId}/rollback/${version}`, {}, auth);
+  }
+
   operatorSummary(days: number, auth: Auth): Promise<Summary> {
     return this.request('GET', `/v1/dashboard/api/operator/summary${windowQuery(days)}`, undefined, auth);
   }
@@ -1153,7 +1190,7 @@ export class InferonApi {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     body?: unknown,
     auth: Auth = {},

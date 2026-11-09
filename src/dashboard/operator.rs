@@ -245,6 +245,102 @@ pub async fn operator_policy_rollback(
     }
 }
 
+/// What an operator may set on the adaptive loop (ITEM-139).
+///
+/// Every field is optional: a request changes what it names and leaves the rest
+/// as the current policy has them. That matters because the loop itself publishes
+/// versions — an operator changing the threshold must not silently wipe the
+/// weights the loop learned yesterday.
+#[derive(serde::Deserialize)]
+pub struct PolicyBody {
+    /// `None` = leave as is. `Some(false)` is the kill switch.
+    enabled: Option<bool>,
+    /// The router threshold, in the policy's own bounds.
+    router_threshold: Option<f64>,
+    /// Provider id -> weight. An empty map means "no opinion", which is a real
+    /// setting: the static ordering applies again.
+    provider_weights: Option<std::collections::BTreeMap<String, f64>>,
+}
+
+/// PUT /v1/dashboard/api/operator/policy/:tenant_id — set the adaptive loop.
+///
+/// The loop adapts from telemetry on its own; this is how a human steers it. A
+/// change is a new version with `evidence.source = "operator"`, so the history
+/// stays auditable and `rollback` can undo a bad steer the same way it undoes a
+/// bad automatic step.
+pub async fn operator_policy_set(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(tenant_id): Path<uuid::Uuid>,
+    Json(body): Json<PolicyBody>,
+) -> Response {
+    if let Err(resp) = operator_or(&state, &headers).await {
+        return resp;
+    }
+    // `Caller` carries the tenant and the operator flag, not a login: the settings
+    // audit (ITEM-108) is where "who" is recorded in full.
+    let operator = "operator";
+    if let Some(threshold) = body.router_threshold {
+        // Refuse rather than clamp: a silently different number than the one that
+        // was typed is the kind of surprise an operator cannot debug.
+        if !(crate::policy::MIN_THRESHOLD..=crate::policy::MAX_THRESHOLD).contains(&threshold) {
+            return crate::json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_threshold",
+                "router threshold must be between 0 and 0.9",
+            );
+        }
+    }
+    if let Some(weights) = &body.provider_weights {
+        if weights.values().any(|w| !w.is_finite() || *w < 0.0 || *w > 1.0) {
+            return crate::json_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_weight",
+                "provider weights must be between 0 and 1",
+            );
+        }
+    }
+
+    let current = match state.policy_store.active(tenant_id).await {
+        Ok(policy) => policy,
+        Err(e) => return internal(e.to_string()),
+    };
+    let next = crate::policy::Policy {
+        version: 0,
+        router_threshold: body
+            .router_threshold
+            .or_else(|| current.as_ref().and_then(|p| p.router_threshold)),
+        provider_weights: body.provider_weights.unwrap_or_else(|| {
+            current
+                .as_ref()
+                .map(|p| p.provider_weights.clone())
+                .unwrap_or_default()
+        }),
+        prune: current.as_ref().and_then(|p| p.prune.clone()),
+        evidence: json!({
+            "source": "operator",
+            "by": operator,
+            "at": chrono_free_now(),
+        }),
+        enabled: body.enabled.unwrap_or(true),
+    };
+    match state.policy_store.publish(tenant_id, next).await {
+        Ok(policy) => {
+            state.hotpath.invalidate(tenant_id);
+            json_ok(json!({ "ok": true, "policy": policy }))
+        }
+        Err(e) => internal(e.to_string()),
+    }
+}
+
+/// Seconds since the epoch, as the operator console records them.
+fn chrono_free_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.
 pub async fn operator_summary(
     State(state): State<Arc<AppState>>,
