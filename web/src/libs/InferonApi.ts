@@ -200,6 +200,21 @@ export type RuntimeReport = {
     p95_us: number | null;
     prompt_tokens_p50: number | null;
     body_p50_ms: number | null;
+    /**
+     * ITEM-137: this band bucket by bucket, enough to see a drift. `drift` is
+     * 'calm' | 'watch' | 'regression' when the bucket is comparable to the band's
+     * baseline, 'moved' when the payload changed too much to compare, and null
+     * when there is nothing to say.
+     */
+    points: {
+      bucket: string;
+      requests: number;
+      p50_us: number | null;
+      p95_us: number | null;
+      prompt_tokens_p50: number | null;
+      body_p50_ms: number | null;
+      drift: 'calm' | 'watch' | 'regression' | 'moved' | null;
+    }[];
   }[];
   overhead: {
     samples: number;

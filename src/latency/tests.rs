@@ -95,3 +95,38 @@ fn every_band_has_a_contiguous_bound() {
     }
     assert_eq!(previous, None, "the last band is open-ended");
 }
+
+#[test]
+fn a_band_that_slows_at_the_same_payload_is_drifting() {
+    // ITEM-137: the shape of a real regression — same work, more time.
+    assert_eq!(drift(Some(1_000), Some(1_100), Some(200_000), Some(205_000)), Some(Drift::Calm));
+    assert_eq!(drift(Some(1_000), Some(1_300), Some(200_000), Some(205_000)), Some(Drift::Watch));
+    assert_eq!(drift(Some(1_000), Some(1_600), Some(200_000), Some(205_000)), Some(Drift::Regression));
+}
+
+#[test]
+fn a_band_that_slows_because_the_prompts_grew_is_not_drifting() {
+    // The payload moved 40%: these are different requests, and calling the
+    // second one a regression is the misreport the bands exist to prevent.
+    assert_eq!(drift(Some(1_000), Some(9_000), Some(100_000), Some(140_000)), Some(Drift::Moved));
+    // Shrinking counts too — a smaller prompt that is slower *is* worth a look,
+    // but it is not comparable to the baseline either.
+    assert_eq!(drift(Some(1_000), Some(9_000), Some(300_000), Some(100_000)), Some(Drift::Moved));
+}
+
+#[test]
+fn the_boundary_of_comparability_is_inclusive() {
+    // Exactly 20% is still comparable, a hair over is not.
+    assert_eq!(drift(Some(1_000), Some(1_000), Some(100_000), Some(120_000)), Some(Drift::Calm));
+    assert_eq!(drift(Some(1_000), Some(1_000), Some(100_000), Some(121_000)), Some(Drift::Moved));
+}
+
+#[test]
+fn missing_numbers_are_never_a_verdict() {
+    // No baseline, no bucket value, no token counts: say nothing.
+    assert_eq!(drift(None, Some(1_000), Some(100), Some(100)), None);
+    assert_eq!(drift(Some(1_000), None, Some(100), Some(100)), None);
+    assert_eq!(drift(Some(0), Some(1_000), Some(100), Some(100)), None);
+    assert_eq!(drift(Some(1_000), Some(1_500), None, Some(100)), Some(Drift::Moved));
+    assert_eq!(drift(Some(1_000), Some(1_500), Some(100), None), Some(Drift::Moved));
+}

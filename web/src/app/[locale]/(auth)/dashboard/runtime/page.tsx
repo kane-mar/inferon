@@ -17,11 +17,19 @@ import { Status } from '@/features/dashboard/ReportStatus';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { driftCellClass, driftMark } from '@/libs/bandDrift';
 import { formatInt } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { metricTone, THRESHOLDS } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 import { cn } from '@/utils/Helpers';
+
+/** `2026-11-09 06` -> `09 Nov 06h`, short enough for a column of them. */
+const shortBucket = (bucket: string): string => {
+  const [date, hour] = bucket.split(' ');
+  const [, month, day] = (date ?? '').split('-');
+  return month && day ? `${day} ${month} ${hour ?? ''}h`.trim() : bucket;
+};
 
 /** Table column classes, the same pair every other report page uses. */
 const LEFT = `${HEAD} text-left`;
@@ -51,6 +59,8 @@ export default async function RuntimePage(props: {
   // ITEM-136: the claim's own basis is the small-prompt band. Everything the
   // headline says about the contract is read from that band, never from a blend
   // that averages a 4 KB prompt with a 1.2 MB one.
+  // The series' own buckets: every band reports the same set, so one union does.
+  const buckets = [...new Set(bands.flatMap(row => row.points.map(p => p.bucket)))].sort();
   const small = {
     band: bands.find(b => b.max_tokens === contract.basis.max_tokens)
       ?? { band: 'small', max_tokens: contract.basis.max_tokens, requests: 0, under_1ms_rate: null, p50_us: null, p95_us: null, prompt_tokens_p50: null, body_p50_ms: null },
@@ -209,6 +219,90 @@ export default async function RuntimePage(props: {
           <p className="mt-3 text-xs text-muted-foreground">{t('bands_note')}</p>
         </Card>
       </div>
+
+      {/* ITEM-137: the same bands over time. A band that darkens while its payload
+          stays put is a regression; a band whose payload grew is bigger prompts.
+          The two are told apart server-side and drawn differently here. */}
+      {bands.some(row => row.points.length > 1) && (
+        <div className="mt-4">
+          <Card title={t('drift_title')} icon="activity">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-muted-foreground">
+                  <th className={LEFT}>{t('band')}</th>
+                  {buckets.map(bucket => (
+                    <th key={bucket} className={RIGHT}>{shortBucket(bucket)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bands.map(row => (
+                  <tr
+                    key={row.band}
+                    className="
+                      border-b
+                      last:border-0
+                    "
+                  >
+                    <td className={CELL}>
+                      <span className="font-medium">{t(`band_${row.band}`)}</span>
+                    </td>
+                    {buckets.map((bucket) => {
+                      const point = row.points.find(p => p.bucket === bucket);
+                      if (!point) {
+                        return (
+                          <td
+                            key={bucket}
+                            className={cn(RIGHT, `text-muted-foreground`)}
+                          >
+                            ·
+                          </td>
+                        );
+                      }
+                      return (
+                        <td key={bucket} className={cn(RIGHT, driftCellClass(point.drift))}>
+                          <span>{us(point.p50_us)}</span>
+                          {driftMark(point.drift) && (
+                            <span aria-hidden className="ml-1">{driftMark(point.drift)}</span>
+                          )}
+                          <span className="block text-xs opacity-70">
+                            {formatInt(point.prompt_tokens_p50 ?? 0)}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-3 text-xs text-muted-foreground">{t('drift_note')}</p>
+            <ul className="
+              mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground
+            "
+            >
+              <li>
+                {driftMark('regression')}
+                {' '}
+                {t('drift_regression')}
+              </li>
+              <li>
+                {driftMark('watch')}
+                {' '}
+                {t('drift_watch')}
+              </li>
+              <li>
+                {driftMark('moved')}
+                {' '}
+                {t('drift_moved')}
+              </li>
+              <li>
+                ·
+                {t('drift_none')}
+              </li>
+            </ul>
+          </Card>
+        </div>
+      )}
 
       {/* End to end, so the proxy's share is visible. */}
       <div className="mt-4">

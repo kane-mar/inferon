@@ -98,7 +98,7 @@ pub async fn runtime(
     let (total_p50, total_p95, total_p99, ttft_p50, ttft_p95) =
         latency(&state, tenant_id, days, offset).await?;
     let models = model_rows(&state, tenant_id, days, offset).await?;
-    let bands = bands(&state, tenant_id, days, offset).await?;
+    let bands = bands(&state, tenant_id, days, offset, &step).await?;
     let (since, pre_era) = measured_since(&state, tenant_id).await?;
     let (bucket_expr, buckets, matrix) = heatmap(&state, tenant_id, days, &step).await?;
 
@@ -226,10 +226,19 @@ async fn contract_verdict(
     Ok(crate::latency::verdict(samples, p50, p95).with_payload(prompt_tokens_p50))
 }
 
-/// ITEM-136: `(requests, under_1ms, p50_us, p95_us, prompt_tokens_p50,
-/// body_p50_ms)` for one payload band; the band's name comes from the constant,
-/// not the database.
-type BandRow = (i64, i64, Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+/// ITEM-136/137: `(bucket, requests, under_1ms, p50_us, p95_us, prompt_tokens_p50,
+/// body_p50_ms)` for one bucket of one payload band. `bucket` is NULL on the row
+/// that carries the whole band — the baseline the drift is measured against. The
+/// band's name comes from the constant, not the database.
+type BandRow = (
+    Option<String>,
+    i64,
+    i64,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
 
 /// Gateway time per payload band, with the client's upload beside it.
 ///
@@ -243,13 +252,18 @@ async fn bands(
     tenant_id: uuid::Uuid,
     days: i64,
     offset: i64,
+    step: &str,
 ) -> Result<Vec<Value>, Response> {
     let mut out = Vec::new();
     for (index, band) in BANDS.iter().enumerate() {
         let (lower, upper) = band_bounds(index);
-        let row: BandRow = stored(
-            sqlx::query_as(
-                "SELECT COUNT(*),
+        // One round trip per band: `GROUPING SETS ((bucket), ())` yields the
+        // per-bucket rows and the band total together, so the baseline a drift is
+        // measured against is the same measurement as the summary above it.
+        let rows: Vec<BandRow> = stored(
+            sqlx::query_as(&format!(
+                "SELECT to_char(date_trunc('{step}', created_at), 'YYYY-MM-DD HH24') AS bucket,
+                    COUNT(*),
                     COUNT(*) FILTER (WHERE proxy_us < 1000),
                     round(percentile_cont(0.5) WITHIN GROUP (ORDER BY proxy_us))::bigint,
                     round(percentile_cont(0.95) WITHIN GROUP (ORDER BY proxy_us))::bigint,
@@ -262,22 +276,62 @@ async fn bands(
                    AND proxy_us IS NOT NULL
                    AND body_ms IS NOT NULL
                    AND prompt_tokens >= $4
-                   AND ($5::bigint IS NULL OR prompt_tokens <= $5)",
-            )
+                   AND ($5::bigint IS NULL OR prompt_tokens <= $5)
+                 GROUP BY GROUPING SETS ((1), ())
+                 ORDER BY 1 NULLS FIRST",
+                step = crate::heatmap::bucket_expr(step)
+            ))
             .bind(tenant_id)
             .bind(days)
             .bind(offset)
             .bind(lower)
             .bind(upper)
-            .fetch_one(&state.db)
+            .fetch_all(&state.db)
             .await,
         )?;
-        let (requests, under_1ms, p50_us, p95_us, tokens, upload) = row;
-        // An empty band is not a zero: say nothing rather than print a healthy
-        // 0 ms for traffic nobody sent.
+
+        let mut baseline: Option<BandRow> = None;
+        let mut points = Vec::new();
+        for row in rows {
+            if row.0.is_none() {
+                baseline = Some(row);
+            } else {
+                points.push(row);
+            }
+        }
+        let Some((
+            _,
+            requests,
+            under_1ms,
+            p50_us,
+            p95_us,
+            tokens,
+            upload,
+        )) = baseline
+        else {
+            // No row at all: the band carried no traffic. An empty band is not a
+            // zero — say nothing rather than print a healthy 0 ms for nobody.
+            continue;
+        };
         if requests == 0 {
             continue;
         }
+        let series: Vec<Value> = points
+            .into_iter()
+            .map(|(bucket, requests, _, p50, p95, bucket_tokens, upload)| {
+                // ITEM-137: is this bucket a regression, or did the prompt grow?
+                let kind = crate::latency::drift(p50_us, p50, tokens, bucket_tokens);
+                json!({
+                    "bucket": bucket,
+                    "requests": requests,
+                    "p50_us": p50,
+                    "p95_us": p95,
+                    "prompt_tokens_p50": tokens,
+                    "body_p50_ms": upload,
+                    "drift": kind.map(|kind| kind.label()),
+                })
+            })
+            .collect();
         out.push(json!({
             "band": band.label,
             "max_tokens": band.max_tokens,
@@ -287,10 +341,12 @@ async fn bands(
             "p95_us": p95_us,
             "prompt_tokens_p50": tokens,
             "body_p50_ms": upload,
+            "points": series,
         }));
     }
     Ok(out)
 }
+
 
 /// When this tenant's traffic started being measured by the current clock
 /// (ITEM-135), and how much traffic the report now excludes as a result.

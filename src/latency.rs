@@ -69,6 +69,78 @@ pub fn band_bounds(index: usize) -> (i64, Option<i64>) {
     (lower, BANDS[index].max_tokens)
 }
 
+/// ITEM-137: how far a bucket's gateway time may move before it is worth a look,
+/// as a multiple of that band's own baseline.
+pub const DRIFT_WATCH: f64 = 1.25;
+pub const DRIFT_REGRESSION: f64 = 1.50;
+/// How much the payload may move and still be compared to the baseline. Beyond
+/// this the two numbers describe different work, so calling one slower than the
+/// other would be the same mistake the payless report made: a bigger prompt costs
+/// more, and that is not a regression.
+pub const PAYLOAD_TOLERANCE: f64 = 0.20;
+
+/// What a bucket's gateway time says, given the payload it was measured at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drift {
+    /// Within the watch band of the baseline.
+    Calm,
+    /// 1.25×–1.5× the baseline — worth noticing, not yet a fault.
+    Watch,
+    /// At least 1.5× the baseline at a comparable payload.
+    Regression,
+    /// The payload moved too much to compare; the number changed because the
+    /// work changed. Not a verdict either way.
+    Moved,
+}
+
+impl Drift {
+    pub fn label(self) -> &'static str {
+        match self {
+            Drift::Calm => "calm",
+            Drift::Watch => "watch",
+            Drift::Regression => "regression",
+            Drift::Moved => "moved",
+        }
+    }
+}
+
+/// Classify one bucket against its band's baseline.
+///
+/// The payload check comes first on purpose: a band whose prompts grew is *not*
+/// drifting, and saying it is would send somebody looking for a proxy regression
+/// that is really a change in traffic. Missing token counts are treated as
+/// incomparable — guessing there is how a report lies.
+pub fn drift(
+    baseline_us: Option<i64>,
+    bucket_us: Option<i64>,
+    baseline_tokens: Option<i64>,
+    bucket_tokens: Option<i64>,
+) -> Option<Drift> {
+    let (Some(baseline), Some(bucket)) = (baseline_us, bucket_us) else {
+        return None;
+    };
+    if baseline <= 0 {
+        return None;
+    }
+    let comparable = match (baseline_tokens, bucket_tokens) {
+        (Some(base), Some(bucket)) if base > 0 => {
+            ((bucket as f64 - base as f64) / base as f64).abs() <= PAYLOAD_TOLERANCE
+        }
+        _ => false,
+    };
+    if !comparable {
+        return Some(Drift::Moved);
+    }
+    let ratio = bucket as f64 / baseline as f64;
+    Some(if ratio >= DRIFT_REGRESSION {
+        Drift::Regression
+    } else if ratio >= DRIFT_WATCH {
+        Drift::Watch
+    } else {
+        Drift::Calm
+    })
+}
+
 /// One evaluation of the claim.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Verdict {

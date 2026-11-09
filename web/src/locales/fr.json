@@ -676,7 +676,13 @@
     "band_over": "plus de {tokens} tokens",
     "bands_note": "L’envoi est le temps médian que les clients passent à envoyer le corps. Il n’est jamais compté comme temps du relais : une liaison lente n’est pas un relais lent. Une tranche vide est masquée plutôt qu’affichée à zéro.",
     "upload_column": "Votre envoi, p50",
-    "era_note": "Les chiffres du relais ne comptent que les requêtes mesurées depuis le {since}, date à laquelle le chronomètre a commencé à partir du corps reçu. {count} requêtes antérieures sont exclues : leur chiffre incluait le temps d’envoi du client."
+    "era_note": "Les chiffres du relais ne comptent que les requêtes mesurées depuis le {since}, date à laquelle le chronomètre a commencé à partir du corps reçu. {count} requêtes antérieures sont exclues : leur chiffre incluait le temps d’envoi du client.",
+    "drift_title": "Temps du relais par taille de prompt, dans le temps",
+    "drift_note": "Chaque case est le p50 du relais pour une tranche horaire, avec la taille médiane du prompt en dessous. Une teinte n’apparaît que si le payload est resté à moins de 20 % de la référence de la tranche : une tranche qui ralentit à payload constant dérive, une tranche dont les prompts grossissent coûte simplement plus cher.",
+    "drift_regression": "au moins 1,5× sa référence, même payload",
+    "drift_watch": "1,25–1,5× sa référence, même payload",
+    "drift_moved": "payload trop variable pour comparer",
+    "drift_none": "aucun trafic dans cette tranche"
   },
   "PayloadsPage": {
     "title_bar": "Charges utiles",

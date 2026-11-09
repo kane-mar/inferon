@@ -676,7 +676,13 @@
     "band_over": "over {tokens} tokens",
     "bands_note": "Upload is the median time clients spent sending the body. It is never counted as gateway time: a slow link is not a slow proxy. An empty band is hidden rather than shown as zero.",
     "upload_column": "Your upload, p50",
-    "era_note": "Gateway figures here count only requests measured since {since}, when the clock began starting from the completed body. {count} earlier requests are excluded: their figure included the time the client spent uploading."
+    "era_note": "Gateway figures here count only requests measured since {since}, when the clock began starting from the completed body. {count} earlier requests are excluded: their figure included the time the client spent uploading.",
+    "drift_title": "Gateway time by prompt size, over time",
+    "drift_note": "Each cell is one bucket's gateway p50, with the median prompt size beneath it. A tint only appears when the payload stayed within 20% of that band's baseline: a band that slows at the same payload is drifting, and a band whose prompts grew simply costs more.",
+    "drift_regression": "at least 1.5× its baseline, same payload",
+    "drift_watch": "1.25–1.5× its baseline, same payload",
+    "drift_moved": "payload moved too much to compare",
+    "drift_none": "no traffic in this bucket"
   },
   "PayloadsPage": {
     "title_bar": "Payloads",
