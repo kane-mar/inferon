@@ -326,7 +326,10 @@ async fn bands(
                     "requests": requests,
                     "p50_us": p50,
                     "p95_us": p95,
-                    "prompt_tokens_p50": tokens,
+                    // The bucket's own payload, not the band's: this is the
+                    // number a reader compares to decide whether the payload
+                    // moved, so printing the baseline here would defeat the point.
+                    "prompt_tokens_p50": bucket_tokens,
                     "body_p50_ms": upload,
                     "drift": kind.map(|kind| kind.label()),
                 })
