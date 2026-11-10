@@ -160,7 +160,17 @@
     "attention_latency": "Answers start slowly",
     "attention_waste": "Spend you can win back",
     "attention_lint": "Wasted tokens found",
-    "attention_now": "now"
+    "attention_now": "now",
+    "spent": "Spent",
+    "saved": "Saved",
+    "prevented": "Prevented",
+    "by_router": "router",
+    "by_fallback": "fallback",
+    "by_cache": "cache",
+    "by_prune": "prune",
+    "by_budget": "budget cap",
+    "by_rate_limit": "rate limit",
+    "by_downgrade": "85% downgrade"
   },
   "KeysPage": {
     "label_field": "Label",

@@ -393,14 +393,38 @@ pub(super) async fn plan_models(
     // ITEM-016: the budget breaker wins over the router and rejects before any
     // upstream call; ITEM-046/081: otherwise the router may downshift.
     let policy_threshold = policy.as_ref().and_then(|policy| policy.router_threshold);
+    // ITEM-140: the projection the budget breaker was measuring against, priced at
+    // the model the caller asked for. A refusal is the one case where "prevented"
+    // is the whole request.
+    let projected = crate::cost::projected_cost(
+        &meta.model,
+        crate::ratelimit::estimate_tokens(meta.payload_bytes()),
+        crate::cost::requested_max_tokens(&meta.raw_prompt),
+    );
     let chosen =
         match budget::check_budget(state, tenant_id, &meta.raw_prompt, policy_threshold).await {
             Ok(chosen) => chosen,
             Err(resp) => {
+                meta.prevented = Some((projected, "budget"));
                 trace_error(state, meta, tenant_id, started, 429, ErrorClass::Inferon4xx);
                 return Err(super::response::with_trace_id(resp, meta.id));
             }
         };
+    // The 85% zone served this on the cheap tier: the protection saved the delta
+    // between what was asked for and what was used.
+    if let Some(chosen) = &chosen {
+        if chosen.reason == budget::BUDGET_REASON {
+            let served = crate::cost::projected_cost(
+                &chosen.model,
+                crate::ratelimit::estimate_tokens(meta.payload_bytes()),
+                crate::cost::requested_max_tokens(&meta.raw_prompt),
+            );
+            let avoided = projected - served;
+            if avoided > rust_decimal::Decimal::ZERO {
+                meta.prevented = Some((avoided, "downgrade"));
+            }
+        }
+    }
     stages.mark("budget");
     let primary = override_primary(state, route.provider_id, meta, chosen).await;
     // ITEM-063: prefer a warm provider cache over a marginally cheaper miss.

@@ -160,7 +160,17 @@
     "attention_latency": "Les réponses démarrent lentement",
     "attention_waste": "Dépense récupérable",
     "attention_lint": "Tokens gaspillés",
-    "attention_now": "maintenant"
+    "attention_now": "maintenant",
+    "spent": "Dépensé",
+    "saved": "Économisé",
+    "prevented": "Évité",
+    "by_router": "routeur",
+    "by_fallback": "repli",
+    "by_cache": "cache",
+    "by_prune": "élagage",
+    "by_budget": "plafond",
+    "by_rate_limit": "limite de débit",
+    "by_downgrade": "palier 85 %"
   },
   "KeysPage": {
     "label_field": "Libellé",

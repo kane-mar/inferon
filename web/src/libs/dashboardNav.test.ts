@@ -28,7 +28,6 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
       '/dashboard/spend',
       '/dashboard/audit',
       '/dashboard/quality',
-      '/dashboard/runtime',
       '/dashboard/payloads',
       '/dashboard/datasets',
     ]);
@@ -62,8 +61,8 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
 });
 
 describe('activeSection — a page belongs to its deepest menu entry', () => {
-  const labels = (pathname: string): string[] => {
-    const menu = dashboardNav(true).map(section => ({
+  const labels = (pathname: string, isOperator = true): string[] => {
+    const menu = dashboardNav(isOperator).map(section => ({
       href: section.href,
       label: section.href,
       ...(section.children
@@ -80,9 +79,19 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
   };
 
   it('shows the report tabs on the dashboard pages', () => {
-    expect(labels('/dashboard')).toContain('/dashboard/runtime');
+    expect(labels('/dashboard')).toContain('/dashboard/payloads');
     expect(labels('/dashboard/spend')).toContain('/dashboard/payloads');
-    expect(labels('/dashboard/runtime')).toContain('/dashboard/payloads');
+  });
+
+  it('keeps Runtime with the operator, not in the customer tabs', () => {
+    // ITEM-140: the gateway's own microbenchmarks serve the honesty stance and the
+    // operator; a customer's dashboard is about their bill.
+    expect(labels('/dashboard')).not.toContain('/dashboard/runtime');
+    expect(labels('/dashboard/runtime', true)).toEqual([]);
+
+    const operator = dashboardNav(true).find(item => item.href === '/dashboard/operator');
+
+    expect(hrefs(operator?.children ?? [])).toEqual(['/dashboard/runtime']);
   });
 
   it('shows no tabs on providers, routing or the operator console', () => {

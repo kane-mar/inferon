@@ -237,6 +237,10 @@ pub(crate) async fn query_summary(
         fallback_savings,
         cache_affinity_requests,
     ) = summary_totals(state, tenant, days, offset).await?;
+    // ITEM-140: a second aggregate, because a 21-column tuple is past what
+    // `query_as` decodes and adding the derive would pull a feature in for one row.
+    let (prevented_usd, prevented_budget, prevented_rate_limit, prevented_downgrade, prune_savings) =
+        value_totals(state, tenant, days, offset).await?;
     // ITEM-056: tail latency percentiles (NULL when there are no samples).
     let (
         ttft_p50_ms,
@@ -288,7 +292,75 @@ pub(crate) async fn query_summary(
         // What the request would have cost on the model the client asked for
         // (model-substitution axis; cache is a separate axis above).
         "unreduced_cost_usd": (total_cost + savings).to_string(),
+        // ITEM-140: the value case, one object — what it cost, what was saved,
+        // what was stopped. Each saving names its source; "prevented" is an
+        // estimate and the page says so.
+        "value": value_case(
+            total_cost,
+            savings,
+            cache_savings,
+            prune_savings,
+            (router_savings, fallback_savings),
+            (prevented_usd, prevented_budget, prevented_rate_limit, prevented_downgrade),
+        ),
     })))
+}
+
+/// `(prevented, budget, rate_limit, downgrade, prune)` for the window.
+async fn value_totals(
+    state: &Arc<AppState>,
+    tenant: Option<uuid::Uuid>,
+    days: i64,
+    offset: i64,
+) -> Result<(Decimal, Decimal, Decimal, Decimal, Decimal), Response> {
+    let row: (Decimal, Decimal, Decimal, Decimal, Decimal) = stored(
+        sqlx::query_as(
+            "SELECT COALESCE(SUM(prevented_usd), 0),
+                    COALESCE(SUM(prevented_usd) FILTER (WHERE prevented_kind = 'budget'), 0),
+                    COALESCE(SUM(prevented_usd) FILTER (WHERE prevented_kind = 'rate_limit'), 0),
+                    COALESCE(SUM(prevented_usd) FILTER (WHERE prevented_kind = 'downgrade'), 0),
+                    COALESCE(SUM((prune_event->>'usd_saved_est')::numeric), 0)
+             FROM traces
+             WHERE ($1::uuid IS NULL OR tenant_id = $1)
+               AND created_at >= NOW() - (($2 + $3) * INTERVAL '1 day')
+               AND created_at < NOW() - ($3 * INTERVAL '1 day')",
+        )
+        .bind(tenant)
+        .bind(days)
+        .bind(offset)
+        .fetch_one(&state.db)
+        .await,
+    )?;
+    Ok(row)
+}
+
+/// ITEM-140: the value case as one object, built outside the `json!` macro — the
+/// nesting pushed it past the macro's recursion limit, and a named function reads
+/// better than an inline literal anyway.
+fn value_case(
+    spent: Decimal,
+    savings: Decimal,
+    cache_savings: Decimal,
+    prune_savings: Decimal,
+    (router, fallback): (Decimal, Decimal),
+    (prevented, budget, rate_limit, downgrade): (Decimal, Decimal, Decimal, Decimal),
+) -> serde_json::Value {
+    serde_json::json!({
+        "spent_usd": spent.to_string(),
+        "saved_usd": (savings + cache_savings + prune_savings).to_string(),
+        "saved_by": {
+            "router": router.to_string(),
+            "fallback": fallback.to_string(),
+            "cache": cache_savings.to_string(),
+            "prune": prune_savings.to_string(),
+        },
+        "prevented_usd": prevented.to_string(),
+        "prevented_by": {
+            "budget": budget.to_string(),
+            "rate_limit": rate_limit.to_string(),
+            "downgrade": downgrade.to_string(),
+        },
+    })
 }
 
 pub(crate) async fn query_by_model(

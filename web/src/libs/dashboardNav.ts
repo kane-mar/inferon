@@ -38,7 +38,8 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
       { href: '/dashboard/spend', labelKey: 'spend' },
       { href: '/dashboard/audit', labelKey: 'audit' },
       { href: '/dashboard/quality', labelKey: 'quality' },
-      { href: '/dashboard/runtime', labelKey: 'runtime' },
+      // ITEM-140: Runtime left the customer's tabs. Gateway microbenchmarks serve
+      // the honesty stance and the operator, not the person looking at their bill.
       { href: '/dashboard/payloads', labelKey: 'payloads' },
       { href: '/dashboard/datasets', labelKey: 'datasets' },
     ],
@@ -48,7 +49,12 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
   // Settings is one page: connect, keys, members and the workspace summary.
   { href: '/dashboard/settings', labelKey: 'settings' },
   ...(isOperator
-    ? [{ href: '/dashboard/operator', labelKey: 'operator' } satisfies DashboardNavSection]
+    ? [{
+      href: '/dashboard/operator',
+      labelKey: 'operator',
+      // The operator's own detail views, including the one that measures us.
+      children: [{ href: '/dashboard/runtime', labelKey: 'runtime' }],
+    } satisfies DashboardNavSection]
     : []),
 ];
 

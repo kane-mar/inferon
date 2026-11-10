@@ -23,6 +23,13 @@ const summary = (overrides: Partial<Summary> = {}): Summary => ({
   fallback_savings_usd: '0.000000',
   total_savings_usd: '0.020000',
   unreduced_cost_usd: '1.500000',
+  value: {
+    spent_usd: '0.500000',
+    saved_usd: '1.000000',
+    saved_by: { router: '0.4', fallback: '0.3', cache: '0.2', prune: '0.1' },
+    prevented_usd: '0.250000',
+    prevented_by: { budget: '0.15', rate_limit: '0.05', downgrade: '0.05' },
+  },
   cache_affinity_requests: 0,
   truncated: 0,
   truncated_rate: null,

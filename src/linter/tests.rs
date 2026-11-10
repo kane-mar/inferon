@@ -39,6 +39,8 @@
             proxy_ms: None,
                 proxy_us: None,
         body_ms: None,
+        prevented_usd: rust_decimal::Decimal::ZERO,
+        prevented_kind: None,
                 example_state: None,
                 example_reason: None,
                 completion_hash: None,

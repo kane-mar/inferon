@@ -31,6 +31,9 @@ pub(super) struct RequestMeta {
     /// ITEM-135: request start → body complete. The client's upload, kept so a
     /// slow sender is visible without being mistaken for proxy latency.
     pub(super) body_ms: Option<i64>,
+    /// ITEM-140: money a protection stopped on this request (see
+    /// `cost::projected_cost`). Set at the decision site, never recomputed later.
+    pub(super) prevented: Option<(rust_decimal::Decimal, &'static str)>,
     /// ITEM-067: set when the wire format was downgraded (json_schema →
     /// json_object) because the target cannot honour a schema contract.
     pub(super) wire_format: Option<&'static str>,
@@ -96,6 +99,7 @@ impl RequestMeta {
             proxy_ms: None,
             proxy_us: None,
             body_ms: None,
+            prevented: None,
             wire_format: None,
             provider_id: None,
             api_key_id: tenant.api_key_id,
@@ -261,6 +265,8 @@ pub(super) fn build_trace(meta: &RequestMeta, tenant_id: Uuid, outcome: TraceOut
         proxy_ms: meta.proxy_ms,
         proxy_us: meta.proxy_us,
         body_ms: meta.body_ms,
+        prevented_usd: meta.prevented.map(|(usd, _)| usd).unwrap_or_default(),
+        prevented_kind: meta.prevented.map(|(_, kind)| kind),
         example_state: None,
         example_reason: None,
         completion_hash: None,

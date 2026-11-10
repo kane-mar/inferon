@@ -207,6 +207,15 @@ pub(crate) async fn proxy_chat_completions(
     // ITEM-095: velocity first — a rejected request costs nothing and never
     // reaches the budget breaker.
     if let Err(resp) = enforce_rate_limit(&state, &tenant, &mut meta).await {
+        // ITEM-140: the request was refused whole, so the whole projection counts.
+        meta.prevented = Some((
+            crate::cost::projected_cost(
+                &meta.model,
+                crate::ratelimit::estimate_tokens(meta.payload_bytes()),
+                crate::cost::requested_max_tokens(&meta.raw_prompt),
+            ),
+            "rate_limit",
+        ));
         trace_error(
             &state,
             &meta,

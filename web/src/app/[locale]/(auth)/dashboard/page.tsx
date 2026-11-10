@@ -87,8 +87,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
   // A failing report costs its own finding, never the page.
   const payloads = await api.payloads(view.days, session.cookie).catch(() => null);
   const findings = attention({ summary, waste, payloads });
-
-  const requestsDelta = previous ? deltaPct(summary.requests, previous.requests) : null;
   const costDelta = previous
     ? moneyDeltaPct(summary.total_cost_usd, previous.total_cost_usd)
     : null;
@@ -160,26 +158,80 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     <>
       {header}
 
+      {/* ITEM-140: the value case leads — what it cost, what it saved, what the
+          protections stopped. The operational numbers follow, below. */}
       <div className="
         mt-6 grid grid-cols-2 gap-3
-        lg:grid-cols-5
+        lg:grid-cols-3
       "
       >
         <KpiCard
-          label={t('requests')}
-          icon="activity"
-          value={formatInt(summary.requests)}
-          window={view.days}
-          delta={requestsDelta}
-        />
-        <KpiCard
-          label={t('total_cost')}
+          label={t('spent')}
           icon="cost"
-          value={money(summary.total_cost_usd)}
+          value={money(summary.value.spent_usd)}
           window={view.days}
           delta={costDelta}
           goodWhen="down"
         />
+        <KpiCard
+          label={t('saved')}
+          icon="down"
+          value={money(summary.value.saved_usd)}
+          window={view.days}
+        />
+        <KpiCard
+          label={t('prevented')}
+          icon="ok"
+          value={money(summary.value.prevented_usd)}
+          window={view.days}
+        />
+      </div>
+
+      {/* Where each came from. Figures, not sentences. */}
+      <dl className="
+        mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground
+        sm:grid-cols-4
+      "
+      >
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_router')}</dt>
+          <dd className="tabular-nums">{money(summary.value.saved_by.router)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_fallback')}</dt>
+          <dd className="tabular-nums">{money(summary.value.saved_by.fallback)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_cache')}</dt>
+          <dd className="tabular-nums">{money(summary.value.saved_by.cache)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_prune')}</dt>
+          <dd className="tabular-nums">{money(summary.value.saved_by.prune)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_budget')}</dt>
+          <dd className="tabular-nums">{money(summary.value.prevented_by.budget)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_rate_limit')}</dt>
+          <dd className="tabular-nums">{money(summary.value.prevented_by.rate_limit)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('by_downgrade')}</dt>
+          <dd className="tabular-nums">{money(summary.value.prevented_by.downgrade)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt>{t('requests')}</dt>
+          <dd className="tabular-nums">{formatInt(summary.requests)}</dd>
+        </div>
+      </dl>
+
+      <div className="
+        mt-4 grid grid-cols-2 gap-3
+        lg:grid-cols-3
+      "
+      >
         <KpiCard
           label={t('error_rate')}
           icon="warning"
@@ -194,15 +246,13 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
           window={view.days}
           delta={ttftDelta}
           goodWhen="down"
-          verdict={`${t('proxy_overhead')} ${formatMs(summary.proxy_p95_ms)} · ${t('avg_ttft')} ${formatMs(summary.avg_ttft_ms)}`}
           tone={metricTone(summary.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
         />
         <KpiCard
-          label={t('total_savings')}
-          icon="down"
-          value={money(summary.total_savings_usd)}
+          label={t('avg_cost')}
+          icon="cost"
+          value={money(summary.avg_cost_usd)}
           window={view.days}
-          verdict={`${t('cache_savings')} ${money(summary.cache_savings_usd)}`}
         />
       </div>
 

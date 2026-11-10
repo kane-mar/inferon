@@ -157,6 +157,36 @@ pub fn savings_vs(
 
 /// The upstream cost recorded on a trace. A locally hosted model costs nothing at
 /// the margin, whatever the price catalog says (ITEM-077).
+/// ITEM-140: the completion a projection assumes when the caller did not say.
+///
+/// A refused request has no completion to price, so the projection needs a number.
+/// 512 tokens is the median completion of this platform's own traffic, and it is
+/// stated here — and on the page — rather than hidden, because "prevented" is an
+/// estimate and an estimate that pretends to be a measurement is the one thing
+/// this product must not ship.
+pub const PROJECTED_COMPLETION_TOKENS: i32 = 512;
+
+/// What a request would have cost had it run: the prompt at the model's price,
+/// plus the caller's `max_tokens` (or the documented default) at the output price.
+///
+/// Used for the two refusals (budget, rate limit) and for the 85% downgrade's
+/// delta, so every "prevented" figure on the dashboard comes from one function
+/// and one assumption.
+pub fn projected_cost(model: &str, prompt_tokens: i64, max_tokens: Option<i64>) -> Decimal {
+    let prompt = prompt_tokens.clamp(0, i64::from(i32::MAX)) as i32;
+    let completion = max_tokens
+        .map(|tokens| tokens.clamp(1, i64::from(i32::MAX)) as i32)
+        .unwrap_or(PROJECTED_COMPLETION_TOKENS);
+    calculate_cost(model, prompt, completion, 0)
+}
+
+/// The completion a caller asked for, from the payload.
+pub fn requested_max_tokens(payload: &serde_json::Value) -> Option<i64> {
+    payload["max_tokens"]
+        .as_i64()
+        .or_else(|| payload["max_completion_tokens"].as_i64())
+}
+
 pub fn trace_cost(
     model: &str,
     prompt_tokens: i32,

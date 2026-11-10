@@ -247,3 +247,31 @@
         assert_eq!(tokens_as_i32(42), 42);
         assert_eq!(tokens_as_i32(i64::MAX), i32::MAX);
     }
+
+#[test]
+fn a_projection_uses_the_callers_max_tokens() {
+    // ITEM-140: "prevented" is what the request would have cost. The completion
+    // is the caller's own limit when they set one.
+    let with_limit = projected_cost("deepseek-flash", 1_000, Some(100));
+    let without = projected_cost("deepseek-flash", 1_000, None);
+
+    assert!(with_limit < without, "a smaller completion projects cheaper: {with_limit} vs {without}");
+    assert_eq!(without, projected_cost("deepseek-flash", 1_000, None), "deterministic");
+}
+
+#[test]
+fn a_projection_prices_the_documented_default_when_there_is_no_limit() {
+    let one_token = projected_cost("deepseek-flash", 1_000, Some(1));
+    let defaulted = projected_cost("deepseek-flash", 1_000, None);
+
+    assert!(defaulted > one_token, "the default completion costs more than one token");
+    // The default is an assumption, so it is a named constant, not a literal.
+    assert_eq!(defaulted, projected_cost("deepseek-flash", 1_000, Some(i64::from(PROJECTED_COMPLETION_TOKENS))));
+}
+
+#[test]
+fn a_projection_reads_the_callers_limit_from_the_payload() {
+    assert_eq!(requested_max_tokens(&serde_json::json!({"max_tokens": 64})), Some(64));
+    assert_eq!(requested_max_tokens(&serde_json::json!({"max_completion_tokens": 32})), Some(32));
+    assert_eq!(requested_max_tokens(&serde_json::json!({})), None);
+}

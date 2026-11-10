@@ -57,6 +57,18 @@ export type Summary = {
   fallback_savings_usd: string;
   total_savings_usd: string;
   unreduced_cost_usd: string;
+  /**
+   * ITEM-140: the value case. `saved_by` names where each saving came from;
+   * `prevented` is an estimate (prompt + max_tokens at the model that was asked
+   * for) and the page says so.
+   */
+  value: {
+    spent_usd: string;
+    saved_usd: string;
+    saved_by: { router: string; fallback: string; cache: string; prune: string };
+    prevented_usd: string;
+    prevented_by: { budget: string; rate_limit: string; downgrade: string };
+  };
   /** ITEM-063: requests that cache affinity re-targeted. */
   cache_affinity_requests: number;
   truncated: number;
