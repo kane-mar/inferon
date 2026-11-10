@@ -241,7 +241,14 @@
     "adapting": "Adapting",
     "frozen": "Frozen",
     "weights": "Provider weights",
-    "no_opinion": "No opinion"
+    "no_opinion": "No opinion",
+    "objective": "Optimise for",
+    "objective_cost": "Cost",
+    "objective_balanced": "Balanced",
+    "objective_quality": "Quality",
+    "prompt_waste": "Prompt waste",
+    "enable_pruning": "Enable pruning",
+    "pruning_on": "Pruning on"
   },
   "ProvidersPage": {
     "title_bar": "Providers",

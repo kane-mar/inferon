@@ -3,12 +3,13 @@
 
 'use client';
 
-import type { Auth, OperatorPolicy } from '@/libs/InferonApi';
+import type { Auth, OperatorPolicy, PromptEvidence } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { InferonApi } from '@/libs/InferonApi';
 import { Card } from './Card';
+import { money } from './money';
 
 /**
  * ITEM-139: steering the adaptive loop.
@@ -52,6 +53,9 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
 
   const api = InferonApi.fromEnv();
   const weights = Object.entries(policy?.provider_weights ?? {});
+  // ITEM-141: the loop's prompt observations arrive as policy evidence.
+  const prompt = (policy?.evidence as { prompt?: PromptEvidence } | undefined)?.prompt;
+  const objective = policy?.objective ?? 'balanced';
 
   return (
     <Card title={t('adaptation')} icon="activity">
@@ -83,6 +87,23 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
             value={threshold}
             onChange={event => setThreshold(event.target.value)}
           />
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          {t('objective')}
+          <select
+            className="rounded-sm border bg-card px-2 py-1 text-sm"
+            value={objective}
+            onChange={event => act(() => api.operatorPolicySet(
+              tenantId,
+              { objective: event.target.value as 'cost' | 'balanced' | 'quality' },
+              props.auth,
+            ))}
+          >
+            <option value="cost">{t('objective_cost')}</option>
+            <option value="balanced">{t('objective_balanced')}</option>
+            <option value="quality">{t('objective_quality')}</option>
+          </select>
         </label>
 
         <button
@@ -144,6 +165,39 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           </dd>
         </div>
       </dl>
+
+      {prompt && (
+        <div className="mt-4 border-t pt-3 text-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-muted-foreground">{t('prompt_waste')}</span>
+              <span className="tabular-nums">{money(prompt.waste_usd)}</span>
+              <code className="text-xs text-muted-foreground">{prompt.top_kind ?? '—'}</code>
+            </div>
+            {prompt.propose_pruning && !prompt.pruning_enabled && (
+              <button
+                type="button"
+                disabled={busy}
+                className="
+                  rounded-sm border px-3 py-1.5 text-xs font-medium
+                  disabled:opacity-40
+                "
+                onClick={() => act(() => api.pruneSet({
+                  enabled: true,
+                  drop_duplicate_turns: true,
+                  max_prompt_tokens: null,
+                  holdout_percent: 10,
+                }, props.auth))}
+              >
+                {t('enable_pruning')}
+              </button>
+            )}
+            {prompt.pruning_enabled && (
+              <span className="text-xs text-muted-foreground">{t('pruning_on')}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {policy?.evidence && Object.keys(policy.evidence).length > 0 && (
         <code className="

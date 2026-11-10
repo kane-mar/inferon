@@ -29,6 +29,62 @@ pub const MAX_THRESHOLD: f64 = 0.9;
 /// hurting quality.
 const QUALITY_MARGIN: f64 = 0.05;
 
+/// What the loop is optimising for (ITEM-141).
+///
+/// Before this, the loop had one direction: cheaper whenever quality held. That
+/// is the right default for a cost product and the wrong answer for a workspace
+/// whose answers matter more than their price. The objective is the workspace's
+/// statement of intent, and every step the loop takes answers to it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Objective {
+    /// Spend first: downgrade readily, tolerate a small quality cost.
+    Cost,
+    /// The default: downgrade while quality holds, stop when it does not.
+    #[default]
+    Balanced,
+    /// Quality first: downgrade only when the cheap tier is *measurably better*,
+    /// and come back up at the first sign of a shortfall.
+    Quality,
+}
+
+impl Objective {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Objective::Cost => "cost",
+            Objective::Balanced => "balanced",
+            Objective::Quality => "quality",
+        }
+    }
+
+    /// The lowest threshold this objective will let the loop reach.
+    ///
+    /// A floor exists because of a live finding (2026-11-09): repeated `-STEP`
+    /// steps took a workspace's threshold to 1.4e-17 — effectively "always
+    /// downgrade" — with nobody able to see it. Costs-first may go low; quality-
+    /// first may not go far at all.
+    pub fn floor(self) -> f64 {
+        match self {
+            Objective::Cost => 0.05,
+            Objective::Balanced => 0.15,
+            Objective::Quality => 0.50,
+        }
+    }
+
+    /// The downgraded success rate a step-down has to reach, given the baseline.
+    ///
+    /// This is the whole difference between the objectives: cost accepts a small
+    /// quality cost, balanced accepts parity, quality demands a measured
+    /// improvement before it will route anything to the cheap tier.
+    fn down_when(self, baseline: f64) -> f64 {
+        match self {
+            Objective::Cost => baseline - (QUALITY_MARGIN / 2.0),
+            Objective::Balanced => baseline,
+            Objective::Quality => baseline + QUALITY_MARGIN,
+        }
+    }
+}
+
 /// A provider's health weight in `[0.1, 1.0]`: better quality and lower latency
 /// (relative to the fleet median) weigh more, so a degrading provider is
 /// demoted. Neutral (1.0) below the sample floor — too little data is no
@@ -67,10 +123,24 @@ pub struct Policy {
     pub prune: Option<crate::prune::PrunePolicy>,
     /// Human-readable evidence for this version (why it changed).
     pub evidence: serde_json::Value,
+    /// ITEM-141: what every step answers to. Absent (a policy written before this
+    /// field existed) reads as `Balanced`, which is the behaviour it had.
+    #[serde(default)]
+    pub objective: Objective,
     /// When true (the default), the hot path uses this policy. A kill switch
     /// clears it so the static config applies again.
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+/// A stored objective; an unknown string reads as the default, because a policy
+/// written by a newer build must not make an older one fail to load.
+fn objective_from(value: &str) -> Objective {
+    match value {
+        "cost" => Objective::Cost,
+        "quality" => Objective::Quality,
+        _ => Objective::Balanced,
+    }
 }
 
 fn default_true() -> bool {
@@ -99,6 +169,7 @@ pub fn prune_policy_from(
             "enabled": body.enabled,
             "previous_version": current.map(|policy| policy.version),
         }),
+        objective: current.map_or(Objective::Balanced, |policy| policy.objective),
         enabled: true,
     }
 }
@@ -109,25 +180,35 @@ pub fn prune_policy_from(
 /// is too small or there is no baseline.
 pub fn recommend_threshold(
     current: f64,
+    objective: Objective,
     downgraded_requests: i64,
     downgraded_success: i64,
     baseline_success: Option<f64>,
 ) -> f64 {
+    let floor = objective.floor();
     if downgraded_requests < MIN_SAMPLE {
-        return current.clamp(MIN_THRESHOLD, MAX_THRESHOLD);
+        return current.clamp(floor, MAX_THRESHOLD);
     }
     let Some(baseline) = baseline_success else {
-        return current.clamp(MIN_THRESHOLD, MAX_THRESHOLD);
+        return current.clamp(floor, MAX_THRESHOLD);
     };
     let downgraded = downgraded_success as f64 / downgraded_requests as f64;
-    let delta = if downgraded + QUALITY_MARGIN < baseline {
+    // Up (downgrade less) as soon as the cheap tier is worse than the baseline.
+    // Quality mode moves twice as decisively, because a shortfall there is the
+    // thing it exists to prevent.
+    let up = if objective == Objective::Quality {
+        2.0 * STEP
+    } else {
         STEP
-    } else if downgraded >= baseline {
+    };
+    let delta = if downgraded + QUALITY_MARGIN < baseline {
+        up
+    } else if downgraded >= objective.down_when(baseline) {
         -STEP
     } else {
         0.0
     };
-    (current + delta).clamp(MIN_THRESHOLD, MAX_THRESHOLD)
+    (current + delta).clamp(floor, MAX_THRESHOLD)
 }
 
 #[async_trait::async_trait]
@@ -224,21 +305,23 @@ impl PolicyStore for PostgresPolicyStore {
             bool,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
             Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
+            String,
         )> = sqlx::query_as(
-            "SELECT version, router_threshold, evidence, enabled, provider_weights, prune
+            "SELECT version, router_threshold, evidence, enabled, provider_weights, prune, objective
              FROM tenant_policies WHERE tenant_id = $1 AND enabled
              ORDER BY version DESC LIMIT 1",
         )
         .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|(version, router_threshold, evidence, enabled, weights, prune)| Policy {
+        Ok(row.map(|(version, router_threshold, evidence, enabled, weights, prune, objective)| Policy {
             version,
             router_threshold,
             prune: prune.map(|prune| prune.0),
             evidence,
             enabled,
             provider_weights: weights.0,
+            objective: objective_from(&objective),
         }))
     }
 
@@ -250,10 +333,11 @@ impl PolicyStore for PostgresPolicyStore {
             bool,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
             Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
+            String,
         ) = sqlx::query_as(
-            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled, provider_weights, prune)
-             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4, $5, $6)
-             RETURNING version, router_threshold, evidence, enabled, provider_weights, prune",
+            "INSERT INTO tenant_policies (tenant_id, version, router_threshold, evidence, enabled, provider_weights, prune, objective)
+             VALUES ($1, COALESCE((SELECT MAX(version) FROM tenant_policies WHERE tenant_id = $1), 0) + 1, $2, $3, $4, $5, $6, $7)
+             RETURNING version, router_threshold, evidence, enabled, provider_weights, prune, objective",
         )
         .bind(tenant_id)
         .bind(policy.router_threshold)
@@ -261,6 +345,7 @@ impl PolicyStore for PostgresPolicyStore {
         .bind(policy.enabled)
         .bind(sqlx::types::Json(policy.provider_weights.clone()))
         .bind(policy.prune.clone().map(sqlx::types::Json))
+        .bind(policy.objective.as_str())
         .fetch_one(&self.pool)
         .await?;
         Ok(Policy {
@@ -270,6 +355,7 @@ impl PolicyStore for PostgresPolicyStore {
             evidence: row.2,
             enabled: row.3,
             provider_weights: row.4.0,
+            objective: objective_from(&row.6),
         })
     }
 
@@ -279,15 +365,16 @@ impl PolicyStore for PostgresPolicyStore {
             serde_json::Value,
             sqlx::types::Json<std::collections::BTreeMap<String, f64>>,
             Option<sqlx::types::Json<crate::prune::PrunePolicy>>,
+            String,
         )> = sqlx::query_as(
-            "SELECT router_threshold, evidence, provider_weights, prune FROM tenant_policies
+            "SELECT router_threshold, evidence, provider_weights, prune, objective FROM tenant_policies
              WHERE tenant_id = $1 AND version = $2",
         )
         .bind(tenant_id)
         .bind(version)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((router_threshold, evidence, weights, prune)) = source else {
+        let Some((router_threshold, evidence, weights, prune, objective)) = source else {
             return Ok(None);
         };
         self.publish(
@@ -297,6 +384,9 @@ impl PolicyStore for PostgresPolicyStore {
                 router_threshold,
                 prune: prune.map(|prune| prune.0),
                 evidence,
+                // A rollback restores the settings of that version, including the
+                // objective it was taken under.
+                objective: objective_from(&objective),
                 enabled: true,
                 provider_weights: weights.0,
             },
@@ -321,6 +411,7 @@ pub async fn analyse(
     pool: &sqlx::PgPool,
     tenant_id: Uuid,
     current: f64,
+    objective: Objective,
 ) -> StoreResult<Option<(f64, serde_json::Value)>> {
     let row: (i64, i64, i64, i64) = sqlx::query_as(
         "SELECT COUNT(*),
@@ -335,7 +426,7 @@ pub async fn analyse(
     .await?;
     let (requests, success, downgraded, downgraded_success) = row;
     let baseline = (requests > 0).then(|| success as f64 / requests as f64);
-    let next = recommend_threshold(current, downgraded, downgraded_success, baseline);
+    let next = recommend_threshold(current, objective, downgraded, downgraded_success, baseline);
     if (next - current).abs() < f64::EPSILON {
         return Ok(None);
     }
@@ -343,6 +434,7 @@ pub async fn analyse(
         next,
         serde_json::json!({
             "reason": "router_threshold_step",
+            "objective": objective.as_str(),
             "from": current,
             "to": next,
             "requests": requests,
@@ -382,7 +474,8 @@ pub async fn run_adaptation(pool: &sqlx::PgPool) {
             .and_then(|policy| policy.router_threshold)
             .or(configured)
             .unwrap_or(crate::router::DOWNGRADE_THRESHOLD);
-        let threshold = analyze_threshold(pool, tenant_id, current).await;
+        let objective = active.as_ref().map_or(Objective::Balanced, |p| p.objective);
+        let threshold = analyze_threshold(pool, tenant_id, current, objective).await;
         let provider_weights = match analyse_providers(pool, tenant_id).await {
             Ok(weights) => weights,
             Err(e) => {
@@ -396,18 +489,42 @@ pub async fn run_adaptation(pool: &sqlx::PgPool) {
         if unchanged {
             continue;
         }
+        // ITEM-141: the prompt is the other half of the bill. This is an
+        // observation plus a proposal, never a rewrite — pruning changes answers
+        // and needs the workspace's consent and a holdout to prove it.
+        let prompt = analyse_prompt(pool, tenant_id).await.ok();
+        let spend: rust_decimal::Decimal =
+            sqlx::query_scalar("SELECT COALESCE(SUM(upstream_cost_usd), 0) FROM traces
+                                WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days'")
+                .bind(tenant_id)
+                .fetch_one(pool)
+                .await
+                .unwrap_or_default();
+        let pruning = prompt.as_ref().is_some_and(|plan| plan.worth_pruning(spend));
         let evidence = serde_json::json!({
             "reason": "adaptive_step",
+            "objective": objective.as_str(),
             "from_threshold": active.as_ref().and_then(|policy| policy.router_threshold),
             "to_threshold": threshold,
             "provider_weights": provider_weights.clone(),
+            "prompt": prompt.as_ref().map(|plan| serde_json::json!({
+                "waste_usd": plan.waste_usd.round_dp(6).to_string(),
+                "requests": plan.requests,
+                "top_kind": plan.top_kind,
+                "propose_pruning": pruning,
+                "pruning_enabled": active
+                    .as_ref()
+                    .and_then(|policy| policy.prune.as_ref())
+                    .is_some_and(|prune| prune.enabled),
+            })),
         });
         let policy = Policy {
             version: 0,
-            prune: None,
+            prune: active.as_ref().and_then(|policy| policy.prune.clone()),
             router_threshold: Some(threshold),
             provider_weights,
             evidence,
+            objective,
             enabled: true,
         };
         match store.publish(tenant_id, policy).await {
@@ -422,14 +539,88 @@ pub async fn run_adaptation(pool: &sqlx::PgPool) {
 
 /// The threshold recommendation: the moved value, or the current one when there
 /// is not enough evidence to move.
-async fn analyze_threshold(pool: &sqlx::PgPool, tenant_id: Uuid, current: f64) -> f64 {
-    match analyse(pool, tenant_id, current).await {
+async fn analyze_threshold(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    current: f64,
+    objective: Objective,
+) -> f64 {
+    match analyse(pool, tenant_id, current, objective).await {
         Ok(Some((next, _))) => next,
         _ => current,
     }
 }
 
-/// Per-provider health weights from the trailing week's telemetry: quality and
+/// The prompt waste the loop can see, and what it would do about it (ITEM-141).
+///
+/// The loop optimised *price* only: given the same prompt it chose a cheaper
+/// model. But most of the money in a runaway bill is in the prompt itself — a
+/// repeated system prompt the provider cache never hits, a tool schema nobody
+/// uses, boilerplate, duplicate turns. The pre-flight linter already prices all
+/// four (`traces.request_lint`); this turns that into a decision.
+///
+/// It **proposes**, it does not rewrite: pruning changes the answer, so enabling
+/// it is the workspace's call and it is measured against a holdout. The proposal
+/// is published as policy evidence, which is what the console shows and what the
+/// operator applies with one click.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PromptPlan {
+    /// Priced waste in the window, in USD.
+    pub waste_usd: rust_decimal::Decimal,
+    /// Requests carrying at least one finding.
+    pub requests: i64,
+    /// The costliest kind, e.g. `repeated_system_prompt`.
+    pub top_kind: Option<String>,
+}
+
+/// Waste worth acting on: an absolute floor, so a small workspace is not nagged
+/// about cents, and it has to be a real share of what was spent.
+pub const PROMPT_WASTE_MIN_USD: f64 = 1.0;
+pub const PROMPT_WASTE_SHARE: f64 = 0.10;
+
+impl PromptPlan {
+    /// Whether the evidence is strong enough to propose enabling pruning.
+    pub fn worth_pruning(&self, spend_usd: rust_decimal::Decimal) -> bool {
+        if self.waste_usd < rust_decimal::Decimal::try_from(PROMPT_WASTE_MIN_USD).unwrap_or_default()
+        {
+            return false;
+        }
+        // A share of spend, only when spend is large enough to divide by.
+        if spend_usd <= rust_decimal::Decimal::ZERO {
+            return true;
+        }
+        let share = self.waste_usd / spend_usd;
+        share >= rust_decimal::Decimal::try_from(PROMPT_WASTE_SHARE).unwrap_or_default()
+    }
+}
+
+/// Aggregate the pre-flight findings for a tenant over the trailing week.
+pub async fn analyse_prompt(pool: &sqlx::PgPool, tenant_id: Uuid) -> StoreResult<PromptPlan> {
+    let row: (Option<rust_decimal::Decimal>, i64, Option<String>) = sqlx::query_as(
+        "SELECT COALESCE(SUM((request_lint->>'wasted_usd_est')::numeric), 0),
+                COUNT(*) FILTER (WHERE request_lint IS NOT NULL),
+                (SELECT k.kind
+                   FROM traces t2, jsonb_array_elements_text(t2.request_lint->'kinds') AS k(kind)
+                  WHERE t2.tenant_id = $1
+                    AND t2.created_at >= NOW() - INTERVAL '7 days'
+                    AND t2.request_lint IS NOT NULL
+                  GROUP BY k.kind
+                  ORDER BY COUNT(*) DESC
+                  LIMIT 1)
+         FROM traces
+         WHERE tenant_id = $1 AND created_at >= NOW() - INTERVAL '7 days'",
+    )
+    .bind(tenant_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(PromptPlan {
+        waste_usd: row.0.unwrap_or_default(),
+        requests: row.1,
+        top_kind: row.2,
+    })
+}
+
+/// Per-provider health weights from the trailing week's telemetry/// Per-provider health weights from the trailing week's telemetry: quality and
 /// latency (relative to the fleet median) decide the weight (ITEM-069).
 pub async fn analyse_providers(
     pool: &sqlx::PgPool,

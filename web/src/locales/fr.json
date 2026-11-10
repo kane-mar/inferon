@@ -241,7 +241,14 @@
     "adapting": "En adaptation",
     "frozen": "Figé",
     "weights": "Poids des fournisseurs",
-    "no_opinion": "Aucun avis"
+    "no_opinion": "Aucun avis",
+    "objective": "Optimiser pour",
+    "objective_cost": "Coût",
+    "objective_balanced": "Équilibré",
+    "objective_quality": "Qualité",
+    "prompt_waste": "Gaspillage de prompt",
+    "enable_pruning": "Activer l’élagage",
+    "pruning_on": "Élagage actif"
   },
   "ProvidersPage": {
     "title_bar": "Fournisseurs",

@@ -761,7 +761,18 @@ export type OperatorPolicy = {
   router_threshold: number | null;
   provider_weights: Record<string, number>;
   enabled: boolean;
+  /** ITEM-141: what every step answers to. */
+  objective: 'cost' | 'balanced' | 'quality';
   evidence: Record<string, unknown>;
+};
+
+/** ITEM-141: the prompt waste the loop can see, and what it proposes. */
+export type PromptEvidence = {
+  waste_usd: string;
+  requests: number;
+  top_kind: string | null;
+  propose_pruning: boolean;
+  pruning_enabled: boolean;
 };
 
 /** ITEM-062: operator engagement view — active tenants/keys, funnel, WoW. */
@@ -1163,7 +1174,12 @@ export class InferonApi {
 
   operatorPolicySet(
     tenantId: string,
-    body: { enabled?: boolean; router_threshold?: number; provider_weights?: Record<string, number> },
+    body: {
+      enabled?: boolean;
+      router_threshold?: number;
+      provider_weights?: Record<string, number>;
+      objective?: 'cost' | 'balanced' | 'quality';
+    },
     auth: Auth,
   ): Promise<{ ok: boolean; policy: OperatorPolicy }> {
     return this.request('PUT', `/v1/dashboard/api/operator/policy/${tenantId}`, body, auth);
@@ -1175,6 +1191,14 @@ export class InferonApi {
 
   operatorPolicyRollback(tenantId: string, version: number, auth: Auth): Promise<{ ok: boolean }> {
     return this.request('POST', `/v1/dashboard/api/operator/policy/${tenantId}/rollback/${version}`, {}, auth);
+  }
+
+  /** ITEM-091/141: publishing the pruning policy is how the loop's proposal is applied. */
+  pruneSet(
+    body: { enabled: boolean; drop_duplicate_turns: boolean; max_prompt_tokens: number | null; holdout_percent: number },
+    auth: Auth,
+  ): Promise<{ version: number }> {
+    return this.request('POST', '/v1/dashboard/api/prune', body, auth);
   }
 
   operatorSummary(days: number, auth: Auth): Promise<Summary> {

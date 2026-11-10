@@ -11,26 +11,91 @@
     #[test]
     fn no_move_without_enough_evidence() {
         // Too few downgraded requests, or no baseline: keep the current value.
-        assert_eq!(recommend_threshold(0.35, MIN_SAMPLE - 1, 5, Some(0.9)), 0.35);
-        assert_eq!(recommend_threshold(0.35, 100, 90, None), 0.35);
+        assert_eq!(
+            recommend_threshold(0.35, Objective::Balanced, MIN_SAMPLE - 1, 5, Some(0.9)),
+            0.35
+        );
+        assert_eq!(recommend_threshold(0.35, Objective::Balanced, 100, 90, None), 0.35);
     }
 
     #[test]
     fn a_worse_cheap_tier_raises_the_threshold() {
         // 60% success on downgraded vs 90% baseline -> downgrade less.
-        assert!(approx(recommend_threshold(0.35, 100, 60, Some(0.9)), 0.40));
+        assert!(approx(
+            recommend_threshold(0.35, Objective::Balanced, 100, 60, Some(0.9)),
+            0.40
+        ));
     }
 
     #[test]
     fn an_every_bit_as_good_cheap_tier_lowers_the_threshold() {
         // 92% on downgraded vs 90% baseline -> downgrade more.
-        assert!(approx(recommend_threshold(0.35, 100, 92, Some(0.9)), 0.30));
+        assert!(approx(
+            recommend_threshold(0.35, Objective::Balanced, 100, 92, Some(0.9)),
+            0.30
+        ));
     }
 
     #[test]
     fn the_step_is_bounded_at_the_limits() {
-        assert_eq!(recommend_threshold(0.0, 100, 99, Some(0.9)), 0.0);
-        assert_eq!(recommend_threshold(0.9, 100, 10, Some(0.9)), 0.9);
+        assert_eq!(recommend_threshold(0.0, Objective::Balanced, 100, 99, Some(0.9)), 0.15);
+        assert_eq!(recommend_threshold(0.9, Objective::Balanced, 100, 10, Some(0.9)), 0.9);
+    }
+
+    #[test]
+    fn quality_first_only_downgrades_when_the_cheap_tier_is_clearly_better() {
+        // ITEM-141: the workspace said quality matters more than price. Equal
+        // quality is not a reason to downgrade; clearly better is.
+        assert!(approx(
+            recommend_threshold(0.60, Objective::Quality, 100, 90, Some(0.90)),
+            0.60
+        ));
+        assert!(approx(
+            recommend_threshold(0.60, Objective::Quality, 100, 98, Some(0.90)),
+            0.55
+        ));
+    }
+
+    #[test]
+    fn quality_first_moves_up_twice_as_fast_on_a_shortfall() {
+        // The thing quality mode exists to prevent, so it acts decisively.
+        assert!(approx(
+            recommend_threshold(0.60, Objective::Quality, 100, 55, Some(0.90)),
+            0.70
+        ));
+        // The same evidence under balanced is one step.
+        assert!(approx(
+            recommend_threshold(0.60, Objective::Balanced, 100, 55, Some(0.90)),
+            0.65
+        ));
+    }
+
+    #[test]
+    fn each_objective_has_a_floor_the_loop_cannot_cross() {
+        // A live finding: repeated steps once took a workspace's threshold to
+        // 1.4e-17 — "always downgrade" — with nobody able to see it.
+        // One step below each floor lands exactly on it; a second attempt stays.
+        assert_eq!(recommend_threshold(0.06, Objective::Cost, 100, 100, Some(0.5)), 0.05);
+        assert_eq!(recommend_threshold(0.05, Objective::Cost, 100, 100, Some(0.5)), 0.05);
+        assert_eq!(recommend_threshold(0.16, Objective::Balanced, 100, 100, Some(0.5)), 0.15);
+        assert_eq!(recommend_threshold(0.51, Objective::Quality, 100, 100, Some(0.5)), 0.50);
+        assert_eq!(Objective::Cost.floor(), 0.05);
+        assert_eq!(Objective::Balanced.floor(), 0.15);
+        assert_eq!(Objective::Quality.floor(), 0.50);
+    }
+
+    #[test]
+    fn cost_first_tolerates_a_small_quality_cost() {
+        // Within the margin of the baseline is still "good enough" at the prices
+        // this objective cares about; balanced would hold still.
+        assert!(approx(
+            recommend_threshold(0.35, Objective::Cost, 100, 88, Some(0.90)),
+            0.30
+        ));
+        assert!(approx(
+            recommend_threshold(0.35, Objective::Balanced, 100, 88, Some(0.90)),
+            0.35
+        ));
     }
 
     #[test]
@@ -55,12 +120,12 @@
         let store = InMemoryPolicyStore::default();
         assert_eq!(store.active(tenant).await.unwrap(), None);
         let v1 = store
-            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true, provider_weights: Default::default() })
+            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.30), evidence: json!({"why": "v1"}), enabled: true, objective: Objective::Balanced, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v1.version, 1);
         let v2 = store
-            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true, provider_weights: Default::default() })
+            .publish(tenant, Policy { version: 0, prune: None, router_threshold: Some(0.35), evidence: json!({"why": "v2"}), enabled: true, objective: Objective::Balanced, provider_weights: Default::default() })
             .await
             .unwrap();
         assert_eq!(v2.version, 2);
@@ -85,6 +150,7 @@ fn a_pruning_opt_in_keeps_the_routing_policy_and_records_the_previous_version() 
         prune: None,
         evidence: serde_json::json!({"why": "adaptive"}),
         enabled: true,
+        objective: Objective::Balanced,
         provider_weights: [("p1".to_string(), 0.5)].into_iter().collect(),
     };
     let next = prune_policy_from(
@@ -129,6 +195,7 @@ fn opting_out_publishes_a_disabled_policy_rather_than_deleting_history() {
         prune: Some(crate::prune::PrunePolicy::default()),
         evidence: serde_json::json!({}),
         enabled: true,
+        objective: Objective::Balanced,
         provider_weights: Default::default(),
     };
     let next = prune_policy_from(
@@ -140,4 +207,20 @@ fn opting_out_publishes_a_disabled_policy_rather_than_deleting_history() {
     );
     assert!(!next.prune.as_ref().unwrap().enabled);
     assert_eq!(next.evidence["enabled"], false);
+}
+
+#[test]
+fn prompt_waste_has_to_be_worth_the_interruption() {
+    // ITEM-141: enabling pruning changes answers, so the loop only proposes it
+    // when the priced waste is real money and a real share of spend.
+    let plan = |usd: &str| PromptPlan {
+        waste_usd: usd.parse().unwrap(),
+        requests: 40,
+        top_kind: Some("repeated_system_prompt".to_string()),
+    };
+
+    assert!(!plan("0.40").worth_pruning("10.00".parse().unwrap()), "cents are not worth a proposal");
+    assert!(!plan("5.00").worth_pruning("200.00".parse().unwrap()), "2.5% of spend is not a waste problem");
+    assert!(plan("5.00").worth_pruning("40.00".parse().unwrap()), "12.5% of spend is");
+    assert!(plan("5.00").worth_pruning(rust_decimal::Decimal::ZERO), "no spend yet: price alone decides");
 }

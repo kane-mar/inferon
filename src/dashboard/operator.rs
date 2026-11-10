@@ -260,6 +260,8 @@ pub struct PolicyBody {
     /// Provider id -> weight. An empty map means "no opinion", which is a real
     /// setting: the static ordering applies again.
     provider_weights: Option<std::collections::BTreeMap<String, f64>>,
+    /// ITEM-141: `cost`, `balanced` or `quality` — what every step answers to.
+    objective: Option<String>,
 }
 
 /// PUT /v1/dashboard/api/operator/policy/:tenant_id — set the adaptive loop.
@@ -322,6 +324,19 @@ pub async fn operator_policy_set(
             "by": operator,
             "at": chrono_free_now(),
         }),
+        objective: match body.objective.as_deref() {
+            Some("cost") => crate::policy::Objective::Cost,
+            Some("quality") => crate::policy::Objective::Quality,
+            Some("balanced") => crate::policy::Objective::Balanced,
+            Some(other) => {
+                return crate::json_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_objective",
+                    &format!("unknown objective: {other}"),
+                )
+            }
+            None => current.as_ref().map_or(crate::policy::Objective::Balanced, |p| p.objective),
+        },
         enabled: body.enabled.unwrap_or(true),
     };
     match state.policy_store.publish(tenant_id, next).await {

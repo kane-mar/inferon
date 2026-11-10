@@ -911,6 +911,7 @@ event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
                 router_threshold: Some(0.0),
                 evidence: json!({}),
                 enabled: true,
+                objective: crate::policy::Objective::Balanced,
                 provider_weights: Default::default(),
             },
         )
@@ -4637,6 +4638,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 }),
                 evidence: serde_json::json!({"why": "test"}),
                 enabled: true,
+                objective: crate::policy::Objective::Balanced,
                 provider_weights: Default::default(),
             },
         )
@@ -4864,6 +4866,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 }),
                 evidence: serde_json::json!({"why": "test"}),
                 enabled: true,
+                objective: crate::policy::Objective::Balanced,
                 provider_weights: Default::default(),
             },
         )
@@ -4916,6 +4919,7 @@ async fn a_tenant_pair_stops_applying_when_its_cheap_model_disappears() {
                 }),
                 evidence: serde_json::json!({"why": "test"}),
                 enabled: true,
+                objective: crate::policy::Objective::Balanced,
                 provider_weights: Default::default(),
             },
         )
