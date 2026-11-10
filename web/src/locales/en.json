@@ -441,7 +441,7 @@
     "connect_go_to_dashboard": "Go to the dashboard"
   },
   "SpendReportPage": {
-    "title_bar": "Spend report",
+    "title_bar": "Bill",
     "transactions": "Sessions",
     "transactions_p50": "Cost per session, median",
     "transactions_p95": "Cost per session, 95th percentile",

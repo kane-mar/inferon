@@ -441,7 +441,7 @@
     "connect_go_to_dashboard": "Aller au tableau de bord"
   },
   "SpendReportPage": {
-    "title_bar": "Rapport de dépenses",
+    "title_bar": "Facture",
     "transactions": "Sessions",
     "transactions_p50": "Coût par session, médiane",
     "transactions_p95": "Coût par session, 95e centile",
