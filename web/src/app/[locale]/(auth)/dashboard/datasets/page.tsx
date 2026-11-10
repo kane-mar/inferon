@@ -13,6 +13,7 @@ import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatInt } from '@/libs/dashboardMetrics';
+import { dateTime } from '@/libs/datetime';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -172,7 +173,7 @@ export default async function DatasetsPage(props: {
                       text-xs text-muted-foreground
                     `}
                     >
-                      <span title={cluster.last_seen}>{cluster.last_seen.slice(0, 16)}</span>
+                      <span title={cluster.last_seen}>{dateTime(cluster.last_seen)}</span>
                     </td>
                     <td className={CELL}>
                       {cluster.distinct_examples > 0 && (

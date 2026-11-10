@@ -24,7 +24,7 @@ export const AutoRefresh = (props: { label: string; intervalMs?: number }) => {
       inline-flex items-center gap-1.5 text-xs text-muted-foreground
     "
     >
-      <span className="size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
+      <span className="size-1.5 animate-pulse rounded-full bg-success motion-reduce:animate-none" aria-hidden />
       {props.label}
     </span>
   );

@@ -7,10 +7,11 @@ import type { KeysResponse } from '@/libs/InferonApi';
 import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { dateOnly } from '@/libs/datetime';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 
-const date = (value: string | null) => (value ? value.slice(0, 10) : '—');
+const date = (value: string | null) => dateOnly(value);
 
 export const KeysPanel = (props: { data: KeysResponse }) => {
   const t = useTranslations('KeysPage');
@@ -18,6 +19,9 @@ export const KeysPanel = (props: { data: KeysResponse }) => {
   const [label, setLabel] = useState('');
   const [created, setCreated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // ITEM-143: revoking cannot be undone, so it arms first — the same two-step the
+  // payload purge uses, rather than a click that ends a key for good.
+  const [armed, setArmed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mint = async (event: React.FormEvent) => {
@@ -135,14 +139,14 @@ export const KeysPanel = (props: { data: KeysResponse }) => {
                               <button
                                 type="button"
                                 disabled={busy}
-                                onClick={() => revoke(key.id)}
+                                onClick={() => (armed === key.id ? revoke(key.id) : setArmed(key.id))}
                                 className="
                                   text-sm text-red-600
                                   hover:underline
                                   disabled:opacity-50
                                 "
                               >
-                                {t('revoke')}
+                                {armed === key.id ? t('revoke_confirm') : t('revoke')}
                               </button>
                             )}
                       </td>

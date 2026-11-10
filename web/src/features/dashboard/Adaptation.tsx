@@ -63,7 +63,12 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           {t('workspace')}
           <select
-            className="rounded-sm border bg-card px-2 py-1 text-sm"
+            name="workspace"
+            className="
+              rounded-sm border bg-card px-2 py-1 text-sm
+              focus-visible:border-ring focus-visible:ring-3
+              focus-visible:ring-ring/50
+            "
             value={tenantId}
             onChange={event => setTenantId(event.target.value)}
           >
@@ -82,8 +87,12 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           <input
             className="
               w-24 rounded-sm border bg-card px-2 py-1 text-sm tabular-nums
+              focus-visible:border-ring focus-visible:ring-3
+              focus-visible:ring-ring/50
             "
+            name="router_threshold"
             inputMode="decimal"
+            spellCheck={false}
             value={threshold}
             onChange={event => setThreshold(event.target.value)}
           />
@@ -92,7 +101,12 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           {t('objective')}
           <select
-            className="rounded-sm border bg-card px-2 py-1 text-sm"
+            name="objective"
+            className="
+              rounded-sm border bg-card px-2 py-1 text-sm
+              focus-visible:border-ring focus-visible:ring-3
+              focus-visible:ring-ring/50
+            "
             value={objective}
             onChange={event => act(() => api.operatorPolicySet(
               tenantId,

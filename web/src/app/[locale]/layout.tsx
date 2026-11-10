@@ -24,6 +24,12 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  // The browser UI (scrollbars, form controls) has to match the theme, or dark
+  // mode shows white scrollbars and light inputs.
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fcfdff' },
+    { media: '(prefers-color-scheme: dark)', color: '#15171c' },
+  ],
   icons: [
     {
       rel: 'apple-touch-icon',
@@ -76,6 +82,8 @@ export default async function RootLayout(props: {
         ${inter.variable}
         ${jetbrainsMono.variable}
       `}
+      // `color-scheme` tells the browser which palette its own widgets use.
+      style={{ colorScheme: 'light dark' }}
       suppressHydrationWarning
     >
       <body>

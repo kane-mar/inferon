@@ -15,6 +15,18 @@ export const DashboardShell = (props: { menu: DashboardNavEntry[] }) => {
 
   return (
     <>
+      {/* ITEM-143: keyboard users should not tab through nine nav links to reach
+          the page. Visible only when focused. */}
+      <a
+        href="#main"
+        className="
+          sr-only rounded-sm bg-card px-3 py-2 text-sm font-medium
+          focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50
+          focus:border
+        "
+      >
+        {t('skip')}
+      </a>
       <div className="flex items-center gap-3">
         <Link href="/dashboard" className="max-sm:hidden">
           <Logo />

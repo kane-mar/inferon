@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { dateOnly } from '@/libs/datetime';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
@@ -161,7 +162,7 @@ export const PromptsPanel = (props: {
                         <td className="py-2 tabular-nums">{version.thumbs_down}</td>
                         <td className="py-2 font-mono text-xs">{money(version.spend_usd)}</td>
                         <td className="py-2 text-xs text-muted-foreground">
-                          <span title={version.first_seen}>{version.first_seen.slice(0, 10)}</span>
+                          <span title={version.first_seen}>{dateOnly(version.first_seen)}</span>
                         </td>
                       </tr>
                     ))}
@@ -220,7 +221,7 @@ export const PromptsPanel = (props: {
                           <option key={version.prompt_hash} value={version.prompt_hash}>
                             {shortHash(version.prompt_hash)}
                             {' · '}
-                            {version.first_seen.slice(0, 10)}
+                            {dateOnly(version.first_seen)}
                           </option>
                         ))}
                       </select>

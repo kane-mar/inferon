@@ -77,7 +77,8 @@
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
-    "menu": "Menu"
+    "menu": "Menu",
+    "skip": "Skip to content"
   },
   "DashboardIndexPage": {
     "title_bar": "Dashboard",
@@ -184,7 +185,8 @@
     "revoked": "Revoked",
     "revoke": "Revoke",
     "no_keys": "No keys yet",
-    "error": "Could not save"
+    "error": "Could not save",
+    "revoke_confirm": "Confirm revoke"
   },
   "MembersPage": {
     "github_login": "GitHub login",

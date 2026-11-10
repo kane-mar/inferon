@@ -10,6 +10,7 @@ import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { dateTime } from '@/libs/datetime';
 import { InferonApi } from '@/libs/InferonApi';
 import { guardOutcomeKeys } from '@/libs/labels';
 import { currentSession } from '@/libs/session';
@@ -263,12 +264,12 @@ export default async function OperatorPage(props: OperatorPageProps) {
                           <td className="py-2">{alert.status}</td>
                           <td className="py-2">
                             <span title={alert.first_fired_at}>
-                              {alert.first_fired_at.slice(0, 16).replace('T', ' ')}
+                              {dateTime(alert.first_fired_at)}
                             </span>
                           </td>
                           <td className="py-2">
                             <span title={alert.last_fired_at}>
-                              {alert.last_fired_at.slice(0, 16).replace('T', ' ')}
+                              {dateTime(alert.last_fired_at)}
                             </span>
                           </td>
                         </tr>
@@ -315,7 +316,7 @@ export default async function OperatorPage(props: OperatorPageProps) {
                           </td>
                           <td className="py-2">
                             <span title={job.created_at}>
-                              {job.created_at.slice(0, 16).replace('T', ' ')}
+                              {dateTime(job.created_at)}
                             </span>
                           </td>
                         </tr>

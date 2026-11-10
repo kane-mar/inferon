@@ -77,7 +77,8 @@
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
-    "menu": "Menu"
+    "menu": "Menu",
+    "skip": "Aller au contenu"
   },
   "DashboardIndexPage": {
     "title_bar": "Tableau de bord",
@@ -184,7 +185,8 @@
     "revoked": "Révoquée",
     "revoke": "Révoquer",
     "no_keys": "Aucune clé",
-    "error": "Non enregistré"
+    "error": "Non enregistré",
+    "revoke_confirm": "Confirmer"
   },
   "MembersPage": {
     "github_login": "Identifiant GitHub",

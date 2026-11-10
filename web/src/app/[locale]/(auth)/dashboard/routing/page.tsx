@@ -10,6 +10,7 @@ import { HEAD } from '@/features/dashboard/reportFormat';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
 import { TierPairsPanel } from '@/features/dashboard/TierPairsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
+import { dateTime } from '@/libs/datetime';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
 
@@ -119,7 +120,7 @@ export default async function RoutingPage(props: RoutingPageProps) {
                               "
                               >
                                 <span title={entry.at}>
-                                  {entry.at.slice(0, 16).replace('T', ' ')}
+                                  {dateTime(entry.at)}
                                 </span>
                               </td>
                               <td className="py-2 font-mono text-xs">{entry.actor_login}</td>

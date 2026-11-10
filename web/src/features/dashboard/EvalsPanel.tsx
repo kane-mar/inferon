@@ -8,12 +8,13 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { dateTime } from '@/libs/datetime';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
 import { pct } from './reportFormat';
 
-const when = (value: string) => value.slice(0, 16).replace('T', ' ');
+const when = (value: string) => dateTime(value);
 
 /** The gate's verdict, coloured by what it means. */
 const VERDICT_CLASS: Record<EvalVerdict['verdict'], string> = {

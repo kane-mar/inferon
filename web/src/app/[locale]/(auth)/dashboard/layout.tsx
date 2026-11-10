@@ -79,7 +79,8 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
         <SectionNav menu={menu} />
       </header>
 
-      <main className="min-h-[calc(100vh-57px)] bg-muted">
+      {/* ITEM-143: the jump target for the skip link. */}
+      <main id="main" className="min-h-[calc(100vh-57px)] bg-muted">
         <div className="mx-auto max-w-7xl px-3 pt-6 pb-16">
           {props.children}
         </div>
