@@ -35,8 +35,8 @@ export const dashboardNav = (isOperator: boolean): DashboardNavSection[] => [
     labelKey: 'home',
     children: [
       { href: '/dashboard', labelKey: 'overview', exact: true },
-      { href: '/dashboard/spend', labelKey: 'spend' },
-      { href: '/dashboard/audit', labelKey: 'audit' },
+      // ITEM-142: one page for the bill — what it cost and what was avoidable.
+      { href: '/dashboard/spend', labelKey: 'bill' },
       { href: '/dashboard/quality', labelKey: 'quality' },
       // ITEM-140: Runtime left the customer's tabs. Gateway microbenchmarks serve
       // the honesty stance and the operator, not the person looking at their bill.

@@ -69,12 +69,11 @@
     "members": "Members",
     "operator": "Operator",
     "settings": "Settings",
-    "spend": "Spend",
-    "audit": "Cost audit",
     "datasets": "Datasets",
     "overview": "Overview",
     "runtime": "Runtime",
-    "payloads": "Payloads"
+    "payloads": "Payloads",
+    "bill": "Bill"
   },
   "DashboardHeader": {
     "sign_out": "Sign out",
@@ -418,7 +417,7 @@
     "related_body": "Everything else that changes how requests are handled.",
     "link_providers": "Providers and models →",
     "link_routing": "Routing, budgets and lint rules →",
-    "link_audit": "Cost audit →",
+    "link_audit": "Bill and what was avoidable",
     "role_owner": "Owner",
     "role_member": "Member",
     "connect_key_step": "Create an API key",
@@ -456,9 +455,6 @@
   "AuditPage": {
     "title_bar": "Cost audit",
     "live": "Live",
-    "no_traffic_title": "No traffic in this window yet",
-    "no_traffic_body": "No traffic yet",
-    "no_traffic_cta": "Connect your SDK",
     "requests": "Requests",
     "spend": "Spend",
     "recoverable": "Can be saved",
@@ -480,7 +476,6 @@
     "f5_title": "What caused the bill",
     "f6_title": "Quality and failures",
     "share_title": "Share this audit",
-    "share_body": "Read-only link, no prompts",
     "share_create": "Create link",
     "share_once": "Shown once",
     "share_copy": "Copy",

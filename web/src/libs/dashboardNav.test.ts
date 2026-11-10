@@ -26,7 +26,6 @@ describe('dashboardNav — four sections, reports as dashboard tabs', () => {
     expect(hrefs(dashboard?.children ?? [])).toEqual([
       '/dashboard',
       '/dashboard/spend',
-      '/dashboard/audit',
       '/dashboard/quality',
       '/dashboard/payloads',
       '/dashboard/datasets',
@@ -81,6 +80,14 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
   it('shows the report tabs on the dashboard pages', () => {
     expect(labels('/dashboard')).toContain('/dashboard/payloads');
     expect(labels('/dashboard/spend')).toContain('/dashboard/payloads');
+  });
+
+  it('has one money tab, because the bill and its findings are one question', () => {
+    // ITEM-142: "what did we spend" and "where did it leak" used to be two tabs.
+    const tabs = hrefs(dashboardNav(false).find(item => item.href === '/dashboard')?.children ?? []);
+
+    expect(tabs).not.toContain('/dashboard/audit');
+    expect(tabs.filter(href => href === '/dashboard/spend')).toHaveLength(1);
   });
 
   it('keeps Runtime with the operator, not in the customer tabs', () => {

@@ -158,7 +158,7 @@ export default async function SettingsPage(props: {
                 </Link>
               </li>
               <li>
-                <Link href="/dashboard/audit" className={LINK}>
+                <Link href="/dashboard/spend" className={LINK}>
                   {t('link_audit')}
                 </Link>
               </li>

@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: 2026 Kane Mar
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { AuditData } from '@/features/dashboard/AuditCards';
 import type { SpendBreakdownRow } from '@/features/dashboard/SpendBreakdown';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
+import { AuditCards } from '@/features/dashboard/AuditCards';
 import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
@@ -12,6 +14,7 @@ import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { CELL, HEAD as REPORT_HEAD } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
+import { ShareAuditPanel } from '@/features/dashboard/ShareAuditPanel';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -22,7 +25,15 @@ import { currentSession } from '@/libs/session';
 // ITEM-124: one header atom for every report — 13px sans, sentence case.
 const RIGHT = `${REPORT_HEAD} text-right`;
 
-/** The spend detail: every dollar by model, provider, key and system prompt. */
+/**
+ * The bill (ITEM-142): what it cost, and what was avoidable.
+ *
+ * Spend and the cost audit used to be two tabs, which asked the customer to know
+ * that "what did we spend" and "where did it leak" are one question. The buying
+ * trigger for this product is a bill that jumped, so they are one page: the
+ * breakdown first, then the findings, each with its dollar figure and the control
+ * that changes it.
+ */
 export default async function SpendReportPage(props: {
   params: Promise<{ locale: string }>;
   searchParams: Promise<{ days?: string; hide_zero?: string }>;
@@ -40,18 +51,55 @@ export default async function SpendReportPage(props: {
   const hideZero = params.hide_zero === '1';
   const t = await getTranslations({ locale, namespace: 'DashboardIndexPage' });
   const heading = await getTranslations({ locale, namespace: 'SpendReportPage' });
+  const auditCopy = await getTranslations({ locale, namespace: 'AuditPage' });
   const api = InferonApi.fromEnv();
 
   // ITEM-103: the unit of work — what one client transaction costs — is a spend
   // question, so it lives here rather than beside the latency numbers.
-  const [byModel, byProvider, byKey, byPrompt, keys, sessions] = await Promise.all([
-    api.byModel(days, session.cookie),
-    api.byProvider(days, 0, session.cookie),
-    api.byKey(days, 0, session.cookie),
-    api.byPrompt(days, 10, session.cookie),
-    api.keys(session.cookie),
-    api.sessions(days, session.cookie),
-  ]);
+  // ITEM-142: the audit's inputs come with them: one page, one window, one fetch.
+  const [byModel, byProvider, byKey, byPrompt, keys, sessions, summary, waste, quality, shares]
+    = await Promise.all([
+      api.byModel(days, session.cookie),
+      api.byProvider(days, 0, session.cookie),
+      api.byKey(days, 0, session.cookie),
+      api.byPrompt(days, 10, session.cookie),
+      api.keys(session.cookie),
+      api.sessions(days, session.cookie),
+      api.summary(days, 0, session.cookie),
+      api.waste(days, session.cookie),
+      api.quality(days, session.cookie),
+      api.auditShares(session.cookie),
+    ]);
+
+  const overall = quality.overall;
+  const topModel = byModel.models[0];
+  const topProvider = byProvider.providers[0];
+  const topKey = byKey.keys[0];
+  const audit: AuditData = {
+    requests: summary.requests,
+    cost: summary.total_cost_usd,
+    savings: {
+      total: summary.total_savings_usd,
+      router: summary.router_savings_usd,
+      fallback: summary.fallback_savings_usd,
+      cache: summary.cache_savings_usd,
+      affinity: summary.cache_affinity_requests,
+    },
+    waste,
+    top: {
+      model: topModel ? { name: topModel.model, cost: topModel.cost_usd } : undefined,
+      provider: topProvider
+        ? { name: topProvider.name, cost: topProvider.cost_usd }
+        : undefined,
+      key: topKey ? { name: topKey.label, cost: topKey.cost_usd } : undefined,
+    },
+    quality: {
+      errorRate: overall.error_rate,
+      truncatedRate: overall.truncated_rate,
+      guardFallbackRate: overall.guard_fallback_rate,
+      topFailure: Object.entries(overall.errors_by_class).sort((a, b) => b[1] - a[1])[0],
+    },
+  };
 
   const models = spendRows(byModel.models, hideZero);
   const providers = spendRows(byProvider.providers, hideZero);
@@ -310,6 +358,23 @@ export default async function SpendReportPage(props: {
           )}
         </Card>
       </div>
+      {/* ITEM-142: the second half of the same question — where it leaked, and
+          the control that changes it. */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold">{auditCopy('title_bar')}</h2>
+      </div>
+      <div className="mt-3">
+        <AuditCards locale={locale} data={audit} />
+      </div>
+
+      {canEdit && (
+        <div className="mt-4">
+          <Card title={auditCopy('share_title')} icon="lock">
+            <ShareAuditPanel data={shares} />
+          </Card>
+        </div>
+      )}
+
     </>
   );
 }

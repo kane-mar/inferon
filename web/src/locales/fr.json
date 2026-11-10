@@ -69,12 +69,11 @@
     "members": "Membres",
     "operator": "Opérateur",
     "settings": "Paramètres",
-    "spend": "Dépenses",
-    "audit": "Audit de coûts",
     "datasets": "Jeux de données",
     "overview": "Vue d’ensemble",
     "runtime": "Exécution",
-    "payloads": "Charges utiles"
+    "payloads": "Charges utiles",
+    "bill": "Facture"
   },
   "DashboardHeader": {
     "sign_out": "Déconnexion",
@@ -418,7 +417,7 @@
     "related_body": "Tous les autres réglages qui changent le traitement des requêtes.",
     "link_providers": "Fournisseurs et modèles →",
     "link_routing": "Routage, budgets et règles d’analyse →",
-    "link_audit": "Audit de coûts →",
+    "link_audit": "Facture et gaspillage évitable",
     "role_owner": "Propriétaire",
     "role_member": "Membre",
     "connect_key_step": "Créer une clé API",
@@ -456,9 +455,6 @@
   "AuditPage": {
     "title_bar": "Audit de coûts",
     "live": "En direct",
-    "no_traffic_title": "Aucun trafic sur cette fenêtre",
-    "no_traffic_body": "Aucun trafic",
-    "no_traffic_cta": "Connecter votre SDK",
     "requests": "Requêtes",
     "spend": "Dépenses",
     "recoverable": "Peut être économisé",
@@ -480,7 +476,6 @@
     "f5_title": "Ce qui a fait monter la facture",
     "f6_title": "Qualité et échecs",
     "share_title": "Partager cet audit",
-    "share_body": "Lien lecture seule, sans prompts",
     "share_create": "Créer un lien",
     "share_once": "Affiché une fois",
     "share_copy": "Copier",
