@@ -23,13 +23,12 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+/**
+ * ITEM-143: `themeColor` lives on the viewport export in this Next version; on
+ * `metadata` it is silently ignored, which is why the first attempt produced no
+ * tag at all.
+ */
 export const metadata: Metadata = {
-  // The browser UI (scrollbars, form controls) has to match the theme, or dark
-  // mode shows white scrollbars and light inputs.
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#fcfdff' },
-    { media: '(prefers-color-scheme: dark)', color: '#15171c' },
-  ],
   icons: [
     {
       rel: 'apple-touch-icon',
@@ -57,6 +56,12 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  // ITEM-143: the browser's own widgets (scrollbars, form controls) follow the
+  // theme; without this dark mode shows white scrollbars.
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fcfdff' },
+    { media: '(prefers-color-scheme: dark)', color: '#15171c' },
+  ],
 };
 
 export function generateStaticParams() {
