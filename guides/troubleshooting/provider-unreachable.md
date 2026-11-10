@@ -41,19 +41,19 @@ The gateway could not open a connection to the base URL. In order of likelihood:
 4. **For TLS**, use a certificate the gateway trusts, or terminate TLS at a proxy you
    control.
 5. **If it is a `local` model on a laptop**, run the self-hosted stack instead
-   ([Inferon on your own network](../inferon-self-hosted.md)) — the cloud cannot reach your
+   ([Inferon on your own network](../inferon-self-hosted.md)) : the cloud cannot reach your
    loopback.
 
 ## How to confirm it worked
 
-- **Test** returns **Connected — N models**, and the provider row shows the check time.
+- **Test** returns **Connected : N models**, and the provider row shows the check time.
 - A completion returns `200`; its trace has no `transport` class.
 - **Quality → Errors by cause** stops growing `transport`.
 
 ## When to stop and ask
 
 - The URL answers from the gateway's container but **Test** fails.
-- Test succeeds and completions still `502` — that is a different path (the request itself),
+- Test succeeds and completions still `502` , that is a different path (the request itself),
   not connectivity.
 - The provider is only reachable over a tunnel you do not control.
 

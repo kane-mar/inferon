@@ -17,7 +17,7 @@ three.
 
 ## Retention
 
-**Keep payloads for (days)** — 30 by default, `0` keeps them forever. A periodic clean-up
+**Keep payloads for (days)** : 30 by default, `0` keeps them forever. A periodic clean-up
 deletes older payloads. Costs and counts survive; only the text goes.
 
 Payloads are also removed the moment you ask: **Datasets → Delete stored payloads** purges
@@ -27,13 +27,13 @@ everything captured for the workspace:
 {"purged": 1284}
 ```
 
-Retention is not a compliance guarantee — see the PII section below for what detection
+Retention is not a compliance guarantee : see the PII section below for what detection
 can and cannot see.
 
 ## Personal data detection
 
 Detection runs on every captured payload by default. It recognises **shapes**, and it
-never records what it found — only the class and a count:
+never records what it found : only the class and a count:
 
 | Class | Shape |
 |---|---|
@@ -52,12 +52,12 @@ found", never as "no personal data".
 | Mode | What it does | Where the effect shows |
 |---|---|---|
 | **Hide personal data in storage** | Replaces matches with a placeholder (`<email>`) before the payload is stored, so datasets, exports and audit shares never carry them | Datasets, exports |
-| **Hide personal data in transit** | Replaces matches in the request that goes to the provider, on 90% of requests — a 10% holdout is sent unredacted so you can see what redaction costs in answer quality | Answers from the provider |
+| **Hide personal data in transit** | Replaces matches in the request that goes to the provider, on 90% of requests: a 10% holdout is sent unredacted so you can see what redaction costs in answer quality | Answers from the provider |
 
 Both are off until you turn them on. Redaction is idempotent: a second pass finds nothing
 left to replace, so a stored redacted payload stays stable.
 
-The transit mode can change answers — the model no longer sees the real value. That is why
+The transit mode can change answers : the model no longer sees the real value. That is why
 it is partial and why the holdout exists; compare the two groups before relying on it
 everywhere.
 
@@ -70,9 +70,9 @@ everywhere.
 
 ## When to stop and ask
 
-- Capture is on and **Datasets** is empty — check the window and whether purge or
+- Capture is on and **Datasets** is empty : check the window and whether purge or
   retention removed the payloads ([payloads were purged](../troubleshooting/payloads-purged.md)).
-- PII counts are zero for traffic you know contains email addresses — the shapes may be
+- PII counts are zero for traffic you know contains email addresses : the shapes may be
   obfuscated, or the payloads are not being captured.
 - You need redaction for compliance, not hygiene: this is shape matching, and a compliance
   control needs a different tool.

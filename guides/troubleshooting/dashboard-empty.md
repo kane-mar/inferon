@@ -30,7 +30,7 @@ way. It only empties **Datasets**.
 
 1. **Confirm the request reached us**: the response carried `x-inferon-trace-id`. If it did
    not, the request never reached the gateway.
-2. **Find the trace by id** — the operator view can look it up directly; the workspace view
+2. **Find the trace by id** : the operator view can look it up directly; the workspace view
    can filter **Quality → Traffic** by model and time.
 3. **Compare workspace ids**: **Settings → Workspace ID** versus the workspace the key was
    minted in.

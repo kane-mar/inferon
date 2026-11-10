@@ -1,8 +1,8 @@
 # Datasets, gold sets and evals: from real traffic to a tested change
 
 The loop this page describes is the reason to capture payloads at all: your own traffic
-becomes a fixed exam, and every change — a cheaper model, a router threshold, a new prompt
-— can be put to that exam before you trust it.
+becomes a fixed exam, and every change : a cheaper model, a router threshold, a new prompt
+: can be put to that exam before you trust it.
 
 Capture must be on (**Routing → Controls → Store prompts and answers**); without it
 nothing here has material.
@@ -10,7 +10,7 @@ nothing here has material.
 ## 1. What counts as an example
 
 **Datasets** lists your traffic grouped by system prompt (or by task cluster when the
-gateway has assigned one). Not every request is an example — a pair is **qualified**
+gateway has assigned one). Not every request is an example : a pair is **qualified**
 only when:
 
 - the outcome was `ok`,
@@ -18,7 +18,7 @@ only when:
 - the answer was not marked bad with a thumbs-down,
 - and, when the request carried a JSON-schema contract, the answer satisfied it.
 
-Everything else is counted as **excluded**, with the reason stored on the trace — `capped`
+Everything else is counted as **excluded**, with the reason stored on the trace : `capped`
 (the captured answer hit the size cap), `truncated`, the outcome itself (`empty`,
 `refused`, `error`), `guard_failed` (the checker's replay failed too) or `schema_invalid`
 (the answer did not satisfy the request's contract). A small dataset is explained rather
@@ -54,7 +54,7 @@ choose, bounded by cases and by spend, and scores each answer deterministically:
 | `schema` | the request carried a contract and the answer satisfies it |
 | `outcome` | neither; the outcome signal decides |
 
-There is **no judge model** — a second model's opinion is another opinion, not evidence.
+There is **no judge model** : a second model's opinion is another opinion, not evidence.
 Each case's latency and cost are recorded with the run.
 
 A run that loses cases (provider error, budget stop) is reported as `partial`, never scored
@@ -88,7 +88,7 @@ move your spend, routing or policy.
 - **Datasets** is empty with capture on: check that the window is long enough and the
   traffic qualified (every excluded reason is shown).
 - A run returns `partial` every time: the spend or case bound is too tight.
-- The comparison says "not enough evidence" — pin a bigger gold set; ten cases is the
+- The comparison says "not enough evidence" : pin a bigger gold set; ten cases is the
   floor, not a target.
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

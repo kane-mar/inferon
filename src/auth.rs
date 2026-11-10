@@ -797,7 +797,7 @@ pub async fn callback(
         Some(_) if !state_matches => crate::json_error(
             StatusCode::BAD_REQUEST,
             "oauth_state_mismatch",
-            "OAuth state mismatch — start the sign-in again",
+            "OAuth state mismatch; start the sign-in again",
         ),
         Some(code) => complete_sign_in(&state, accounts, code, &headers, secure).await,
     };
@@ -936,7 +936,7 @@ fn provisioning_failed() -> Response {
     crate::json_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "provisioning_failed",
-        "could not set up your tenant — please try signing in again",
+        "could not set up your tenant; please try signing in again",
     )
 }
 

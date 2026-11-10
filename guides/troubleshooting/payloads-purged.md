@@ -37,7 +37,7 @@ why the dashboard still shows the traffic.
 
 - A new request appears in **Datasets** with its payload, and its trace has `raw_prompt`.
 - **Payloads** shows the retention window you set.
-- A gold set pinned before the purge still runs — its cases are independent of `traces`.
+- A gold set pinned before the purge still runs : its cases are independent of `traces`.
 
 ## When to stop and ask
 

@@ -38,7 +38,7 @@ pub async fn pin_gold(
         Ok(None) => crate::json_error(
             StatusCode::BAD_REQUEST,
             "no_verified_examples",
-            "no verified examples to pin yet — the dataset surface shows what qualifies",
+            "no verified examples to pin yet; the dataset surface shows what qualifies",
         ),
         Err(e) => internal(e.to_string()),
     }

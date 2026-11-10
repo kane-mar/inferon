@@ -8,8 +8,8 @@ turned off automatically when it makes answers worse.
 
 Only two things, and never the last turn or your tool definitions:
 
-- **Exact duplicate turns** — a message whose role and content repeat an earlier one.
-- **The oldest stale turns** — only when you set a prompt-token ceiling; the oldest go
+- **Exact duplicate turns**: a message whose role and content repeat an earlier one.
+- **The oldest stale turns**: only when you set a prompt-token ceiling; the oldest go
   first until the payload fits.
 
 **Routing → Context pruning**. Enable it, choose which rules apply, and set the ceiling if
@@ -21,7 +21,7 @@ A share of the traffic is sent **unpruned** on purpose. That is how the product 
 whether pruning helped: two arms, same requests, one measurement.
 
 - The arm is chosen by a deterministic hash of the workspace and prompt, so the same
-  prompt stays in the same arm — it does not flip between requests.
+  prompt stays in the same arm : it does not flip between requests.
 - The trace records which arm a request was in (`prune_event.held_out`) and what was
   removed (`kinds`, `turns`, `bytes`, `tokens`, `usd`).
 - **Payloads → Pruning** shows both arms and the difference in success rate.
@@ -60,7 +60,7 @@ itself on this traffic, with this evidence.
 
 ## When to stop and ask
 
-- Pruning is enabled and no trace carries `prune_event` — the policy may not be on the
+- Pruning is enabled and no trace carries `prune_event` : the policy may not be on the
   active version yet.
 - The two arms have very different request counts with a large holdout configured.
 - The rollback fired and you disagree with it: the evidence is in the policy, and the

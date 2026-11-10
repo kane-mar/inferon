@@ -2,7 +2,7 @@
 
 This is the same image the hosted service runs, on your own Docker host: the proxy,
 the dashboard, Postgres and Redis. Nothing leaves your network, and nothing calls
-home — there is no licence key, no usage metering and no update check.
+home : there is no licence key, no usage metering and no update check.
 
 Read the last section before you install. Self-hosted is **supported** but
 **self-supported**, and it gives up the hosted control plane on purpose.
@@ -12,7 +12,7 @@ Read the last section before you install. Self-hosted is **supported** but
 | You get | You give up |
 |---|---|
 | The same Rust proxy, dashboard, cost audit and router | The hosted control plane (no shared provider keys, no cross-workspace operator view) |
-| Your prompts stay on your network | Managed upgrades, backups and TLS — they are yours |
+| Your prompts stay on your network | Managed upgrades, backups and TLS: they are yours |
 | Providers on your own LAN too (`kind: local`, $0) | GitHub sign-in (optional; an operator-minted key works without it) |
 | Postgres usage data that you own | Support response times |
 
@@ -20,7 +20,7 @@ Read the last section before you install. Self-hosted is **supported** but
 
 - Docker Engine 24+ with the Compose v2 plugin.
 - About 2 GB of RAM. The proxy is small; Postgres is the steady user.
-- An OpenAI-compatible model endpoint to route to — on this host, on the LAN, or a
+- An OpenAI-compatible model endpoint to route to : on this host, on the LAN, or a
   cloud API. A local one needs no key (Ollama, LM Studio, vLLM).
 - Optional: a hostname and TLS if anything beyond your LAN will reach it.
 
@@ -42,7 +42,7 @@ WEB_BIND=0.0.0.0 docker compose --profile self-hosted up -d
 ```
 
 > Put TLS in front of both ports before you expose them outside a network you
-> trust. The `prod` profile does it with Caddy — see `docker-compose.yml` — if you
+> trust. The `prod` profile does it with Caddy, see `docker-compose.yml`, if you
 > would rather copy a setup that already works.
 
 ### Secrets worth setting
@@ -149,7 +149,7 @@ docker compose --profile self-hosted up -d        # no --build, no network
 
 The stack makes no outbound call at startup. Two things do need a network when you
 turn them on. The optional prompt embedder downloads its model file
-(`scripts/fetch-embedder.sh` — run it before exporting), and any provider you
+(`scripts/fetch-embedder.sh` : run it before exporting), and any provider you
 configure points at an endpoint you choose.
 
 ## Support boundary
@@ -165,9 +165,9 @@ configure points at an endpoint you choose.
 
 ## See also
 
-- `README.md` § Durable deployment — the reference `prod` profile with Caddy, for a
+- `README.md` § Durable deployment : the reference `prod` profile with Caddy, for a
   host you keep online.
-- [Your first request](using/first-request.md) — the five-minute path once the stack
+- [Your first request](using/first-request.md) : the five-minute path once the stack
   is up.
 
 _Last verified 2026-10-29 against the documented compose stack (master fe7c760)._

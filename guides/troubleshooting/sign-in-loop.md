@@ -25,12 +25,12 @@ Three causes:
 ## Fix
 
 1. **Check `SESSION_SECRET` is set and identical** on every container that reads the
-   cookie — one value, no trailing whitespace, no quotes in the middle. Rotating it signs
+   cookie : one value, no trailing whitespace, no quotes in the middle. Rotating it signs
    everyone out; that is expected, once.
 2. **Check the cookie in the browser**: `inferon_session` present, `Secure` when on HTTPS,
    `Path=/`, and the cookie's domain matching the address bar exactly.
 3. **Check the callback URL** in the GitHub OAuth app against
-   `${NEXT_PUBLIC_APP_URL}/auth/callback` — host *and* scheme.
+   `${NEXT_PUBLIC_APP_URL}/auth/callback` : host *and* scheme.
 4. **Behind your own proxy**, forward `Cookie` and `Set-Cookie`. A reverse proxy that drops
    them produces exactly this loop.
 
@@ -42,9 +42,9 @@ Three causes:
 
 ## When to stop and ask
 
-- One browser loops and another does not — a cookie or extension problem on that browser.
+- One browser loops and another does not : a cookie or extension problem on that browser.
 - Sign-in loops only for users who arrived after a deploy: the secret changed.
-- Everything works over `http://` and not over `https://` — a `Secure` cookie being set on a
+- Everything works over `http://` and not over `https://` , a `Secure` cookie being set on a
   plain-HTTP page, or the reverse.
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

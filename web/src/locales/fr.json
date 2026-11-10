@@ -1,6 +1,6 @@
 {
   "Index": {
-    "meta_title": "Inferon — voyez le coût réel de chaque requête d’IA",
+    "meta_title": "Inferon: voyez le coût réel de chaque requête d’IA",
     "meta_description": "Une passerelle compatible avec l’API OpenAI. Elle mesure, protège et oriente votre trafic d’IA pour que vous voyiez toujours le coût réel et restiez dans votre budget."
   },
   "Navbar": {
@@ -16,7 +16,7 @@
   "Hero": {
     "badge": "Compatible avec l’API OpenAI",
     "title": "Sachez ce que chaque requête d’IA <important>coûte vraiment</important>.",
-    "description": "Inferon se place entre votre application et les fournisseurs d’IA. Il mesure chaque requête, protège votre budget et envoie le trafic vers des modèles moins chers — et votre client OpenAI actuel continue de fonctionner sans changement.",
+    "description": "Inferon se place entre votre application et les fournisseurs d’IA. Il mesure chaque requête, protège votre budget et envoie le trafic vers des modèles moins chers: et votre client OpenAI actuel continue de fonctionner sans changement.",
     "primary_button": "Se connecter avec GitHub",
     "secondary_button": "Voir le code source"
   },
@@ -24,7 +24,7 @@
     "section_subtitle": "Fonctionnalités",
     "section_title": "Tout ce qu’il faut pour faire confiance à vos dépenses d’IA",
     "feature1_title": "Le coût réel de chaque requête",
-    "feature1_description": "Chaque requête enregistre son nombre de tokens et ce que le fournisseur a facturé, en dollars et cents exacts — jamais une estimation arrondie.",
+    "feature1_description": "Chaque requête enregistre son nombre de tokens et ce que le fournisseur a facturé, en dollars et cents exacts: jamais une estimation arrondie.",
     "feature2_title": "Protection du budget",
     "feature2_description": "Fixez un budget par espace de travail. Quand il baisse, Inferon passe à un modèle moins cher au lieu de laisser la facture dépasser la limite.",
     "feature3_title": "Vérificateur de sortie",
@@ -176,8 +176,8 @@
     "label_field": "Libellé",
     "label_placeholder": "ex. production",
     "create": "Créer une clé",
-    "key_created": "Nouvelle clé — copiez-la maintenant",
-    "key_once": "Affichée une seule fois — copiez-la",
+    "key_created": "Nouvelle clé: copiez-la maintenant",
+    "key_once": "Affichée une seule fois: copiez-la",
     "created": "Créée",
     "last_used": "Dernière utilisation",
     "status_label": "Statut",
@@ -274,8 +274,8 @@
     "not_checked": "Non testé",
     "list_title": "Vos fournisseurs ({count})",
     "test_result": "Résultat du test",
-    "test_ok": "Connecté — {count} modèles",
-    "test_failed": "Échec — {error}",
+    "test_ok": "Connecté: {count} modèles",
+    "test_failed": "Échec: {error}",
     "edit": "Modifier",
     "edit_title": "Modifier le fournisseur",
     "rotate_key": "Clé API (remplacer)",
@@ -300,11 +300,11 @@
     "disable": "Désactiver",
     "make_default": "Définir par défaut",
     "test_connection": "Tester la connexion",
-    "probe_ok": "Connecté — {count} modèles",
+    "probe_ok": "Connecté: {count} modèles",
     "probe_failed": "Fournisseur injoignable",
     "local_note": "Joignable sur votre réseau",
     "key_optional": "Laisser vide si le point d'accès n'exige aucune clé",
-    "local_free": "Gratuit — tourne sur votre propre matériel"
+    "local_free": "Gratuit: tourne sur votre propre matériel"
   },
   "QualityPage": {
     "title_bar": "Qualité",
@@ -348,7 +348,7 @@
     "tier_pairs_cheap": "Modèle économique",
     "tier_pairs_select": "Sélectionner un modèle…",
     "tier_pairs_add": "Ajouter la paire",
-    "tier_pairs_inactive": "inactive — un des modèles est désactivé",
+    "tier_pairs_inactive": "inactive: un des modèles est désactivé",
     "tier_pairs_error": "Non enregistré",
     "prune": "Élagage du contexte",
     "triggers": "Traite",
@@ -386,7 +386,7 @@
   "ControlsPage": {
     "budget": "Budget mensuel (USD)",
     "spent_of": "{spent} dépensés sur {limit}",
-    "spent_unlimited": "{spent} dépensés — aucun plafond",
+    "spent_unlimited": "{spent} dépensés: aucun plafond",
     "cheap_fallback": "Modèle de repli économique",
     "cheap_help": "Utilisé quand 85 % du budget est dépensé.",
     "none": "Aucun",
@@ -525,7 +525,7 @@
     "enable": "Élaguer le contexte répété",
     "duplicates": "Supprimer les tours exactement dupliqués",
     "budget": "Limite de tokens du prompt (facultatif)",
-    "budget_placeholder": "ex. 8000 — laissez vide pour aucune limite",
+    "budget_placeholder": "ex. 8000: laissez vide pour aucune limite",
     "budget_help": "Estimé à caractères ÷ 4. Les tours les plus anciens partent d’abord, après le prompt système et le dernier tour.",
     "holdout": "Groupe de comparaison (%)",
     "holdout_help": "Part des requêtes envoyées sans élagage, pour pouvoir comparer. Limitée à 50 %.",
@@ -559,7 +559,7 @@
     "challenger": "Candidat",
     "compare": "Comparer",
     "need_two_runs": "Lancez au moins deux modèles pour les comparer.",
-    "verdict": "Verdict : {verdict} — {detail}",
+    "verdict": "Verdict : {verdict}: {detail}",
     "owner_only": "Seul le propriétaire de l’espace de travail peut lancer des évaluations.",
     "error": "Non enregistré"
   },
@@ -594,7 +594,7 @@
     "samples": "Requêtes mesurées",
     "within_contract": "dans la promesse de 1 ms",
     "over_contract": "au-delà de la promesse de 1 ms",
-    "not_enough_samples": "pas encore assez de données — {count} nécessaires",
+    "not_enough_samples": "pas encore assez de données: {count} nécessaires",
     "claim": "La promesse",
     "claim_p50": "p50 < 1 ms",
     "met": "tenue",

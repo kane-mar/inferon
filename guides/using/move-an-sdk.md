@@ -98,7 +98,7 @@ These calls need a provider of the matching type. An Anthropic SDK sends to
 with no Anthropic provider and the answer is:
 
 ```json
-{"error":{"message":"no Anthropic provider configured — add one in Dashboard → Providers","type":"no_provider"}}
+{"error":{"message":"no Anthropic provider configured; add one in Dashboard → Providers","type":"no_provider"}}
 ```
 
 ## Four things that go wrong

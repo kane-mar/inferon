@@ -30,7 +30,7 @@ fails to decrypt).
 
 1. **Read the container's log** before anything else:
    `docker compose logs --tail=50 proxy` (or `web`).
-2. **Check the container is actually up**: `docker compose ps` — `Restarting` is not healthy,
+2. **Check the container is actually up**: `docker compose ps` , `Restarting` is not healthy,
    it is a crash loop.
 3. **For the proxy**: check the secrets it needs are present (presence, not values):
    `SESSION_SECRET`, `PROVIDER_ENCRYPTION_KEY`, `OPERATOR_API_KEY` when the operator views
@@ -38,7 +38,7 @@ fails to decrypt).
 4. **For migrations**: run `./scripts/migrate.sh` and read the output; a failed migration
    leaves the proxy unable to answer even though it started.
 5. **Restart the container, not the stack**: `docker compose --profile prod up -d --no-build proxy`
-   (or `web`) — a full `up` also recreates anything whose environment interpolation changed.
+   (or `web`) : a full `up` also recreates anything whose environment interpolation changed.
 
 ## How to confirm it worked
 
@@ -49,7 +49,7 @@ fails to decrypt).
 
 ## When to stop and ask
 
-- The container is healthy, its log is clean, and Caddy still returns `502` — a network or
+- The container is healthy, its log is clean, and Caddy still returns `502` : a network or
   routing problem between them.
 - The proxy crash-loops on the same line of its log.
 - Providers all fail to resolve after a redeploy: the encryption key changed, and the stored

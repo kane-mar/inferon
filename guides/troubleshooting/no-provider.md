@@ -10,13 +10,13 @@ The whole path from signing in to an answered request is in
 $ curl -s -w ' [%{http_code}]\n' https://inferon.agilefederation.com/v1/chat/completions \
     -H "Authorization: Bearer $INFERON_API_KEY" -H 'Content-Type: application/json' \
     -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"hi"}]}'
-{"error":{"message":"no upstream provider configured — add one in Dashboard → Providers","type":"no_provider"}} [400]
+{"error":{"message":"no upstream provider configured; add one in Dashboard → Providers","type":"no_provider"}} [400]
 ```
 
 The Anthropic surface answers with its own wording:
 
 ```json
-{"error":{"message":"no Anthropic provider configured — add one in Dashboard → Providers","type":"no_provider"}}
+{"error":{"message":"no Anthropic provider configured; add one in Dashboard → Providers","type":"no_provider"}}
 ```
 
 `GET /v1/models` still returns `200`, with an empty list:
@@ -40,12 +40,12 @@ The workspace has no provider that can take this request. There are three shapes
 
 **The refusal is recorded.** The answer carries `x-inferon-trace-id`, and that id is
 the row **Quality → Errors by cause** counts under the class `inferon_4xx`. Nothing was
-sent upstream, so there is no spend and no provider traffic — but the attempt is
+sent upstream, so there is no spend and no provider traffic , but the attempt is
 visible, with its model and its time.
 
 ## Fix
 
-1. Open **Providers**. The empty state says **No provider yet — add one so requests
+1. Open **Providers**. The empty state says **No provider yet : add one so requests
    have somewhere to go.** Press **Add provider**.
 2. Choose the **Type** that matches your account: `DeepSeek`, `OpenAI`,
    `OpenAI-compatible`, `Anthropic`, or `local` for a model on your own network.
@@ -53,7 +53,7 @@ visible, with its model and its time.
    `https://api.openai.com/v1`). For anything else, paste the endpoint that ends at
    `/v1`. The key is the provider's own key, and a `local` provider needs no key.
 4. Press **Add provider**, then **Test** on the new row. You want
-   **Connected — N models**.
+   **Connected : N models**.
 5. Press **Models** on the provider row and enable the model you ask for. Press
    **Make default** on the one you reach for most.
 6. For an Anthropic client, add a provider of type `Anthropic` and send the request to
@@ -74,7 +74,7 @@ The list is no longer empty, and a completion returns `200` with a
 
 Then **Settings → Connect your SDK** flips to **First request received**, and
 **Dashboard** counts the request within a second or two. If the request is still
-refused after this, the answer is a different one — read the body again.
+refused after this, the answer is a different one : read the body again.
 
 ## When to stop and ask
 

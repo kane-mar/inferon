@@ -8,9 +8,9 @@ applies to a pair ([models and cheaper pairs](02-models-and-tier-pairs.md)).
 
 **Routing → Controls → Automatic router**. The threshold is the only knob:
 
-- `0` — nothing is ever simple enough; every request stays where it was asked to go.
-- `0.35` — the default. Only plainly simple requests move.
-- `1` — everything that has a pair moves.
+- `0` : nothing is ever simple enough; every request stays where it was asked to go.
+- `0.35` : the default. Only plainly simple requests move.
+- `1` : everything that has a pair moves.
 
 ## How "simple" is scored
 
@@ -59,7 +59,7 @@ change with the actor and the previous value.
   `from_model` → `to_model`.
 - **Spend** shows the cheap model taking the traffic that used to go to the expensive one,
   and **Savings** attributes the difference to the router.
-- **Quality** answers the next question — did quality move? Compare against the same
+- **Quality** answers the next question : did quality move? Compare against the same
   window before the change, or run an evaluation
   ([datasets, gold sets and evals](10-datasets-gold-sets-evals.md)).
 
@@ -69,6 +69,6 @@ change with the actor and the previous value.
   `router_event`.
 - Everything moves, including tool-calling requests, with the threshold at its default.
 - The cheap model's answers are worse and you want the router to leave one prompt family
-  alone — there is no per-prompt exclusion today; that is a feature request.
+  alone : there is no per-prompt exclusion today; that is a feature request.
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

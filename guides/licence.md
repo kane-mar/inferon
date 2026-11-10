@@ -47,7 +47,7 @@ The commercial licence sells **terms**, not features:
 | Self-host for your own organisation | yes | yes |
 | An organisation with a policy against AGPL | cannot | can |
 | Warranty, indemnity, support level | no | written per agreement |
-| Same features as the free build | — | yes, identical |
+| Same features as the free build |: | yes, identical |
 
 There is no paid version of the product with more in it. If a page in these guides
 describes it, the free build has it.

@@ -7,6 +7,8 @@ rules are mechanical and checked, not remembered:
 - every published page carries a `Last verified` footer with a date and a commit;
 - every troubleshooting page uses the same five sections, in the same order;
 - the mean sentence stays under 25 words, and no sentence runs past 40;
+- no em dash in prose (the house style is a colon, a semicolon or a comma), while
+  the em dash used as a *value placeholder* inside code stays;
 - the two sales working documents stay internal: no published page links to them.
 
 Run from the repository root: `python3 scripts/check-guides.py`.
@@ -105,6 +107,16 @@ def check_footer(path, text):
         )
 
 
+# The em dash is banned in prose. It stays legal for two things: inside code (the
+# UI prints `—` where a value is missing), and in the one page that describes that
+# placeholder, where it appears inside backticks anyway.
+def check_dashes(path, text):
+    for number, line in enumerate(prose(text).splitlines(), 1):
+        without_code = re.sub(r'`[^`]*`', '', line)
+        if '\u2014' in without_code:
+            problems.append(f'{path}: em dash in prose: {line.strip()[:60]}')
+
+
 def check_sections(path, text):
     if TROUBLESHOOTING not in path.parents:
         return
@@ -139,10 +151,11 @@ for page in pages():
     check_footer(page, body)
     check_sections(page, body)
     check_reading(page, body)
+    check_dashes(page, body)
 
 if problems:
     print('\n'.join(problems))
     sys.exit(1)
 
 count = len([p for p in pages() if published(p)])
-print(f'guides ok: {count} published pages, links resolve, footers dated, sections even')
+print(f'guides ok: {count} published pages, links resolve, footers dated, sections even, no em dashes')

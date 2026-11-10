@@ -84,7 +84,7 @@ fn spawn_workers(
         .filter(|u| !u.is_empty());
     if webhook_url.is_none() {
         tracing::info!(
-            "alert webhook not configured — findings are evaluated and stored, not delivered"
+            "alert webhook not configured; findings are evaluated and stored, not delivered"
         );
     }
     let alert_client = Client::new();
@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // store and the outbound client).
     let secrets = inferon::secret::Secrets::from_env().map(Arc::new);
     if secrets.is_none() {
-        tracing::info!("provider provisioning disabled — set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
+        tracing::info!("provider provisioning disabled; set PROVIDER_ENCRYPTION_KEY (32-byte hex)");
     }
     let provider_store = Arc::new(inferon::providers::PostgresProviderStore::new(
         pool.clone(),

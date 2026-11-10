@@ -28,7 +28,7 @@ to confirm it, and when to stop and ask.
 | Page | Answers |
 |---|---|
 | [401 or 403: the key is not accepted](troubleshooting/401-403.md) | Missing, malformed or revoked key; a member hitting an owner-only action |
-| [no_provider](troubleshooting/no-provider.md) | The workspace has nowhere to send the request — the most common first failure |
+| [no_provider](troubleshooting/no-provider.md) | The workspace has nowhere to send the request: the most common first failure |
 | [429: our limit, or the provider's](troubleshooting/too-many-requests.md) | Our per-key limit versus the provider's own refusal |
 | [5xx and the fallback chain](troubleshooting/upstream-5xx.md) | A provider failure, a connection failure of ours, and what an exhausted chain returns |
 | [Empty, refused or cut short](troubleshooting/empty-refused-truncated.md) | `max_tokens`, reasoning tokens, and the four unusable-answer outcomes |

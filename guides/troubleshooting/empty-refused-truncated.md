@@ -16,7 +16,7 @@ One of these, with a `200` status:
 
 | Trace outcome | What happened | Where it shows |
 |---|---|---|
-| `empty` | a `200` with no content — usually the token budget was consumed by reasoning | **Quality → Empty rate** |
+| `empty` | a `200` with no content: usually the token budget was consumed by reasoning | **Quality → Empty rate** |
 | `truncated` | the answer hit `max_tokens` before finishing | **Quality → Cut short** |
 | `refused` | the model declined | **Quality → Refusal rate** |
 | `error` | the provider failed, timed out or was unreachable | **Quality → Errors by cause** |
@@ -55,10 +55,10 @@ Sixteen of eighteen tokens went to reasoning.
 ## When to stop and ask
 
 - `max_tokens` is large, the answer is still empty, and `reasoning_tokens` is near the
-  limit every time — the model is spending everything on thinking.
+  limit every time : the model is spending everything on thinking.
 - Answers are cut short although the prompt does not ask for anything long.
 - The refusal rate is high for prompts that worked last week: something upstream changed
-  (a model update, a system prompt, a policy) — compare the two prompt versions in
+  (a model update, a system prompt, a policy) : compare the two prompt versions in
   **Datasets → Prompts**.
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

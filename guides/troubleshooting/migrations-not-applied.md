@@ -13,7 +13,7 @@ Any of these, always right after an upgrade:
 ## What it means
 
 The Postgres entrypoint only runs `db/init/*.sql` on a **fresh volume**. Every later
-migration has to be applied explicitly — `./scripts/migrate.sh` does that, and it re-applies
+migration has to be applied explicitly : `./scripts/migrate.sh` does that, and it re-applies
 *all* files in order because each one is written to be idempotent. Nothing tracks which have
 run; the schema is the record.
 
@@ -24,7 +24,7 @@ it.
 ## Fix
 
 1. **Run the migrations** from the project root on the host:
-   `./scripts/migrate.sh` — it waits for Postgres, applies every file in order and prints
+   `./scripts/migrate.sh` : it waits for Postgres, applies every file in order and prints
    how many it applied.
 2. **Then restart what reads the schema**: the proxy (`docker compose --profile prod up -d
    --no-build proxy`). Migrations are separate from the image.
@@ -43,7 +43,7 @@ it.
 ## When to stop and ask
 
 - `migrate.sh` fails on the same statement twice.
-- A column exists and the proxy still complains about it — the proxy may be running an older
+- A column exists and the proxy still complains about it : the proxy may be running an older
   image than you think (`docker compose ps` shows the container's age).
 - Data is missing that no migration deletes: that is a restore, not a migration.
 

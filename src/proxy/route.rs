@@ -137,7 +137,7 @@ pub(crate) async fn resolve_route(
                 None => Err(json_error(
                     StatusCode::BAD_REQUEST,
                     "no_provider",
-                    "no upstream provider configured — add one in Dashboard → Providers",
+                    "no upstream provider configured; add one in Dashboard → Providers",
                 )),
             }
         }
@@ -219,9 +219,9 @@ pub(super) async fn balance_across_providers(
 /// surface the request arrived on (ITEM-050 AC5).
 pub(super) fn surface_mismatch(surface: Surface) -> Response {
     let message = match surface {
-        Surface::Anthropic => "no Anthropic provider configured — add one in Dashboard → Providers",
+        Surface::Anthropic => "no Anthropic provider configured; add one in Dashboard → Providers",
         Surface::OpenAi => {
-            "no OpenAI-compatible provider configured — add one in Dashboard → Providers"
+            "no OpenAI-compatible provider configured; add one in Dashboard → Providers"
         }
     };
     json_error(StatusCode::BAD_REQUEST, "no_provider", message)

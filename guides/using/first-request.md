@@ -28,7 +28,7 @@ You can create more keys, and revoke any of them, on **Settings → API keys**.
 
 A new workspace has no provider, so the gateway has nowhere to send a request. In
 the same card, press **Providers →** (or open **Providers** in the sidebar). The page
-says **No provider yet — add one so requests have somewhere to go.** Press **Add
+says **No provider yet : add one so requests have somewhere to go.** Press **Add
 provider**.
 
 | Field | What to enter |
@@ -38,7 +38,7 @@ provider**.
 | **Base URL** | filled in for you: `https://api.deepseek.com/v1` for DeepSeek |
 | **API key** | the key from your provider account |
 
-Press **Add provider**, then **Test** on the new row. **Connected — N models** means
+Press **Add provider**, then **Test** on the new row. **Connected : N models** means
 Inferon reached the provider and read its model list. **Cannot reach it** means the
 URL, the key or your network is wrong.
 
@@ -101,13 +101,13 @@ prompt capture, the prompt and the answer are saved too.
 
 | What you see | What it means | Fix |
 |---|---|---|
-| `401` `{"error":{"message":"missing or invalid Authorization header","type":"invalid_api_key"}}` | The request carried no key, or a key we do not know. | Send `Authorization: Bearer $INFERON_API_KEY`. If the key was revoked, create a new one — see [401 or 403](../troubleshooting/401-403.md). |
-| `400` `{"error":{"message":"no upstream provider configured — add one in Dashboard → Providers","type":"no_provider"}}` | The workspace has no provider, so there is nothing to forward to. | Do step 3 above — see [no_provider](../troubleshooting/no-provider.md). |
-| `400` `{"error":{"message":"no Anthropic provider configured — add one in Dashboard → Providers","type":"no_provider"}}` | You called `/v1/messages`, which needs a provider of type `Anthropic`. | Add an `Anthropic` provider, or call `/v1/chat/completions`. |
+| `401` `{"error":{"message":"missing or invalid Authorization header","type":"invalid_api_key"}}` | The request carried no key, or a key we do not know. | Send `Authorization: Bearer $INFERON_API_KEY`. If the key was revoked, create a new one; see [401 or 403](../troubleshooting/401-403.md). |
+| `400` `{"error":{"message":"no upstream provider configured; add one in Dashboard → Providers","type":"no_provider"}}` | The workspace has no provider, so there is nothing to forward to. | Do step 3 above; see [no_provider](../troubleshooting/no-provider.md). |
+| `400` `{"error":{"message":"no Anthropic provider configured; add one in Dashboard → Providers","type":"no_provider"}}` | You called `/v1/messages`, which needs a provider of type `Anthropic`. | Add an `Anthropic` provider, or call `/v1/chat/completions`. |
 
 ## Next steps
 
-- [Move an existing SDK to Inferon](move-an-sdk.md) — Python, Node or curl, two lines.
-- [Inferon on your own network](../inferon-self-hosted.md) — run the same stack yourself.
+- [Move an existing SDK to Inferon](move-an-sdk.md) : Python, Node or curl, two lines.
+- [Inferon on your own network](../inferon-self-hosted.md) : run the same stack yourself.
 
 _Last verified 2026-11-05 against the live host (master f2165a3)._

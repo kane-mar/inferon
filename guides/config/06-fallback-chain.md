@@ -1,7 +1,7 @@
 # A fallback chain that actually fires
 
 A fallback chain says: if this model fails in a way worth retrying, try this one next.
-It is off by default — a failing request returns its error.
+It is off by default : a failing request returns its error.
 
 **Routing → Fallback chain**. The first step is always the model your request asked for;
 you add the ones after it.
@@ -9,7 +9,7 @@ you add the ones after it.
 ## What each step handles
 
 Every step declares which failures it takes, and a failure moves to the **next step that
-handles that class** — not simply the next step:
+handles that class** : not simply the next step:
 
 | Handles | Means |
 |---|---|
@@ -35,7 +35,7 @@ happened. The trace records the move:
                   "from_model": "mock-429", "to_model": "mock-ok"}
 ```
 
-If every step fails, the client receives the **last** attempt's error — the real one, not
+If every step fails, the client receives the **last** attempt's error : the real one, not
 an invented summary. With no `checker` step in the chain, a failed schema check is
 replayed on the deployment's frontier model instead.
 
@@ -60,11 +60,11 @@ that always fires means the first step is the wrong model.
 
 ## When to stop and ask
 
-- A `429` or `5xx` reaches the client although a later step handles that class — check the
+- A `429` or `5xx` reaches the client although a later step handles that class : check the
   chain was saved under **Recent changes**.
 - Every step fires on every request: the first model is failing systematically, and the
   chain is hiding it. Fix the first step; do not lengthen the chain.
 - The chain is exhausted and the client gets an error naming a model it never asked
-  for — that is the last step's error, [by design](#what-the-client-gets).
+  for , that is the last step's error, [by design](#what-the-client-gets).
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

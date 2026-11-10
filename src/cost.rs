@@ -103,7 +103,7 @@ pub fn warn_if_unpriced(model: &str) -> bool {
         crate::metrics::count_unpriced();
         tracing::warn!(
             model,
-            "no price row — costed at the default $3.00/$15.00 per 1M; add it to cost::price_for if that is wrong"
+            "no price row; costed at the default $3.00/$15.00 per 1M. Add it to cost::price_for if that is wrong"
         );
     }
     first

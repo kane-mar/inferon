@@ -68,7 +68,7 @@ Guess nothing; measure for a day and read it back:
 ## What the client sees at the cap
 
 - **Rate limited**: `429` with `retry-after`; retrying earlier just extends the wait.
-- **Budget exhausted**: `429` with type `rate_limited` as well — the same retry
+- **Budget exhausted**: `429` with type `rate_limited` as well , the same retry
   behaviour, but raising the per-minute limit will not help; the monthly cap will.
 
 Both are visible in **Quality → Errors by cause** as `rate_limited`.
@@ -83,10 +83,10 @@ Both are visible in **Quality → Errors by cause** as `rate_limited`.
 ## When to stop and ask
 
 - A `429` arrives while both the key's limits and the workspace default are `0`, and the
-  body is the provider's own message — that is the provider rate-limiting you, not us
+  body is the provider's own message , that is the provider rate-limiting you, not us
   ([429: our limit, or the provider's](../troubleshooting/too-many-requests.md)).
 - Requests are refused at 100% of a budget you did not set.
-- A burst is refused for one service but not the other with identical keys — compare the
+- A burst is refused for one service but not the other with identical keys : compare the
   keys' own limits before the workspace default.
 
 _Last verified 2026-11-06 against the live host (master acdaffc)._

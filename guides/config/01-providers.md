@@ -29,13 +29,13 @@ curl -s https://inferon.agilefederation.com/v1/dashboard/api/providers \
 ```
 
 The four keyed types refuse an empty or missing key with `400 invalid_key`
-(`"a provider key is required"`). `local` needs no key at all — the field can be
+(`"a provider key is required"`). `local` needs no key at all : the field can be
 omitted entirely, and a local provider is stored without one.
 
 ## The key
 
 The provider's key is encrypted at rest and never shown again. The dashboard keeps a
-masked hint — the last four characters:
+masked hint : the last four characters:
 
 ```json
 {"kind":"deepseek","name":"Example","base_url":"https://api.deepseek.com/v1","key_hint":"…-key","is_default":false}
@@ -61,7 +61,7 @@ A failure says what the provider said, so you can tell a wrong key from a wrong 
 
 The result is stored on the provider and shown as **Connected**, **Cannot reach it** or
 **Not tested**. If it says **Cannot reach it**, the problem is between the gateway and
-that URL — see
+that URL : see
 [a provider that tests as unreachable](../troubleshooting/provider-unreachable.md).
 
 ## Pick the models
@@ -76,7 +76,7 @@ listed per provider, because the same id can be served by two of them:
            {"id":"mock-expensive","enabled":true,"is_default":false}]}
 ```
 
-Only enabled models answer. The first provider you add becomes the workspace default —
+Only enabled models answer. The first provider you add becomes the workspace default:
 the one used for a model id no provider claims.
 
 ## A model on your own network
@@ -106,7 +106,7 @@ and when, and the change is visible to the whole workspace.
 - **Test** fails with a URL and key you know work from your own machine.
 - The provider's `/models` answers, but a completion returns its own `400` about the
   model name.
-- You need a provider type that is not in the five above — the gateway has no adapter
+- You need a provider type that is not in the five above : the gateway has no adapter
   for that API shape, and that is a feature request, not a setting.
 
 _Last verified 2026-11-06 against the live host (master 626609e)._

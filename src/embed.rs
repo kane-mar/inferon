@@ -125,7 +125,7 @@ pub fn from_env() -> std::sync::Arc<dyn Embedder> {
             }
         } else {
             tracing::info!(
-                "no embedder configured (EMBED_MODEL_PATH / EMBED_TOKENIZER_PATH) — routing stays heuristic"
+                "no embedder configured (EMBED_MODEL_PATH / EMBED_TOKENIZER_PATH); routing stays heuristic"
             );
         }
     }

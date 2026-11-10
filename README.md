@@ -14,40 +14,40 @@ backlog is in `BACKLOG.md`; item files are in `.backlog/`.
 
 ## What it does
 
-- **`POST /v1/chat/completions`** — a pass-through any OpenAI SDK can call.
+- **`POST /v1/chat/completions`**: a pass-through any OpenAI SDK can call.
   Streaming responses (SSE, `text/event-stream`) are piped through byte for byte;
   non-streaming responses pass through as JSON. The time to the first token (TTFT)
   is measured at the first chunk from the provider.
-- **Workspace auth** — every request needs `Authorization: Bearer <workspace key>`.
+- **Workspace auth**: every request needs `Authorization: Bearer <workspace key>`.
   Keys are stored as SHA-256 hashes in the `api_keys` table. A workspace can hold
   several keys and each can be revoked on its own; a revoked key stops working at
   once. The proxy swaps the header for the workspace's master key, so client keys
   never reach the provider and are never logged.
-- **Usage records** — every finished request (streaming or not, success or error)
+- **Usage records**: every finished request (streaming or not, success or error)
   is written to the Postgres `traces` table in the background. It stores the tokens
   (read from the last SSE chunk for streams), TTFT, total duration, the raw prompt
   and completion, the cost of that one request (`rust_decimal`, never a float), the
   waste flags, and a `truncated` marker for stopped streams.
-- **Cost linter** (background worker) — finds three kinds of waste and estimates
+- **Cost linter** (background worker) : finds three kinds of waste and estimates
   what each one costs: an over-provisioned gpt-4o call, the same 4k+ token system
   prompt sent again with no cache, and gpt-4o used on simple text.
-- **Dashboard** — the TypeScript web app at `/dashboard` (one workspace at a time),
+- **Dashboard**: the TypeScript web app at `/dashboard` (one workspace at a time),
   backed by the JSON APIs under `/v1/dashboard/api/*`.
 
 ## Architecture
 
 Two deployment units behind one Caddy TLS ingress (compose profile `prod`):
 
-- **`proxy` (Rust)** — the data plane: `/v1/*` (the OpenAI-compatible API and the
+- **`proxy` (Rust)**: the data plane: `/v1/*` (the OpenAI-compatible API and the
   dashboard JSON), `/auth/*` (GitHub OAuth and signed sessions), `/healthz`. The
   web app never touches it directly.
-- **`web` (Next.js)** — the human surfaces: landing page, the sign-in-only
+- **`web` (Next.js)**: the human surfaces: landing page, the sign-in-only
   dashboard (`/dashboard`, `/dashboard/onboarding`, `/dashboard/providers`,
   `/dashboard/keys`, `/dashboard/members`) and the operator console
   (`/dashboard/operator`). When it renders a page it calls the Rust API over the
   compose network (`INFERON_API_URL`) and forwards the browser's session cookie;
   the browser talks to the same public origin. The web app never checks sessions
-  itself — sign-in lives only in the Rust proxy.
+  itself : sign-in lives only in the Rust proxy.
 
 **Providers (ITEM-043)**: a workspace can add its own provider at
 `/dashboard/providers` (DeepSeek, OpenAI, or any OpenAI-compatible host). The keys
@@ -71,7 +71,7 @@ How long a client takes to send its body is recorded separately as `traces.body_
 and shown on the Runtime page, because it is the one part of a request the gateway
 cannot influence. This distinction was a real defect until 2026-11-08 (ITEM-135): the
 clock started at the request line, so a 1.2 MB prompt uploaded from a home connection
-was reported as gateway overhead — 1.5–2 s at the median and 7.7 s at p95, for work
+was reported as gateway overhead : 1.5–2 s at the median and 7.7 s at p95, for work
 the proxy does in about 8 ms. Rows written before that date still include the
 upload; do not read a trend across it.
 
@@ -79,7 +79,7 @@ That last part is why the claim carries a payload size. Parsing is unavoidable w
 and it is proportional to the payload: the gateway adds a few microseconds on a 4 KB
 prompt, and a **300k-token (1.2 MB) prompt spends a few milliseconds** on it. The
 dashboard states the median prompt size beside the number for exactly that reason
-(ITEM-127), and the request body is forwarded as the client sent it — it is parsed
+(ITEM-127), and the request body is forwarded as the client sent it : it is parsed
 once, never cloned and re-serialised before dispatch.
 
 "Warm" has a precise meaning: the request lands inside the cache windows (keys and
@@ -99,7 +99,7 @@ This is measured on every change, not promised:
   1 vCPU host the tail depends on the scheduler (1.1–3.5 ms seen), while a cache
   regression measured 6–28 ms;
 - the hot path makes **one** storage round trip per request (the key lookup).
-  Everything else — controls, policy, fallbacks, route, warm target, spend — is
+  Everything else, controls, policy, fallbacks, route, warm target, spend, is
   served from `src/hotpath.rs` and refreshed on every write.
 
 ## For developers
@@ -113,14 +113,14 @@ Task guides, from the first request to the things that break:
 
 Open `https://inferon.agilefederation.com/auth/login` and sign in with GitHub.
 Your first sign-in **creates your workspace** and shows your API key exactly once
-(it is stored hashed and never shown again) — copy it there. After that, signing in
+(it is stored hashed and never shown again) : copy it there. After that, signing in
 takes you straight to your dashboard.
 
 **What you can call:**
 
-- `POST /v1/chat/completions` — chat completions, streaming and non-streaming
+- `POST /v1/chat/completions`: chat completions, streaming and non-streaming
   (`stream: true|false`), OpenAI SDK-compatible
-- `GET /dashboard` — your cost dashboard (one workspace, sign in with GitHub; the
+- `GET /dashboard`: your cost dashboard (one workspace, sign in with GitHub; the
   web app reads the JSON APIs below with your session cookie)
   - JSON: `/v1/dashboard/api/summary`, `/timeseries`, `/by-model`, `/by-prompt`,
     `/waste` (all with `?days=7|30|90`)
@@ -151,7 +151,7 @@ for chunk in client.chat.completions.create(
 ```
 
 Point your existing OpenAI SDK code at the base URL and key above. It works
-unchanged — Inferon is a drop-in proxy.
+unchanged : Inferon is a drop-in proxy.
 
 ## Quickstart (Docker)
 
@@ -164,10 +164,10 @@ curl http://localhost:8080/healthz   # → ok
 The stack is `proxy` (axum), `postgres` (the schema is applied from `db/init/` on
 first boot) and `redis` (reserved for later slices). Two profiles add more:
 
-- `--profile self-hosted` — proxy + dashboard (Next) + Postgres + Redis, with no TLS
+- `--profile self-hosted`: proxy + dashboard (Next) + Postgres + Redis, with no TLS
   ingress. This is the "run it on your own network" install:
   **[guides/inferon-self-hosted.md](guides/inferon-self-hosted.md)**.
-- `--profile prod` — the same stack behind Caddy, matching the durable host.
+- `--profile prod`: the same stack behind Caddy, matching the durable host.
 
 ## Creating a workspace key (operator / machine-only runbook)
 
@@ -176,8 +176,8 @@ first boot) and `redis` (reserved for later slices). Two profiles add more:
 > other people, and for machines and scripts. A developer should not need it day to
 > day.
 
-Workspace keys are stored **hashed**. A workspace's *upstream master key* — the key
-the proxy uses to call the provider for that workspace — is stored as plain text in
+Workspace keys are stored **hashed**. A workspace's *upstream master key* : the key
+the proxy uses to call the provider for that workspace : is stored as plain text in
 `tenants.upstream_openai_key`. That column is for the **platform's own** workspace
 and for workspaces an operator seeds with `scripts/seed-tenant.sh`. Self-serve
 workspaces are **keyless** and must add their own provider in the dashboard; the
@@ -231,23 +231,23 @@ People sign in with GitHub for browser sessions. The dashboard requires a sessio
 `/v1/chat` stays key-authed. With `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and
 `SESSION_SECRET` set:
 
-- `GET /auth/login` — sends you to GitHub; if OAuth is not configured it answers
+- `GET /auth/login`: sends you to GitHub; if OAuth is not configured it answers
   HTTP 503 (`oauth_not_configured`)
-- `GET /auth/callback` — finishes the sign-in, sets the signed session cookie
+- `GET /auth/callback`: finishes the sign-in, sets the signed session cookie
   (HttpOnly, SameSite=Lax, Secure over TLS) and redirects to `/dashboard` (new
   accounts land on `/dashboard/onboarding`, the guided first run)
-- `GET /auth/me` — the signed-in user (`github_id`/`github_login`), or 401
-- `POST /auth/logout` — expires the session cookie
+- `GET /auth/me`: the signed-in user (`github_id`/`github_login`), or 401
+- `POST /auth/logout`: expires the session cookie
 
 Sessions are stateless signed cookies (HMAC-SHA256, 30 days). A forged or expired
 cookie counts as signed out; it is never an error.
 
 The JSON APIs all need `Authorization: Bearer <workspace key>` and show one
-workspace only — no workspace can see another's data:
+workspace only : no workspace can see another's data:
 
 - `GET /v1/dashboard/api/summary?days=7` (totals, tokens, average cost per request,
   average TTFT)
-- `GET /v1/dashboard/api/timeseries?days=30&offset=0` — daily buckets for the
+- `GET /v1/dashboard/api/timeseries?days=30&offset=0`: daily buckets for the
   charts; `offset` moves the window back (`offset=days` fetches the previous period
   for the compare view)
 - `GET /v1/dashboard/api/by-model?days=7`
@@ -276,7 +276,7 @@ Repository secrets to set (Settings → Secrets and variables → Actions):
 | `INFERON_HOST` | public hostname (the Caddy site address) |
 | `OPERATOR_API_KEY` | operator credential (machine and console access) |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` / `SESSION_SECRET` | human sign-in (optional; unset means `/auth/login` answers 503). GitHub reserves the `GITHUB_` prefix for secret **names**, so the repo secrets are `OAUTH_*`; they reach the container as `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, which is what the app reads. |
-| `UPSTREAM_MASTER_KEY` | platform key for operator-seeded workspaces only (`seed-tenant.sh`) — not a self-serve pass-through (optional) |
+| `UPSTREAM_MASTER_KEY` | platform key for operator-seeded workspaces only (`seed-tenant.sh`) : not a self-serve pass-through (optional) |
 | `PROVIDER_ENCRYPTION_KEY` | 32-byte hex key that encrypts workspace provider credentials at rest (ITEM-043; unset disables provider provisioning) |
 | `OPERATOR_GITHUB_LOGINS` | comma-separated operator GitHub logins (optional) |
 | `ALERT_WEBHOOK_URL` | cost-anomaly webhook (optional) |
@@ -382,7 +382,7 @@ cargo test --features embedder --release -- --ignored --nocapture embed_semantic
 ```
 src/cost.rs      price table + cost math (rust_decimal, cache-hit aware)
 src/linter.rs    waste rules (over-provisioned / cache-miss / model misuse)
-src/dashboard.rs workspace-scoped + operator JSON APIs (no HTML — the frontend owns the UI)
+src/dashboard.rs workspace-scoped + operator JSON APIs (no HTML : the frontend owns the UI)
 src/tenant.rs    workspace + API-key persistence (TenantStore: in-memory + Postgres)
 src/telemetry.rs batched trace worker + Postgres sink
 src/usage.rs     token-usage parsing (SSE + JSON)
@@ -428,4 +428,4 @@ The full text is in [`LICENSE`](LICENSE). [`LICENSES.md`](LICENSES.md) lists eve
 dependency licence, why each one is allowed, and how to run the audit. Before you
 contribute, read [`CONTRIBUTING.md`](CONTRIBUTING.md): contributions need the
 [CLA](CLA.md), which keeps the commercial option open. The code licence does not
-grant rights to the name or logo — see [`TRADEMARKS.md`](TRADEMARKS.md).
+grant rights to the name or logo : see [`TRADEMARKS.md`](TRADEMARKS.md).

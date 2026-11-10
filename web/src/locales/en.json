@@ -1,6 +1,6 @@
 {
   "Index": {
-    "meta_title": "Inferon — see what every AI request really costs",
+    "meta_title": "Inferon: see what every AI request really costs",
     "meta_description": "A gateway that works with the OpenAI API. It measures, protects and routes your AI traffic, so you always see the real cost and stay inside your budget."
   },
   "Navbar": {
@@ -16,7 +16,7 @@
   "Hero": {
     "badge": "Works with the OpenAI API",
     "title": "Know what every AI request <important>really costs</important>.",
-    "description": "Inferon sits between your app and the AI providers. It measures each request, protects your budget and moves traffic to cheaper models — and your current OpenAI client keeps working unchanged.",
+    "description": "Inferon sits between your app and the AI providers. It measures each request, protects your budget and moves traffic to cheaper models: and your current OpenAI client keeps working unchanged.",
     "primary_button": "Sign in with GitHub",
     "secondary_button": "View source"
   },
@@ -24,7 +24,7 @@
     "section_subtitle": "Features",
     "section_title": "Everything you need to trust your AI spend",
     "feature1_title": "The real cost of each request",
-    "feature1_description": "Every request stores its token counts and what the provider charged, in exact dollars and cents — never a rounded estimate.",
+    "feature1_description": "Every request stores its token counts and what the provider charged, in exact dollars and cents: never a rounded estimate.",
     "feature2_title": "Budget protection",
     "feature2_description": "Set a budget for each workspace. When it runs low, Inferon switches to a cheaper model instead of letting the bill run past the limit.",
     "feature3_title": "Output checker",
@@ -176,8 +176,8 @@
     "label_field": "Label",
     "label_placeholder": "e.g. production",
     "create": "Create key",
-    "key_created": "New key — copy it now",
-    "key_once": "Shown once — copy it now",
+    "key_created": "New key: copy it now",
+    "key_once": "Shown once: copy it now",
     "created": "Created",
     "last_used": "Last used",
     "status_label": "Status",
@@ -274,8 +274,8 @@
     "not_checked": "Not tested",
     "list_title": "Your providers ({count})",
     "test_result": "Test result",
-    "test_ok": "Connected — {count} models",
-    "test_failed": "Failed — {error}",
+    "test_ok": "Connected: {count} models",
+    "test_failed": "Failed: {error}",
     "edit": "Edit",
     "edit_title": "Edit provider",
     "rotate_key": "API key (replace)",
@@ -300,11 +300,11 @@
     "disable": "Disable",
     "make_default": "Make default",
     "test_connection": "Test connection",
-    "probe_ok": "Connected — {count} models",
+    "probe_ok": "Connected: {count} models",
     "probe_failed": "Could not reach the provider",
     "local_note": "Reachable on your network",
     "key_optional": "Leave blank if the endpoint needs no key",
-    "local_free": "Free — runs on your own hardware"
+    "local_free": "Free: runs on your own hardware"
   },
   "QualityPage": {
     "title_bar": "Quality",
@@ -348,7 +348,7 @@
     "tier_pairs_cheap": "Cheap model",
     "tier_pairs_select": "Select a model…",
     "tier_pairs_add": "Add pair",
-    "tier_pairs_inactive": "inactive — one of the models is disabled",
+    "tier_pairs_inactive": "inactive: one of the models is disabled",
     "tier_pairs_error": "Could not save",
     "prune": "Context pruning",
     "triggers": "Handles",
@@ -386,7 +386,7 @@
   "ControlsPage": {
     "budget": "Monthly budget (USD)",
     "spent_of": "{spent} spent of {limit}",
-    "spent_unlimited": "{spent} spent — no cap set",
+    "spent_unlimited": "{spent} spent: no cap set",
     "cheap_fallback": "Cheap fallback model",
     "cheap_help": "Used once 85% of the budget is spent.",
     "none": "None",
@@ -525,7 +525,7 @@
     "enable": "Prune repeated context",
     "duplicates": "Drop exact duplicate turns",
     "budget": "Prompt-token limit (optional)",
-    "budget_placeholder": "e.g. 8000 — leave blank for no limit",
+    "budget_placeholder": "e.g. 8000: leave blank for no limit",
     "budget_help": "Estimated as characters ÷ 4. The oldest turns go first, after the system prompt and the last turn.",
     "holdout": "Comparison group (%)",
     "holdout_help": "Share of requests sent without pruning, so you can compare. Limited to 50%.",
@@ -559,7 +559,7 @@
     "challenger": "Challenger",
     "compare": "Compare",
     "need_two_runs": "Run at least two models to compare them.",
-    "verdict": "Verdict: {verdict} — {detail}",
+    "verdict": "Verdict: {verdict}: {detail}",
     "owner_only": "Only the workspace owner can run evals.",
     "error": "Could not save"
   },
@@ -594,7 +594,7 @@
     "samples": "Requests measured",
     "within_contract": "inside the 1 ms claim",
     "over_contract": "over the 1 ms claim",
-    "not_enough_samples": "not enough data yet — {count} needed",
+    "not_enough_samples": "not enough data yet: {count} needed",
     "claim": "The claim",
     "claim_p50": "p50 < 1 ms",
     "met": "met",

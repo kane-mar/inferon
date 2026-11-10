@@ -6,9 +6,9 @@ part.
 
 ## Expensive and cheap, in this product
 
-- **Expensive (frontier)** — the model your request asks for. It is the default
+- **Expensive (frontier)**: the model your request asks for. It is the default
   answer, and nothing changes it unless you turn something on.
-- **Cheap** — the model a request can be moved to when the work looks simple. A
+- **Cheap**: the model a request can be moved to when the work looks simple. A
   **pair** names both: `expensive → cheap`.
 
 Two pairs exist on every workspace, and you never have to configure them:
@@ -18,7 +18,7 @@ Two pairs exist on every workspace, and you never have to configure them:
 | `gpt-4o` | `gpt-4o-mini` |
 | `deepseek-v4-pro` | `deepseek-flash` |
 
-`GET /v1/dashboard/api/routing` returns your own pairs — empty means the built-in table
+`GET /v1/dashboard/api/routing` returns your own pairs : empty means the built-in table
 above is what applies:
 
 ```json
@@ -36,7 +36,7 @@ Each row is returned with a verdict:
 ```
 
 `active` is the honest part: a pair only applies while **both** models can be routed to
-right now. Disable one of them and the pair reports `active: false` and stops applying —
+right now. Disable one of them and the pair reports `active: false` and stops applying:
 it is shown, not silently dropped.
 
 Save a pair and the next request follows it. **Routing → Recent changes** records the
@@ -92,7 +92,7 @@ provider that fails its reachability test is skipped rather than tried.
 - A pair reports `active: true` and a request that should have been downgraded was not,
   with `router_event` absent.
 - Two providers serve the same model and every request goes to the slower one.
-- The cheap model's answers are visibly worse and the evaluation says they are fine —
+- The cheap model's answers are visibly worse and the evaluation says they are fine:
   that is a gold set problem, not a pairing problem.
 
 _Last verified 2026-11-06 against the live host (master 626609e)._
