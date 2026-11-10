@@ -46,7 +46,7 @@ export const MembersPanel = (props: { data: MembersResponse }) => {
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-muted-foreground">{t('github_login')}</span>
                 <input
-                  className="rounded-sm border bg-background px-3 py-2"
+                  className="rounded-md border bg-background px-3 py-2"
                   value={login}
                   onChange={event => setLogin(event.target.value)}
                   placeholder={t('invite_placeholder')}

@@ -12,6 +12,7 @@ import {
   CompareToggle,
   MetricTabs,
 } from '@/features/dashboard/DashboardToolbar';
+import { Empty } from '@/features/dashboard/Empty';
 import { Icon } from '@/features/dashboard/Icon';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { LineChart } from '@/features/dashboard/LineChart';
@@ -136,7 +137,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         {header}
         <div className="mt-6">
           <Card title={t('empty_title')} icon="activity">
-            <p className="text-sm text-muted-foreground">{t('empty_state')}</p>
+            <Empty label={t('empty_state')} />
             <div className="mt-4 flex flex-wrap gap-2">
               <Link href="/dashboard/settings" className={buttonVariants()}>
                 {t('empty_connect')}
@@ -257,7 +258,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
       </div>
 
       {findings.length > 0 && (
-        <div className="mt-4">
+        <div className="mt-6">
           <Card title={t('attention')} icon="warning">
             <ul className="divide-y">
               {findings.map(finding => (
@@ -288,7 +289,7 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         </div>
       )}
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card
           title={t('usage_over_time')}
           icon="activity"

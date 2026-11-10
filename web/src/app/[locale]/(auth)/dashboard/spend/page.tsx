@@ -161,7 +161,7 @@ export default async function SpendReportPage(props: {
           />
           {models.length > 0 && (
             <table className="mt-4 w-full text-left text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-muted-foreground">
                   <th className={REPORT_HEAD}>{t('model')}</th>
                   <th className={RIGHT}>{t('requests')}</th>
@@ -210,7 +210,7 @@ export default async function SpendReportPage(props: {
             empty={t('no_data')}
           />
           {providerRows.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-6">
               <SpendBreakdown
                 kind="provider"
                 rows={providerRows}
@@ -231,7 +231,7 @@ export default async function SpendReportPage(props: {
             empty={t('no_data')}
           />
           {keyRows.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-6">
               <SpendBreakdown
                 kind="key"
                 rows={keyRows}
@@ -249,7 +249,7 @@ export default async function SpendReportPage(props: {
               )
             : (
                 <table className="w-full text-left text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
                       <th className={REPORT_HEAD}>{t('prompt_hash')}</th>
                       <th className={RIGHT}>{t('requests')}</th>
@@ -296,7 +296,7 @@ export default async function SpendReportPage(props: {
       </div>
 
       {/* The unit of work: what one client transaction actually costs. */}
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={heading('transactions')} icon="activity">
           <div className="grid grid-cols-3 gap-3">
             <KpiCard
@@ -321,7 +321,7 @@ export default async function SpendReportPage(props: {
           {sessions.sessions.length > 0 && (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b">
                     <th className={REPORT_HEAD}>{heading('transaction')}</th>
                     <th className={REPORT_HEAD}>{heading('turns')}</th>
@@ -363,12 +363,12 @@ export default async function SpendReportPage(props: {
       <div className="mt-8">
         <h2 className="text-lg font-semibold">{auditCopy('title_bar')}</h2>
       </div>
-      <div className="mt-3">
+      <div className="mt-6">
         <AuditCards locale={locale} data={audit} />
       </div>
 
       {canEdit && (
-        <div className="mt-4">
+        <div className="mt-6">
           <Card title={auditCopy('share_title')} icon="lock">
             <ShareAuditPanel data={shares} />
           </Card>

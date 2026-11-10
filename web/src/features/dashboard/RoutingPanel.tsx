@@ -150,10 +150,7 @@ export const RoutingPanel = (props: { data: RoutingResponse; modelIds: string[] 
       )}
 
       {saved && (
-        <p className="
-          text-sm text-success
-        "
-        >
+        <p className="text-sm text-success">
           {t('saved')}
         </p>
       )}

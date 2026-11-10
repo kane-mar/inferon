@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it, vi } from 'vitest';
+import { InferonApi, InferonApiError } from './InferonApi';
+import { resolveMe } from './session';
 
 // `session.ts` imports the Next server runtime for its cookie, and `next/headers`
 // cannot be required outside the bundler (its shim points at a file only the build
@@ -10,8 +12,6 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('next/headers', () => ({
   cookies: async () => ({ get: () => undefined }),
 }));
-import { InferonApi, InferonApiError } from './InferonApi';
-import { resolveMe } from './session';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

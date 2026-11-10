@@ -59,7 +59,7 @@ export const KeysPanel = (props: { data: KeysResponse }) => {
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted-foreground">{t('label_field')}</span>
           <input
-            className="rounded-sm border bg-background px-3 py-2"
+            className="rounded-md border bg-background px-3 py-2"
             value={label}
             onChange={event => setLabel(event.target.value)}
             placeholder={t('label_placeholder')}

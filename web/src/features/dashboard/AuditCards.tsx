@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { getTranslations } from 'next-intl/server';
-import { errorClassKeys } from '@/libs/labels';
 import { formatInt } from '@/libs/dashboardMetrics';
+import { errorClassKeys } from '@/libs/labels';
 import { Finding } from './Finding';
 import { money } from './money';
 import { pct } from './reportFormat';

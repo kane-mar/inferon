@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Kane Mar
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { Empty } from './Empty';
+
 export const BarChart = (props: {
   rows: { label: string; value: number; display: string }[];
   empty: string;
 }) => {
   const max = props.rows.reduce((top, row) => Math.max(top, row.value), 0);
   if (props.rows.length === 0 || max <= 0) {
-    return <p className="text-sm text-muted-foreground">{props.empty}</p>;
+    return <Empty label={props.empty} />;
   }
   return (
     <ul className="space-y-3">

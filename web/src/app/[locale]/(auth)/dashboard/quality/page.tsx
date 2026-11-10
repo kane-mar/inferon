@@ -112,14 +112,20 @@ export default async function QualityPage(props: {
         />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('by_error_class')} icon="warning">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b">
                   <th className={HEAD}>{t('class')}</th>
-                  <th className={`${HEAD} text-right`}>{t('count')}</th>
+                  <th className={`
+                    ${HEAD}
+                    text-right
+                  `}
+                  >
+                    {t('count')}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -136,12 +142,21 @@ export default async function QualityPage(props: {
                       <td className={CELL}>
                         <div className="font-medium">{label}</div>
                         {code && (
-                          <code className="mt-1 block text-xs text-muted-foreground">
+                          <code className="
+                            mt-1 block text-xs text-muted-foreground
+                          "
+                          >
                             {code}
                           </code>
                         )}
                       </td>
-                      <td className={`${CELL} text-right`}>{count}</td>
+                      <td className={`
+                        ${CELL}
+                        text-right
+                      `}
+                      >
+                        {count}
+                      </td>
                     </tr>
                   );
                 })}
@@ -151,7 +166,7 @@ export default async function QualityPage(props: {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('by_model')} icon="quality">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -200,7 +215,7 @@ export default async function QualityPage(props: {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('by_prompt')} icon="layers">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -244,7 +259,7 @@ export default async function QualityPage(props: {
           </div>
         </Card>
       </div>
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={evalsCopy('title_bar')} icon="ok">
           <EvalsPanel
             goldSets={evals.gold_sets}

@@ -15,21 +15,18 @@ import { formatInt } from '@/libs/dashboardMetrics';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
+import { cn } from '@/utils/Helpers';
 
 /** A labelled on/off/known value, used by every card here. */
 const State = (props: { label: string; value: string; tone?: 'good' | 'off' }) => (
   <div className="flex items-baseline justify-between gap-3 py-1">
     <span className="text-sm text-muted-foreground">{props.label}</span>
     <span
-      className={`
-        text-sm font-medium
-        ${props.tone === 'good'
-    ? `
-      text-success
-    `
-    : ''}
-        ${props.tone === 'off' ? 'text-muted-foreground' : ''}
-      `}
+      className={cn(
+        'text-sm font-medium',
+        props.tone === 'good' && 'text-success',
+        props.tone === 'off' && 'text-muted-foreground',
+      )}
     >
       {props.value}
     </span>
@@ -114,7 +111,8 @@ export default async function PayloadsPage(props: {
         <Card
           title={t('capture')}
           action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
-          icon="store">
+          icon="store"
+        >
           <State
             label={t('storing')}
             value={capture.enabled ? t('on') : t('off')}
@@ -136,7 +134,8 @@ export default async function PayloadsPage(props: {
         <Card
           title={t('lint')}
           action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
-          icon="lint">
+          icon="lint"
+        >
           <State
             label={t('lint_state')}
             value={lint.enabled ? t('on') : t('off')}
@@ -180,7 +179,8 @@ export default async function PayloadsPage(props: {
         <Card
           title={t('pruning')}
           action={<DocsLink guide="config/08-pruning-and-comparison" label={t('docs')} />}
-          icon="prune">
+          icon="prune"
+        >
           {pruning.policy == null || !pruning.policy.enabled
             ? <p className="text-sm text-muted-foreground">{t('pruning_off')}</p>
             : (
@@ -225,7 +225,8 @@ export default async function PayloadsPage(props: {
         <Card
           title={t('pii')}
           action={<DocsLink guide="config/09-payloads-retention-pii" label={t('docs')} />}
-          icon="pii">
+          icon="pii"
+        >
           <State
             label={t('detection')}
             value={pii.detection ? t('on') : t('off')}

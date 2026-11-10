@@ -136,7 +136,7 @@ export default async function RuntimePage(props: {
         </p>
       )}
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('claim')} icon="ok">
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 text-sm">
@@ -163,7 +163,7 @@ export default async function RuntimePage(props: {
           Each payload band is measured on its own, with the client's upload
           beside it, so "the gateway got slower" and "we are sending bigger
           prompts" cannot be confused again. */}
-      <div className="mt-4">
+      <div className="mt-6">
         <Card
           title={t('bands_title')}
           icon="latency"
@@ -173,7 +173,7 @@ export default async function RuntimePage(props: {
             ? <p className="text-sm text-muted-foreground">{t('no_traffic')}</p>
             : (
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
                       <th className={LEFT}>{t('band')}</th>
                       <th className={RIGHT}>{t('requests')}</th>
@@ -217,10 +217,10 @@ export default async function RuntimePage(props: {
           stays put is a regression; a band whose payload grew is bigger prompts.
           The two are told apart server-side and drawn differently here. */}
       {bands.some(row => row.points.length > 1) && (
-        <div className="mt-4">
+        <div className="mt-6">
           <Card title={t('drift_title')} icon="activity">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-muted-foreground">
                   <th className={LEFT}>{t('band')}</th>
                   {buckets.map(bucket => (
@@ -297,7 +297,7 @@ export default async function RuntimePage(props: {
       )}
 
       {/* End to end, so the proxy's share is visible. */}
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('end_to_end')} icon="latency">
           <div className="
             grid grid-cols-2 gap-3
@@ -349,7 +349,7 @@ export default async function RuntimePage(props: {
       {/* Model × time matrix: degradation at a glance (ITEM-099). Empty cells
           are "no traffic" — visually distinct from a fast/healthy day. */}
       {data.heatmap.models.length > 0 && (
-        <div className="mt-4">
+        <div className="mt-6">
           <Card
             title={t('heatmap', { step: data.heatmap.step })}
             icon="activity"
@@ -372,7 +372,7 @@ export default async function RuntimePage(props: {
           >
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead>
+                <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-muted-foreground">
                     <th className="
                       py-2.5 pr-3 font-medium text-muted-foreground
@@ -462,11 +462,11 @@ export default async function RuntimePage(props: {
       )}
 
       {/* Where the overhead goes. */}
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('by_model')} icon="runtime">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b">
                   <th className={HEAD}>{t('model')}</th>
                   <th className={HEAD}>{t('requests')}</th>

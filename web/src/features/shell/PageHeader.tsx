@@ -10,7 +10,7 @@ export const PageHeader = (props: {
 }) => (
   <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
     <div>
-      <h1 className="text-2xl font-semibold">{props.title}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-balance">{props.title}</h1>
 
       {props.description && (
         <p className="text-sm font-medium text-muted-foreground">

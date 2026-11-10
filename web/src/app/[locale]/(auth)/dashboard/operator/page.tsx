@@ -6,6 +6,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Adaptation } from '@/features/dashboard/Adaptation';
 import { Card } from '@/features/dashboard/Card';
+import { Empty } from '@/features/dashboard/Empty';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { WindowChip } from '@/features/dashboard/WindowChip';
@@ -144,12 +145,12 @@ export default async function OperatorPage(props: OperatorPageProps) {
         <Card title={t('tenants')} icon="store">
           {tenants.tenants.length === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+                <Empty label={t('no_data')} />
               )
             : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-card">
                       <tr className="border-b text-muted-foreground">
                         <th className="py-2 font-medium">{t('tenant')}</th>
                         <th className="py-2 font-medium">{t('requests')}</th>
@@ -181,12 +182,12 @@ export default async function OperatorPage(props: OperatorPageProps) {
         <Card title={t('guard')} icon="quality">
           {guard.guarded_requests === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+                <Empty label={t('no_data')} />
               )
             : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-card">
                       <tr className="border-b text-muted-foreground">
                         <th className="py-2 font-medium">{t('outcome')}</th>
                         <th className="py-2 font-medium">{t('requests')}</th>
@@ -230,16 +231,16 @@ export default async function OperatorPage(props: OperatorPageProps) {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('alerts')} icon="warning">
           {alerts.alerts.length === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+                <Empty label={t('no_data')} />
               )
             : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-card">
                       <tr className="border-b text-muted-foreground">
                         <th className="py-2 font-medium">{t('tenant')}</th>
                         <th className="py-2 font-medium">{t('class')}</th>
@@ -283,12 +284,12 @@ export default async function OperatorPage(props: OperatorPageProps) {
         <Card title={t('evolution')} icon="layers">
           {evolution.jobs.length === 0
             ? (
-                <p className="text-sm text-muted-foreground">{t('no_data')}</p>
+                <Empty label={t('no_data')} />
               )
             : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-card">
                       <tr className="border-b text-muted-foreground">
                         <th className="py-2 font-medium">{t('tenant')}</th>
                         <th className="py-2 font-medium">{t('adapter')}</th>

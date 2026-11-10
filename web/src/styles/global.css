@@ -190,4 +190,39 @@
   samp {
     @apply font-mono;
   }
+  /*
+   * ITEM-146: a heading reached by an anchor must not land under the sticky bar,
+   * and every transition in the product is short enough that one global opt-out
+   * is the honest fix for readers who asked for less motion.
+   */
+  :target {
+    scroll-margin-top: 5rem;
+  }
+  /*
+   * ITEM-146: a keyboard focus ring everywhere, not only where a component
+   * remembered one. The accent ink is 7.7:1 on the canvas, so the ring is visible
+   * without being a colour block.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  /*
+   * Numbers are compared, not read, so they never wobble when they change: the
+   * one place tabular figures belong is the default for data, not an opt-in per
+   * cell.
+   */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
 }

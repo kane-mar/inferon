@@ -11,12 +11,15 @@ export const Card = (props: {
   action?: React.ReactNode;
   children: React.ReactNode;
 }) => (
-  <section className="rounded-lg border bg-card text-card-foreground shadow-sm">
+  <section className="
+    overflow-hidden rounded-lg border bg-card text-card-foreground
+  "
+  >
     <header className="
-      flex items-center justify-between gap-3 border-b px-4 py-3
+      flex items-center justify-between gap-3 border-b px-5 py-3.5
     "
     >
-      <h2 className="flex items-center gap-2 font-semibold">
+      <h2 className="flex items-center gap-2 font-semibold text-balance">
         {props.icon && (
           <Icon name={props.icon} size={16} className="text-muted-foreground" />
         )}
@@ -25,6 +28,6 @@ export const Card = (props: {
       {props.action}
     </header>
 
-    <div className="p-4">{props.children}</div>
+    <div className="p-5">{props.children}</div>
   </section>
 );

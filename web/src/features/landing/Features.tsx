@@ -58,10 +58,7 @@ export const Features = () => {
                 <CubeIcon />
               </div>
 
-              <div className="
-                mt-3 text-sm font-semibold
-              "
-              >
+              <div className="mt-3 text-sm font-semibold">
                 {t(title)}
               </div>
 

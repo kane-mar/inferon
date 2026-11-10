@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { buttonVariants } from '@/components/ui/buttonVariants';
 import { Link } from '@/libs/I18nNavigation';
 import { InferonApi } from '@/libs/InferonApi';
+import { cn } from '@/utils/Helpers';
 import {
   buildSnippet,
   SNIPPET_LANGS,
@@ -121,16 +122,12 @@ export const Onboarding = (props: {
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <div
-        className={`
-          flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm
-          ${
-    connected
-      ? `
-        border-success/30 bg-success/10 text-success
-      `
-      : 'text-muted-foreground'
-    }
-        `}
+        className={cn(
+          'flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm',
+          connected
+            ? 'border-success/30 bg-success/10 text-success'
+            : 'text-muted-foreground',
+        )}
       >
         <span aria-hidden>{connected ? '✓' : '⋯'}</span>
         {connected ? labels.received : labels.waiting}

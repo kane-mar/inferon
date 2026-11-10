@@ -114,10 +114,7 @@ export const PrunePanel = (props: { policy: PrunePolicy | null; canEdit: boolean
                 {busy ? t('saving') : t('save')}
               </Button>
               {saved && (
-                <span className="
-                  text-sm text-success
-                "
-                >
+                <span className="text-sm text-success">
                   {t('saved')}
                 </span>
               )}

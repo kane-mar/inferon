@@ -5,6 +5,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
+import { Empty } from '@/features/dashboard/Empty';
 import { PrunePanel } from '@/features/dashboard/PrunePanel';
 import { HEAD } from '@/features/dashboard/reportFormat';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
@@ -65,7 +66,7 @@ export default async function RoutingPage(props: RoutingPageProps) {
         <RoutingPanel data={data} modelIds={modelIds} />
       </Card>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('tier_pairs')} icon="prune">
           <TierPairsPanel
             pairs={data.tier_pairs}
@@ -75,23 +76,23 @@ export default async function RoutingPage(props: RoutingPageProps) {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('prune')} icon="prune">
           <PrunePanel policy={config.prune} canEdit={config.role === 'owner'} />
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={t('controls')} icon="activity">
           <ControlsPanel data={config} modelIds={modelIds} />
         </Card>
       </div>
 
       {data.role === 'owner' && (
-        <div className="mt-4">
+        <div className="mt-6">
           <Card title={t('audit')} icon="lock">
             {data.audit.length === 0
-              ? <p className="text-sm text-muted-foreground">{t('audit_empty')}</p>
+              ? <Empty label={t('audit_empty')} />
               : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">

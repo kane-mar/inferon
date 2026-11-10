@@ -65,7 +65,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           <select
             name="workspace"
             className="
-              rounded-sm border bg-card px-2 py-1 text-sm
+              rounded-md border bg-card px-2 py-1 text-sm
               focus-visible:border-ring focus-visible:ring-3
               focus-visible:ring-ring/50
             "
@@ -86,7 +86,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           {t('threshold')}
           <input
             className="
-              w-24 rounded-sm border bg-card px-2 py-1 text-sm tabular-nums
+              w-24 rounded-md border bg-card px-2 py-1 text-sm tabular-nums
               focus-visible:border-ring focus-visible:ring-3
               focus-visible:ring-ring/50
             "
@@ -103,7 +103,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           <select
             name="objective"
             className="
-              rounded-sm border bg-card px-2 py-1 text-sm
+              rounded-md border bg-card px-2 py-1 text-sm
               focus-visible:border-ring focus-visible:ring-3
               focus-visible:ring-ring/50
             "
@@ -124,7 +124,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           type="button"
           disabled={busy || !tenantId || threshold === ''}
           className="
-            rounded-sm border px-3 py-1.5 text-sm font-medium
+            rounded-md border px-3 py-1.5 text-sm font-medium
             disabled:opacity-40
           "
           onClick={() => act(() => api.operatorPolicySet(tenantId, { router_threshold: Number(threshold) }, props.auth))}
@@ -136,7 +136,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
           type="button"
           disabled={busy || !tenantId}
           className="
-            rounded-sm border px-3 py-1.5 text-sm font-medium
+            rounded-md border px-3 py-1.5 text-sm font-medium
             disabled:opacity-40
           "
           onClick={() => act(() => api.operatorPolicyFreeze(tenantId, props.auth))}
@@ -149,7 +149,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
             type="button"
             disabled={busy || !tenantId}
             className="
-              rounded-sm border px-3 py-1.5 text-sm font-medium
+              rounded-md border px-3 py-1.5 text-sm font-medium
               disabled:opacity-40
             "
             onClick={() => act(() => api.operatorPolicyRollback(tenantId, policy.version - 1, props.auth))}
@@ -193,7 +193,7 @@ export const Adaptation = (props: { tenants: { tenant_id: string; requests: numb
                 type="button"
                 disabled={busy}
                 className="
-                  rounded-sm border px-3 py-1.5 text-xs font-medium
+                  rounded-md border px-3 py-1.5 text-xs font-medium
                   disabled:opacity-40
                 "
                 onClick={() => act(() => api.pruneSet({

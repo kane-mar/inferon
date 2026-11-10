@@ -24,7 +24,7 @@ export type MetricSpec = {
  * (and the icon beside it), never a filled card: five coloured boxes is
  * decoration, and the eye stops telling "notable" from "normal".
  */
-export const KPI_CARD = 'rounded-lg border bg-card p-4 text-card-foreground';
+export const KPI_CARD = 'rounded-lg border bg-card p-5 text-card-foreground';
 
 /**
  * The value's colour: a warning or a failure stands out; a healthy number is the
@@ -33,11 +33,11 @@ export const KPI_CARD = 'rounded-lg border bg-card p-4 text-card-foreground';
 export const kpiValueClass = (tone: Tone | undefined): string => {
   switch (tone) {
     case 'bad':
-      return 'text-2xl font-semibold tabular-nums text-destructive';
+      return 'text-[1.75rem]/none font-semibold tracking-tight tabular-nums text-destructive';
     case 'warn':
-      return 'text-2xl font-semibold tabular-nums text-warning';
+      return 'text-[1.75rem]/none font-semibold tracking-tight tabular-nums text-warning';
     default:
-      return 'text-2xl font-semibold tabular-nums';
+      return 'text-[1.75rem]/none font-semibold tracking-tight tabular-nums';
   }
 };
 

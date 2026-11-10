@@ -6,8 +6,10 @@ import { Card } from './Card';
 /** One named audit finding: what we detect, the headline, and the numbers. */
 export const Finding = (props: {
   title: string;
-  /** ITEM-138: none. A finding states what it found and what it is worth; the
-   *  reasoning lives in the guides, linked once at the top of the report. */
+  /**
+   * ITEM-138: none. A finding states what it found and what it is worth; the
+   *  reasoning lives in the guides, linked once at the top of the report.
+   */
   description?: string;
   highlight: string;
   metrics: { label: string; value: string }[];

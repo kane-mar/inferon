@@ -107,7 +107,7 @@ export default async function DatasetsPage(props: {
         <KpiCard label={t('grouping')} icon="layers" value={groupingLabel} />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card
           title={t('by_prompt')}
           icon="datasets"
@@ -115,7 +115,7 @@ export default async function DatasetsPage(props: {
         >
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b">
                   <th className={HEAD}>{t('prompt')}</th>
                   <th className={HEAD}>{t('model')}</th>
@@ -196,7 +196,7 @@ export default async function DatasetsPage(props: {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-6">
         <Card title={promptsCopy('title_bar')} icon="layers">
           <PromptsPanel
             prompts={prompts.prompts}

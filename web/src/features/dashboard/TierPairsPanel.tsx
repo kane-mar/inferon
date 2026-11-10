@@ -73,10 +73,7 @@ export const TierPairsPanel = (props: {
             <span className="text-muted-foreground">→</span>
             <span className="flex-1 font-mono text-xs">{pair.cheap}</span>
             {!pair.active && (
-              <span className="
-                text-xs text-warning
-              "
-              >
+              <span className="text-xs text-warning">
                 {t('tier_pairs_inactive')}
               </span>
             )}

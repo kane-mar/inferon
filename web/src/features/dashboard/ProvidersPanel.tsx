@@ -462,9 +462,7 @@ export const ProvidersPanel = (props: {
                 className={cn(
                   'text-sm',
                   probe.status === 'ok'
-                    ? `
-                      text-success
-                    `
+                    ? `text-success`
                     : 'text-destructive',
                 )}
               >
@@ -503,7 +501,11 @@ export const ProvidersPanel = (props: {
                           sm:grid-cols-2
                         "
                       >
-                        <h3 className="text-sm font-semibold sm:col-span-2">
+                        <h3 className="
+                          text-sm font-semibold
+                          sm:col-span-2
+                        "
+                        >
                           {t('edit_title')}
                         </h3>
                         <label className="text-sm">
@@ -690,9 +692,7 @@ export const ProvidersPanel = (props: {
                         className={cn(
                           'border-t px-4 py-2 text-xs',
                           result.ok
-                            ? `
-                              text-success
-                            `
+                            ? `text-success`
                             : 'text-destructive',
                         )}
                       >
