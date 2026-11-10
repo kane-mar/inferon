@@ -319,11 +319,24 @@ pub async fn operator_policy_set(
                 .unwrap_or_default()
         }),
         prune: current.as_ref().and_then(|p| p.prune.clone()),
-        evidence: json!({
-            "source": "operator",
-            "by": operator,
-            "at": chrono_free_now(),
-        }),
+        // ITEM-141: keep the loop's own observation. A human changing the
+        // objective must not make the prompt-waste evidence disappear — that
+        // would leave the console blank exactly when someone is looking at it.
+        evidence: {
+            let mut evidence = json!({
+                "source": "operator",
+                "by": operator,
+                "at": chrono_free_now(),
+            });
+            if let Some(prompt) = current
+                .as_ref()
+                .and_then(|policy| policy.evidence.get("prompt"))
+                .cloned()
+            {
+                evidence["prompt"] = prompt;
+            }
+            evidence
+        },
         objective: match body.objective.as_deref() {
             Some("cost") => crate::policy::Objective::Cost,
             Some("quality") => crate::policy::Objective::Quality,
