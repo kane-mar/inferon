@@ -100,7 +100,6 @@
     "tpm_limit": "Tokens par minute (0 = aucune limite)",
     "limit_error": "Limite non enregistrée",
     "empty_title": "Aucune requête pour l'instant",
-    "empty_body": "Envoyez votre première requête",
     "empty_connect": "Connectez votre SDK",
     "empty_provider": "Ajouter un fournisseur",
     "by_prompt": "Dépenses par prompt système",
@@ -170,7 +169,8 @@
     "by_prune": "élagage",
     "by_budget": "plafond",
     "by_rate_limit": "limite de débit",
-    "by_downgrade": "palier 85 %"
+    "by_downgrade": "palier 85 %",
+    "empty_state": "Envoyez votre première requête"
   },
   "KeysPage": {
     "label_field": "Libellé",
@@ -260,7 +260,6 @@
     "name_placeholder": "Mon compte DeepSeek",
     "base_url": "URL de base",
     "key": "Clé API",
-    "key_note": "Chiffrée, affichée une fois",
     "add_title": "Ajouter un fournisseur",
     "add": "Ajouter le fournisseur",
     "adding": "Ajout…",
@@ -279,11 +278,9 @@
     "edit": "Modifier",
     "edit_title": "Modifier le fournisseur",
     "rotate_key": "Clé API (remplacer)",
-    "rotate_key_note": "Vide : clé inchangée",
     "org": "Organisation (facultatif)",
     "org_placeholder": "org-…",
     "headers": "En-têtes supplémentaires (facultatif)",
-    "headers_note": "Un Name: Value par ligne",
     "save": "Enregistrer",
     "saving": "Enregistrement…",
     "cancel": "Annuler",
@@ -302,9 +299,12 @@
     "test_connection": "Tester la connexion",
     "probe_ok": "Connecté: {count} modèles",
     "probe_failed": "Fournisseur injoignable",
-    "local_note": "Joignable sur votre réseau",
     "key_optional": "Laisser vide si le point d'accès n'exige aucune clé",
-    "local_free": "Gratuit: tourne sur votre propre matériel"
+    "local_free": "Gratuit: tourne sur votre propre matériel",
+    "key_hint": "Chiffrée, affichée une fois",
+    "rotate_key_hint": "Vide : clé inchangée",
+    "headers_hint": "Un Name: Value par ligne",
+    "local_hint": "Joignable sur votre réseau"
   },
   "QualityPage": {
     "title_bar": "Qualité",
@@ -334,7 +334,6 @@
     "chain": "Chaîne de repli",
     "help": "Relance si le modèle principal échoue",
     "primary": "Modèle principal",
-    "primary_help": "le modèle demandé par votre requête",
     "empty": "Aucun repli",
     "add_placeholder": "Ajouter un modèle de repli…",
     "remove": "Supprimer",
@@ -381,19 +380,18 @@
     "setting_pii_redact_wire": "Masquer les données personnelles (réseau)",
     "setting_fallbacks": "Chaîne de repli",
     "setting_tier_pairs": "Paires de modèles moins chers",
-    "setting_prune": "Élagage du contexte"
+    "setting_prune": "Élagage du contexte",
+    "primary_hint": "le modèle demandé par votre requête"
   },
   "ControlsPage": {
     "budget": "Budget mensuel (USD)",
     "spent_of": "{spent} dépensés sur {limit}",
     "spent_unlimited": "{spent} dépensés: aucun plafond",
     "cheap_fallback": "Modèle de repli économique",
-    "cheap_help": "Utilisé quand 85 % du budget est dépensé.",
     "none": "Aucun",
     "guard": "Vérificateur de sortie (contrôle et corrige le JSON des appels d’outils)",
     "router": "Routeur automatique (envoie les requêtes simples à un modèle moins cher)",
     "threshold": "Seuil du routeur",
-    "threshold_help": "Les requêtes notées sous ce seuil vont au modèle économique (0–1).",
     "save": "Enregistrer",
     "saving": "Enregistrement…",
     "saved": "Enregistré.",
@@ -401,12 +399,13 @@
     "error": "Non enregistré",
     "capture": "Stocker les prompts et réponses bruts (paires de jeu de données)",
     "retention": "Conserver les payloads pendant (jours)",
-    "lint": "Analyse des payloads"
+    "lint": "Analyse des payloads",
+    "cheap_hint": "Utilisé quand 85 % du budget est dépensé.",
+    "threshold_hint": "Les requêtes notées sous ce seuil vont au modèle économique (0–1)."
   },
   "SettingsPage": {
     "title_bar": "Paramètres",
     "connect_title": "Connecter votre SDK",
-    "connect_body": "Créez une clé",
     "keys_title": "Clés API",
     "members_title": "Membres",
     "workspace_title": "Espace de travail",
@@ -416,14 +415,12 @@
     "access": "Accès",
     "operator_badge": "Opérateur de la plateforme",
     "related_title": "Réglages associés",
-    "related_body": "Tous les autres réglages qui changent le traitement des requêtes.",
     "link_providers": "Fournisseurs et modèles →",
     "link_routing": "Routage, budgets et règles d’analyse →",
     "link_audit": "Facture et gaspillage évitable",
     "role_owner": "Propriétaire",
     "role_member": "Membre",
     "connect_key_step": "Créer une clé API",
-    "connect_key_step_help": "Affichée une fois",
     "connect_create_key": "Créer ma clé",
     "connect_creating": "Création…",
     "connect_create_key_failed": "Clé non créée",
@@ -434,13 +431,16 @@
     "connect_base_url": "URL de base",
     "connect_key": "Clé API",
     "connect_model_label": "Modèle",
-    "connect_model_help": "Modèle de votre première requête",
-    "connect_links_help": "Les modèles appartiennent au fournisseur qui les sert.",
     "connect_providers_link": "Fournisseurs →",
     "connect_request_step": "Envoyer la première requête",
     "connect_waiting": "En attente de votre première requête…",
     "connect_received": "Première requête reçue.",
-    "connect_go_to_dashboard": "Aller au tableau de bord"
+    "connect_go_to_dashboard": "Aller au tableau de bord",
+    "connect_text": "Créez une clé",
+    "related_text": "Tous les autres réglages qui changent le traitement des requêtes.",
+    "connect_key_step_hint": "Affichée une fois",
+    "connect_model_hint": "Modèle de votre première requête",
+    "connect_links_hint": "Les modèles appartiennent au fournisseur qui les sert."
   },
   "SpendReportPage": {
     "title_bar": "Facture",
@@ -489,9 +489,9 @@
     "share_error": "Impossible de créer le lien",
     "share_revoke_error": "Impossible de révoquer le lien",
     "public_title": "Audit de coûts",
-    "public_body": "Lecture seule, trafic réel",
     "invalid_title": "Ce lien n'est pas disponible",
-    "invalid_body": "Il a peut-être été révoqué, ou l'adresse est incorrecte."
+    "public_text": "Lecture seule, trafic réel",
+    "invalid_text": "Il a peut-être été révoqué, ou l'adresse est incorrecte."
   },
   "DatasetsPage": {
     "title_bar": "Jeux de données",
@@ -526,14 +526,14 @@
     "duplicates": "Supprimer les tours exactement dupliqués",
     "budget": "Limite de tokens du prompt (facultatif)",
     "budget_placeholder": "ex. 8000: laissez vide pour aucune limite",
-    "budget_help": "Estimé à caractères ÷ 4. Les tours les plus anciens partent d’abord, après le prompt système et le dernier tour.",
     "holdout": "Groupe de comparaison (%)",
-    "holdout_help": "Part des requêtes envoyées sans élagage, pour pouvoir comparer. Limitée à 50 %.",
     "save": "Enregistrer",
     "saving": "Enregistrement…",
     "saved": "Enregistré.",
     "owner_only": "Seul le propriétaire de l’espace de travail peut modifier l’élagage.",
-    "error": "Impossible d’enregistrer l’élagage. Veuillez réessayer."
+    "error": "Impossible d’enregistrer l’élagage. Veuillez réessayer.",
+    "budget_hint": "Estimé à caractères ÷ 4. Les tours les plus anciens partent d’abord, après le prompt système et le dernier tour.",
+    "holdout_hint": "Part des requêtes envoyées sans élagage, pour pouvoir comparer. Limitée à 50 %."
   },
   "EvalsPage": {
     "title_bar": "Évaluations",
@@ -656,7 +656,6 @@
     "off": "Désactivée",
     "retention": "conservation {days} jours",
     "days": "{days} jours",
-    "capture_off_help": "Non stockés",
     "lint_coverage": "Couverture",
     "lint_findings": "Constats",
     "prune_removed": "Requêtes élaguées",
@@ -690,7 +689,8 @@
     "redact_wire": "Masquer sur le réseau",
     "matches": "Correspondances",
     "matches_value": "{matches} sur {scanned} vérifiés",
-    "docs": "Documentation"
+    "docs": "Documentation",
+    "capture_off": "Non stockés"
   },
   "WindowChip": {
     "label": "Derniers",

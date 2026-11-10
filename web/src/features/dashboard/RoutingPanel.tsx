@@ -71,7 +71,7 @@ export const RoutingPanel = (props: { data: RoutingResponse; modelIds: string[] 
         >
           <span className="font-mono text-xs text-muted-foreground">1</span>
           <span className="font-medium">{t('primary')}</span>
-          <span className="text-xs text-muted-foreground">{t('primary_help')}</span>
+          <span className="text-xs text-muted-foreground">{t('primary_hint')}</span>
         </li>
 
         {chain.map((step, index) => (

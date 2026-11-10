@@ -77,7 +77,7 @@ export default async function PayloadsPage(props: {
           tone={capture.enabled ? 'good' : undefined}
           verdict={capture.enabled
             ? t('retention', { days: capture.retention_days })
-            : t('capture_off_help')}
+            : t('capture_off')}
         />
         <KpiCard
           label={t('lint_coverage')}

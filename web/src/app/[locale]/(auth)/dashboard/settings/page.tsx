@@ -71,7 +71,7 @@ export default async function SettingsPage(props: {
   // use. This page's own copy lives in `SettingsPage`.
   const labels: OnboardingLabels = {
     keyStep: t('connect_key_step'),
-    keyStepHelp: t('connect_key_step_help'),
+    keyStepHelp: t('connect_key_step_hint'),
     createKey: t('connect_create_key'),
     creating: t('connect_creating'),
     createKeyFailed: t('connect_create_key_failed'),
@@ -82,8 +82,8 @@ export default async function SettingsPage(props: {
     baseUrlLabel: t('connect_base_url'),
     keyLabel: t('connect_key'),
     modelLabel: t('connect_model_label'),
-    modelHelp: t('connect_model_help'),
-    linksHelp: t('connect_links_help'),
+    modelHelp: t('connect_model_hint'),
+    linksHelp: t('connect_links_hint'),
     providersLink: t('connect_providers_link'),
     requestStep: t('connect_request_step'),
     waiting: t('connect_waiting'),
@@ -106,7 +106,7 @@ export default async function SettingsPage(props: {
         "
         >
           <Card title={t('connect_title')} icon="cost">
-            <p className="mb-4 text-sm text-muted-foreground">{t('connect_body')}</p>
+            <p className="mb-4 text-sm text-muted-foreground">{t('connect_text')}</p>
             <Onboarding
               firstTraceAt={summary.first_trace_at}
               appUrl={getBaseUrl()}
@@ -145,7 +145,7 @@ export default async function SettingsPage(props: {
           </Card>
 
           <Card title={t('related_title')} icon="layers">
-            <p className="mb-3 text-sm text-muted-foreground">{t('related_body')}</p>
+            <p className="mb-3 text-sm text-muted-foreground">{t('related_text')}</p>
             <ul className="space-y-2 text-sm">
               <li>
                 <Link href="/dashboard/providers" className={LINK}>

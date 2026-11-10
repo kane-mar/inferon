@@ -32,7 +32,7 @@ export default async function PublicAuditPage(props: {
     return (
       <main className="mx-auto max-w-xl p-10 text-center">
         <h1 className="text-2xl font-semibold">{t('invalid_title')}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t('invalid_body')}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{t('invalid_text')}</p>
       </main>
     );
   }
@@ -74,7 +74,7 @@ export default async function PublicAuditPage(props: {
     "
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeader title={t('public_title')} description={t('public_body')} />
+        <PageHeader title={t('public_title')} description={t('public_text')} />
         <AutoRefresh label={t('live')} />
       </div>
       <AuditCards locale={locale} data={data} />

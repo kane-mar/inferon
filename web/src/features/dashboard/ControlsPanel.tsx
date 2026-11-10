@@ -124,7 +124,7 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
           <option value="">{t('none')}</option>
           {modelIds.map(id => <option key={id} value={id}>{id}</option>)}
         </select>
-        <span className="mt-1 block text-xs text-muted-foreground">{t('cheap_help')}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">{t('cheap_hint')}</span>
       </label>
 
       <label className="flex items-center gap-2 text-sm">
@@ -181,7 +181,7 @@ export const ControlsPanel = (props: { data: TenantConfig; modelIds: string[] })
             disabled={!canEdit || !routerOn}
             onChange={event => setThreshold(event.target.value)}
           />
-          <span className="mt-1 block text-xs text-muted-foreground">{t('threshold_help')}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{t('threshold_hint')}</span>
         </label>
       </div>
 

@@ -388,7 +388,7 @@ export const ProvidersPanel = (props: {
               sm:col-span-2
             "
             >
-              {t('local_note')}
+              {t('local_hint')}
             </span>
           )}
 
@@ -429,7 +429,7 @@ export const ProvidersPanel = (props: {
               onChange={event => setHeaders(event.target.value)}
             />
             <span className="mt-1 block text-xs text-muted-foreground">
-              {t('headers_note')}
+              {t('headers_hint')}
             </span>
           </label>
 
@@ -438,7 +438,7 @@ export const ProvidersPanel = (props: {
             sm:col-span-2
           "
           >
-            {t('key_note')}
+            {t('key_hint')}
           </span>
 
           <div className="
@@ -537,7 +537,7 @@ export const ProvidersPanel = (props: {
                             mt-1 block text-xs text-muted-foreground
                           "
                           >
-                            {t('rotate_key_note')}
+                            {t('rotate_key_hint')}
                           </span>
                         </label>
                         <label className="text-sm">
@@ -565,7 +565,7 @@ export const ProvidersPanel = (props: {
                             mt-1 block text-xs text-muted-foreground
                           "
                           >
-                            {t('headers_note')}
+                            {t('headers_hint')}
                           </span>
                         </label>
                         <div className="

@@ -100,7 +100,6 @@
     "tpm_limit": "Tokens per minute (0 = no limit)",
     "limit_error": "Could not save the limit",
     "empty_title": "No requests yet",
-    "empty_body": "Send your first request",
     "empty_connect": "Connect your SDK",
     "empty_provider": "Add a provider",
     "by_prompt": "Spend by system prompt",
@@ -170,7 +169,8 @@
     "by_prune": "prune",
     "by_budget": "budget cap",
     "by_rate_limit": "rate limit",
-    "by_downgrade": "85% downgrade"
+    "by_downgrade": "85% downgrade",
+    "empty_state": "Send your first request"
   },
   "KeysPage": {
     "label_field": "Label",
@@ -260,7 +260,6 @@
     "name_placeholder": "My DeepSeek account",
     "base_url": "Base URL",
     "key": "API key",
-    "key_note": "Encrypted, shown once",
     "add_title": "Add a provider",
     "add": "Add provider",
     "adding": "Adding…",
@@ -279,11 +278,9 @@
     "edit": "Edit",
     "edit_title": "Edit provider",
     "rotate_key": "API key (replace)",
-    "rotate_key_note": "Blank keeps the current key",
     "org": "Organization (optional)",
     "org_placeholder": "org-…",
     "headers": "Extra headers (optional)",
-    "headers_note": "One Name: Value per line",
     "save": "Save",
     "saving": "Saving…",
     "cancel": "Cancel",
@@ -302,9 +299,12 @@
     "test_connection": "Test connection",
     "probe_ok": "Connected: {count} models",
     "probe_failed": "Could not reach the provider",
-    "local_note": "Reachable on your network",
     "key_optional": "Leave blank if the endpoint needs no key",
-    "local_free": "Free: runs on your own hardware"
+    "local_free": "Free: runs on your own hardware",
+    "key_hint": "Encrypted, shown once",
+    "rotate_key_hint": "Blank keeps the current key",
+    "headers_hint": "One Name: Value per line",
+    "local_hint": "Reachable on your network"
   },
   "QualityPage": {
     "title_bar": "Quality",
@@ -334,7 +334,6 @@
     "chain": "Fallback chain",
     "help": "Retry when the main model fails",
     "primary": "Main model",
-    "primary_help": "the model your request asks for",
     "empty": "No fallback",
     "add_placeholder": "Add a fallback model…",
     "remove": "Remove",
@@ -381,19 +380,18 @@
     "setting_pii_redact_wire": "Hide personal data in transit",
     "setting_fallbacks": "Fallback chain",
     "setting_tier_pairs": "Cheaper model pairs",
-    "setting_prune": "Context pruning"
+    "setting_prune": "Context pruning",
+    "primary_hint": "the model your request asks for"
   },
   "ControlsPage": {
     "budget": "Monthly budget (USD)",
     "spent_of": "{spent} spent of {limit}",
     "spent_unlimited": "{spent} spent: no cap set",
     "cheap_fallback": "Cheap fallback model",
-    "cheap_help": "Used once 85% of the budget is spent.",
     "none": "None",
     "guard": "Output checker (check and fix tool-call JSON)",
     "router": "Automatic router (send simple requests to a cheaper model)",
     "threshold": "Router threshold",
-    "threshold_help": "Requests scoring below this go to the cheap model (0–1).",
     "save": "Save",
     "saving": "Saving…",
     "saved": "Saved.",
@@ -401,12 +399,13 @@
     "error": "Could not save",
     "capture": "Store raw prompts and answers (dataset pairs)",
     "retention": "Keep payloads for (days)",
-    "lint": "Payload linter"
+    "lint": "Payload linter",
+    "cheap_hint": "Used once 85% of the budget is spent.",
+    "threshold_hint": "Requests scoring below this go to the cheap model (0–1)."
   },
   "SettingsPage": {
     "title_bar": "Settings",
     "connect_title": "Connect your SDK",
-    "connect_body": "Create a key",
     "keys_title": "API keys",
     "members_title": "Members",
     "workspace_title": "Workspace",
@@ -416,14 +415,12 @@
     "access": "Access",
     "operator_badge": "Platform operator",
     "related_title": "Related settings",
-    "related_body": "Everything else that changes how requests are handled.",
     "link_providers": "Providers and models →",
     "link_routing": "Routing, budgets and lint rules →",
     "link_audit": "Bill and what was avoidable",
     "role_owner": "Owner",
     "role_member": "Member",
     "connect_key_step": "Create an API key",
-    "connect_key_step_help": "Shown once",
     "connect_create_key": "Create my key",
     "connect_creating": "Creating…",
     "connect_create_key_failed": "Could not create the key",
@@ -434,13 +431,16 @@
     "connect_base_url": "Base URL",
     "connect_key": "API key",
     "connect_model_label": "Model",
-    "connect_model_help": "Model id for your first request",
-    "connect_links_help": "Models belong to the provider that serves them.",
     "connect_providers_link": "Providers →",
     "connect_request_step": "Send the first request",
     "connect_waiting": "Waiting for your first request…",
     "connect_received": "First request received.",
-    "connect_go_to_dashboard": "Go to the dashboard"
+    "connect_go_to_dashboard": "Go to the dashboard",
+    "connect_text": "Create a key",
+    "related_text": "Everything else that changes how requests are handled.",
+    "connect_key_step_hint": "Shown once",
+    "connect_model_hint": "Model id for your first request",
+    "connect_links_hint": "Models belong to the provider that serves them."
   },
   "SpendReportPage": {
     "title_bar": "Bill",
@@ -489,9 +489,9 @@
     "share_error": "Could not create the link",
     "share_revoke_error": "Could not revoke the link",
     "public_title": "Cost audit",
-    "public_body": "Read-only, live traffic",
     "invalid_title": "This link is not available",
-    "invalid_body": "It may have been revoked, or the address is wrong."
+    "public_text": "Read-only, live traffic",
+    "invalid_text": "It may have been revoked, or the address is wrong."
   },
   "DatasetsPage": {
     "title_bar": "Datasets",
@@ -526,14 +526,14 @@
     "duplicates": "Drop exact duplicate turns",
     "budget": "Prompt-token limit (optional)",
     "budget_placeholder": "e.g. 8000: leave blank for no limit",
-    "budget_help": "Estimated as characters ÷ 4. The oldest turns go first, after the system prompt and the last turn.",
     "holdout": "Comparison group (%)",
-    "holdout_help": "Share of requests sent without pruning, so you can compare. Limited to 50%.",
     "save": "Save",
     "saving": "Saving…",
     "saved": "Saved.",
     "owner_only": "Only the workspace owner can change pruning.",
-    "error": "Could not save pruning. Please try again."
+    "error": "Could not save pruning. Please try again.",
+    "budget_hint": "Estimated as characters ÷ 4. The oldest turns go first, after the system prompt and the last turn.",
+    "holdout_hint": "Share of requests sent without pruning, so you can compare. Limited to 50%."
   },
   "EvalsPage": {
     "title_bar": "Evals",
@@ -656,7 +656,6 @@
     "off": "Off",
     "retention": "{days} day retention",
     "days": "{days} days",
-    "capture_off_help": "Not stored",
     "lint_coverage": "Lint coverage",
     "lint_findings": "Findings",
     "prune_removed": "Pruned requests",
@@ -690,7 +689,8 @@
     "redact_wire": "Hide in transit",
     "matches": "Matches",
     "matches_value": "{matches} across {scanned} checked",
-    "docs": "Docs"
+    "docs": "Docs",
+    "capture_off": "Not stored"
   },
   "WindowChip": {
     "label": "Last",

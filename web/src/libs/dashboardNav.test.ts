@@ -94,7 +94,8 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
     // ITEM-140: the gateway's own microbenchmarks serve the honesty stance and the
     // operator; a customer's dashboard is about their bill.
     expect(labels('/dashboard')).not.toContain('/dashboard/runtime');
-    expect(labels('/dashboard/runtime', true)).toEqual([]);
+    // On the operator's own page the section's children are its tabs.
+    expect(labels('/dashboard/runtime')).toEqual(['/dashboard/runtime']);
 
     const operator = dashboardNav(true).find(item => item.href === '/dashboard/operator');
 
@@ -105,7 +106,8 @@ describe('activeSection — a page belongs to its deepest menu entry', () => {
     // These live under /dashboard too, which is exactly why the depth matters.
     expect(labels('/dashboard/providers')).toEqual([]);
     expect(labels('/dashboard/routing')).toEqual([]);
-    expect(labels('/dashboard/operator')).toEqual([]);
+    // The operator console is a section with one child since ITEM-140.
+    expect(labels('/dashboard/operator')).toEqual(['/dashboard/runtime']);
   });
 
   it('shows no tabs on Settings — it is one page', () => {

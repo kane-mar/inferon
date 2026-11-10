@@ -2,6 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it, vi } from 'vitest';
+
+// `session.ts` imports the Next server runtime for its cookie, and `next/headers`
+// cannot be required outside the bundler (its shim points at a file only the build
+// emits). Mocking it is what makes this a unit test of the session seam rather
+// than a test of Next's packaging.
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ get: () => undefined }),
+}));
 import { InferonApi, InferonApiError } from './InferonApi';
 import { resolveMe } from './session';
 

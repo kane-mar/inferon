@@ -91,7 +91,7 @@ export const PrunePanel = (props: { policy: PrunePolicy | null; canEdit: boolean
             disabled={!props.canEdit || !enabled}
             onChange={event => setBudget(event.target.value)}
           />
-          <span className="mt-1 block text-xs text-muted-foreground">{t('budget_help')}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{t('budget_hint')}</span>
         </label>
 
         <label className="block text-sm">
@@ -103,7 +103,7 @@ export const PrunePanel = (props: { policy: PrunePolicy | null; canEdit: boolean
             disabled={!props.canEdit || !enabled}
             onChange={event => setHoldout(event.target.value)}
           />
-          <span className="mt-1 block text-xs text-muted-foreground">{t('holdout_help')}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{t('holdout_hint')}</span>
         </label>
       </div>
 
