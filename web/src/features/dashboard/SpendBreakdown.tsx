@@ -12,7 +12,7 @@ import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { cn } from '@/utils/Helpers';
 import { money } from './money';
-import { percent } from './reportFormat';
+import { duration, percent } from './reportFormat';
 
 export type SpendBreakdownRow = {
   /** key_id / provider_id — `null` for a legacy/shared row (not editable). */
@@ -37,14 +37,11 @@ const COMPACT_INPUT = `
   focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50
 `;
 
-const msOrDash = (value: number | null | undefined): string =>
-  (value == null ? '—' : `${Math.round(value)}ms`);
-
 const Th = (props: { children: React.ReactNode; align?: 'left' | 'right' }) => (
   <th
     className={cn(
       'py-2.5 text-xs font-medium text-muted-foreground',
-      props.align === 'right' && 'text-right',
+      props.align === 'right' ? 'text-right' : 'text-left',
     )}
   >
     {props.children}
@@ -255,7 +252,7 @@ export const SpendBreakdown = (props: {
               {props.kind === 'provider' && (
                 <>
                   <td className="py-2 text-right tabular-nums">{percent(row.errorRate)}</td>
-                  <td className="py-2 text-right tabular-nums">{msOrDash(row.p95Ms)}</td>
+                  <td className="py-2 text-right tabular-nums">{duration(row.p95Ms)}</td>
                 </>
               )}
               <td className="py-2 text-right tabular-nums">{formatCompact(row.tokens)}</td>

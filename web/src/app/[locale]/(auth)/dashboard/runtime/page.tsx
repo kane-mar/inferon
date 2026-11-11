@@ -409,7 +409,7 @@ export default async function RuntimePage(props: {
                           {cell
                             ? (
                                 <>
-                                  {cell.p95_ms == null ? '—' : `${Math.round(cell.p95_ms)}ms`}
+                                  {duration(cell.p95_ms)}
                                   <span className="ml-1 opacity-70">
                                     {cell.error_rate == null
                                       ? ''
