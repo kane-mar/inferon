@@ -4,9 +4,9 @@
 site_name: Inferon
 site_description: One OpenAI-compatible endpoint in front of every model, with true cost numbers and cost protection.
 docs_dir: guides
-# site_url is set when the host is chosen (ITEM-112 is blocked on that decision); the
-# build does not need it, but search canonical links improve once it is filled in.
-# site_url: https://docs.inferon.agilefederation.com/
+# ITEM-112: hosted on GitHub Pages, because the repository is public. The project
+# site lives under /inferon/, so absolute links and the sitemap need that prefix.
+site_url: https://kane-mar.github.io/inferon/
 
 exclude_docs: |
   inferon-cost-audit.md
