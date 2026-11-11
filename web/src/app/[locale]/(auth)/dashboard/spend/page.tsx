@@ -7,11 +7,12 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 import { AuditCards } from '@/features/dashboard/AuditCards';
-import { BarChart } from '@/features/dashboard/BarChart';
 import { Card } from '@/features/dashboard/Card';
+import { Empty } from '@/features/dashboard/Empty';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
+import { ShareBar } from '@/features/dashboard/OutcomeBar';
 import { CELL, HEAD, HEAD_RIGHT } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { ShareAuditPanel } from '@/features/dashboard/ShareAuditPanel';
@@ -20,6 +21,7 @@ import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
 import { formatCompact, formatInt, spendRows } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
+import { share } from '@/libs/segments';
 import { currentSession } from '@/libs/session';
 
 /**
@@ -142,101 +144,115 @@ export default async function SpendReportPage(props: {
         )}
       />
 
+      {/* ITEM-148: the page opened straight into five stacked cards. The three
+          numbers it exists to answer come first, then the breakdown. */}
       <div className="
-        mt-6 grid grid-cols-1 gap-4
+        mt-6 grid grid-cols-2 gap-3
+        lg:grid-cols-4
+      "
+      >
+        <KpiCard
+          label={t('spent')}
+          icon="cost"
+          value={money(summary.total_cost_usd)}
+          window={days}
+        />
+        <KpiCard
+          label={t('requests')}
+          icon="activity"
+          value={formatInt(summary.requests)}
+          window={days}
+        />
+        <KpiCard
+          label={heading('transactions_p50')}
+          icon="latency"
+          value={money(sessions.distribution.p50_cost_usd)}
+          window={days}
+        />
+        <KpiCard
+          label={t('saved')}
+          icon="down"
+          value={money(summary.value.saved_usd)}
+          window={days}
+        />
+      </div>
+
+      <div className="
+        mt-6 grid grid-cols-1 gap-6
         lg:grid-cols-2
       "
       >
         <Card title={t('by_model')} icon="cost">
-          <BarChart
-            rows={models.map(model => ({
-              label: model.model,
-              value: Number(model.cost_usd),
-              display: money(model.cost_usd),
-            }))}
-            empty={t('no_data')}
-          />
-          {models.length > 0 && (
-            <table className="mt-4 w-full text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-card">
-                <tr className="border-b text-muted-foreground">
-                  <th className={HEAD}>{t('model')}</th>
-                  <th className={HEAD_RIGHT}>{t('requests')}</th>
-                  <th className={HEAD_RIGHT}>{t('tokens')}</th>
-                  <th className={HEAD_RIGHT}>{t('cached')}</th>
-                  <th className={HEAD_RIGHT}>{t('cost')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {models.map(model => (
-                  <tr
-                    key={model.model}
-                    className="
-                      border-b
-                      last:border-0
-                    "
-                  >
-                    <td className="py-2">{model.model}</td>
-                    <td className="py-2 text-right tabular-nums">{formatInt(model.requests)}</td>
-                    <td className="py-2 text-right tabular-nums">
-                      {formatCompact(model.prompt_tokens + model.completion_tokens)}
-                    </td>
-                    <td className="
-                      py-2 text-right text-muted-foreground tabular-nums
-                    "
-                    >
-                      {model.prompt_tokens > 0
-                        ? `${Math.round((model.cached_prompt_tokens / model.prompt_tokens) * 100)}%`
-                        : '—'}
-                    </td>
-                    <td className="py-2 text-right tabular-nums">{money(model.cost_usd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          {models.length === 0
+            ? <Empty label={t('no_data')} />
+            : (
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-card">
+                    <tr className="border-b text-muted-foreground">
+                      <th className={HEAD}>{t('model')}</th>
+                      <th className={HEAD_RIGHT}>{t('requests')}</th>
+                      <th className={HEAD_RIGHT}>{t('tokens')}</th>
+                      <th className={HEAD_RIGHT}>{t('cached')}</th>
+                      <th className={HEAD_RIGHT}>{t('cost')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {models.map(model => (
+                      <tr
+                        key={model.model}
+                        className="
+                          border-b
+                          last:border-0
+                        "
+                      >
+                        <td className="py-2">{model.model}</td>
+                        <td className="py-2 text-right tabular-nums">{formatInt(model.requests)}</td>
+                        <td className="py-2 text-right tabular-nums">
+                          {formatCompact(model.prompt_tokens + model.completion_tokens)}
+                        </td>
+                        <td className="
+                          py-2 text-right text-muted-foreground tabular-nums
+                        "
+                        >
+                          {model.prompt_tokens > 0
+                            ? `${Math.round((model.cached_prompt_tokens / model.prompt_tokens) * 100)}%`
+                            : '—'}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {money(model.cost_usd)}
+                          <ShareBar share={share(Number(model.cost_usd), Number(summary.total_cost_usd))} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
         </Card>
 
         <Card title={t('by_provider')} icon="store">
-          <BarChart
-            rows={providers.map(provider => ({
-              label: provider.name,
-              value: Number(provider.cost_usd),
-              display: money(provider.cost_usd),
-            }))}
-            empty={t('no_data')}
-          />
-          {providerRows.length > 0 && (
-            <div className="mt-6">
-              <SpendBreakdown
-                kind="provider"
-                rows={providerRows}
-                canEdit={canEdit}
-                emptyLabel={t('no_data')}
-              />
-            </div>
-          )}
+          {providerRows.length === 0
+            ? <Empty label={t('no_data')} />
+            : (
+                <SpendBreakdown
+                  kind="provider"
+                  rows={providerRows}
+                  canEdit={canEdit}
+                  emptyLabel={t('no_data')}
+                />
+              )}
         </Card>
 
         <Card title={t('by_key')} icon="lock">
-          <BarChart
-            rows={keySource.map(key => ({
-              label: key.label,
-              value: Number(key.cost_usd),
-              display: money(key.cost_usd),
-            }))}
-            empty={t('no_data')}
-          />
-          {keyRows.length > 0 && (
-            <div className="mt-6">
-              <SpendBreakdown
-                kind="key"
-                rows={keyRows}
-                canEdit={canEdit}
-                emptyLabel={t('no_data')}
-              />
-            </div>
-          )}
+          {keyRows.length === 0
+            ? <Empty label={t('no_data')} />
+            : (
+                <SpendBreakdown
+                  kind="key"
+                  rows={keyRows}
+                  canEdit={canEdit}
+                  emptyLabel={t('no_data')}
+                />
+              )}
         </Card>
 
         <Card title={t('by_prompt')} icon="layers">
@@ -291,6 +307,23 @@ export default async function SpendReportPage(props: {
               )}
         </Card>
       </div>
+
+      {/* ITEM-142: the second half of the same question — where it leaked, and
+          the control that changes it. */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold">{auditCopy('title_bar')}</h2>
+      </div>
+      <div className="mt-6">
+        <AuditCards locale={locale} data={audit} />
+      </div>
+
+      {canEdit && (
+        <div className="mt-6">
+          <Card title={auditCopy('share_title')} icon="lock">
+            <ShareAuditPanel data={shares} />
+          </Card>
+        </div>
+      )}
 
       {/* The unit of work: what one client transaction actually costs. */}
       <div className="mt-6">
@@ -355,22 +388,6 @@ export default async function SpendReportPage(props: {
           )}
         </Card>
       </div>
-      {/* ITEM-142: the second half of the same question — where it leaked, and
-          the control that changes it. */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold">{auditCopy('title_bar')}</h2>
-      </div>
-      <div className="mt-6">
-        <AuditCards locale={locale} data={audit} />
-      </div>
-
-      {canEdit && (
-        <div className="mt-6">
-          <Card title={auditCopy('share_title')} icon="lock">
-            <ShareAuditPanel data={shares} />
-          </Card>
-        </div>
-      )}
 
     </>
   );

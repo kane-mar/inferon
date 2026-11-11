@@ -327,7 +327,11 @@
     "errors": "Errors",
     "success": "Success",
     "thumbs_up": "Up",
-    "thumbs_down": "Down"
+    "thumbs_down": "Down",
+    "outcomes": "Outcomes",
+    "other": "Unclassified",
+    "no_errors": "No failures",
+    "no_data": "No traffic"
   },
   "RoutingPage": {
     "title_bar": "Routing",
