@@ -211,6 +211,113 @@ pub fn recommend_threshold(
     (current + delta).clamp(floor, MAX_THRESHOLD)
 }
 
+/// ITEM-147: what an operator asked to change, and the rules it has to meet.
+///
+/// These rules lived inside the HTTP handler, so the boundary cases could only be
+/// exercised as side effects of a request. They are pure here: one place to read,
+/// one place to test, and the handler keeps its single job (gate, load, publish).
+#[derive(Clone, Debug, Default)]
+pub struct OperatorChange {
+    /// `None` leaves the current value alone.
+    pub enabled: Option<bool>,
+    pub router_threshold: Option<f64>,
+    /// The objective by name, as an operator typed it.
+    pub objective: Option<String>,
+    pub provider_weights: Option<std::collections::BTreeMap<String, f64>>,
+}
+
+/// Why an operator change was refused. The handler turns each into a typed 400.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PolicyError {
+    /// Outside `MIN_THRESHOLD..=MAX_THRESHOLD`. Refused, never clamped.
+    InvalidThreshold,
+    /// Outside `0.0..=1.0`, or not a number.
+    InvalidWeight,
+    /// Not one of `cost`, `balanced`, `quality`.
+    UnknownObjective(String),
+}
+
+impl PolicyError {
+    /// The stable code a client sees, and the sentence beside it.
+    pub fn as_response(&self) -> (&'static str, String) {
+        match self {
+            PolicyError::InvalidThreshold => (
+                "invalid_threshold",
+                format!("router threshold must be between {MIN_THRESHOLD} and {MAX_THRESHOLD}"),
+            ),
+            PolicyError::InvalidWeight => (
+                "invalid_weight",
+                "provider weights must be between 0 and 1".to_string(),
+            ),
+            PolicyError::UnknownObjective(name) => (
+                "invalid_objective",
+                format!("unknown objective: {name}"),
+            ),
+        }
+    }
+}
+
+impl OperatorChange {
+    /// The policy this change produces, given the one in force.
+    ///
+    /// Two behaviours are deliberate: a field the operator did not name keeps its
+    /// current value (the loop publishes versions too, so a threshold edit must not
+    /// wipe learned weights), and the loop's own observations survive in `evidence`.
+    pub fn apply(&self, current: Option<&Policy>) -> Result<Policy, PolicyError> {
+        if let Some(threshold) = self.router_threshold {
+            if !(MIN_THRESHOLD..=MAX_THRESHOLD).contains(&threshold) {
+                return Err(PolicyError::InvalidThreshold);
+            }
+        }
+        if let Some(weights) = &self.provider_weights {
+            if weights
+                .values()
+                .any(|weight| !weight.is_finite() || !(0.0..=1.0).contains(weight))
+            {
+                return Err(PolicyError::InvalidWeight);
+            }
+        }
+        let objective = match self.objective.as_deref() {
+            Some("cost") => Objective::Cost,
+            Some("quality") => Objective::Quality,
+            Some("balanced") => Objective::Balanced,
+            Some(other) => return Err(PolicyError::UnknownObjective(other.to_string())),
+            None => current.map_or(Objective::Balanced, |policy| policy.objective),
+        };
+
+        Ok(Policy {
+            version: 0,
+            router_threshold: self
+                .router_threshold
+                .or_else(|| current.and_then(|policy| policy.router_threshold)),
+            provider_weights: self
+                .provider_weights
+                .clone()
+                .unwrap_or_else(|| current.map(|policy| policy.provider_weights.clone()).unwrap_or_default()),
+            prune: current.and_then(|policy| policy.prune.clone()),
+            evidence: operator_evidence(current),
+            objective,
+            enabled: self.enabled.unwrap_or(true),
+        })
+    }
+}
+
+/// The audit trail for a manual steer: who, when, and whatever the loop observed.
+fn operator_evidence(current: Option<&Policy>) -> serde_json::Value {
+    let mut evidence = serde_json::json!({
+        "source": "operator",
+        "by": "operator",
+        "at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0),
+    });
+    if let Some(prompt) = current.and_then(|policy| policy.evidence.get("prompt")) {
+        evidence["prompt"] = prompt.clone();
+    }
+    evidence
+}
+
 #[async_trait::async_trait]
 pub trait PolicyStore: Send + Sync {
     /// The tenant's active policy (`None` = static config applies).

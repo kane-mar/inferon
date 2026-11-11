@@ -12,7 +12,7 @@ import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { cn } from '@/utils/Helpers';
 import { money } from './money';
-import { pct } from './reportFormat';
+import { percent } from './reportFormat';
 
 export type SpendBreakdownRow = {
   /** key_id / provider_id — `null` for a legacy/shared row (not editable). */
@@ -254,7 +254,7 @@ export const SpendBreakdown = (props: {
               <td className="py-2 text-right tabular-nums">{formatInt(row.requests)}</td>
               {props.kind === 'provider' && (
                 <>
-                  <td className="py-2 text-right tabular-nums">{pct(row.errorRate)}</td>
+                  <td className="py-2 text-right tabular-nums">{percent(row.errorRate)}</td>
                   <td className="py-2 text-right tabular-nums">{msOrDash(row.p95Ms)}</td>
                 </>
               )}

@@ -25,6 +25,3 @@ export const docsHref = (guide: string): string | null => {
 
   return `${base.replace(/\/$/, '')}/${guide.replace(/^\//, '')}.md`.replace('.md', '');
 };
-
-/** Whether a link is worth rendering at all (the host is configured). */
-export const hasDocs = (): boolean => docsHref('using/first-request') != null;

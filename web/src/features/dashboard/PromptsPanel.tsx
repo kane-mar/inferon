@@ -13,7 +13,7 @@ import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT, MONO_FIELD_INPUT } from './formStyles';
 import { money } from './money';
-import { pct, shortHash } from './reportFormat';
+import { percent, shortHash } from './reportFormat';
 
 /** The three diff kinds, and how each reads. */
 const DIFF_CLASS: Record<PromptDiff['changes'][number]['kind'], string> = {
@@ -158,7 +158,7 @@ export const PromptsPanel = (props: {
                           <span title={version.prompt_hash}>{shortHash(version.prompt_hash)}</span>
                         </td>
                         <td className="py-2 tabular-nums">{version.requests}</td>
-                        <td className="py-2 tabular-nums">{pct(version.ok_rate, 0)}</td>
+                        <td className="py-2 tabular-nums">{percent(version.ok_rate, 0)}</td>
                         <td className="py-2 tabular-nums">{version.thumbs_down}</td>
                         <td className="py-2 font-mono text-xs">{money(version.spend_usd)}</td>
                         <td className="py-2 text-xs text-muted-foreground">

@@ -12,7 +12,7 @@ import { dateTime } from '@/libs/datetime';
 import { errorMessage } from '@/libs/errors';
 import { InferonApi } from '@/libs/InferonApi';
 import { FIELD_INPUT } from './formStyles';
-import { pct } from './reportFormat';
+import { percent } from './reportFormat';
 
 const when = (value: string) => dateTime(value);
 
@@ -177,7 +177,7 @@ export const EvalsPanel = (props: {
                           /
                           {run.cases}
                         </td>
-                        <td className="py-2 tabular-nums">{pct(run.pass_rate)}</td>
+                        <td className="py-2 tabular-nums">{percent(run.pass_rate)}</td>
                         <td className="py-2 font-mono text-xs">{run.cost_usd}</td>
                         <td className="py-2 text-xs text-muted-foreground">
                           <span title={run.created_at}>{when(run.created_at)}</span>
@@ -219,7 +219,7 @@ export const EvalsPanel = (props: {
                   <option key={run.run_id} value={run.run_id}>
                     {run.model}
                     {' · '}
-                    {pct(run.pass_rate)}
+                    {percent(run.pass_rate)}
                   </option>
                 ))}
               </select>
@@ -236,7 +236,7 @@ export const EvalsPanel = (props: {
                   <option key={run.run_id} value={run.run_id}>
                     {run.model}
                     {' · '}
-                    {pct(run.pass_rate)}
+                    {percent(run.pass_rate)}
                   </option>
                 ))}
               </select>

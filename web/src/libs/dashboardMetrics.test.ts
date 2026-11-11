@@ -11,8 +11,6 @@ import {
   deltaPct,
   errorRatePct,
   formatCompact,
-  formatInt,
-  formatMs,
   moneyDeltaPct,
   seriesTotals,
   spendRows,
@@ -95,15 +93,8 @@ describe('number formatting', () => {
     expect(formatCompact(1_250_000)).toBe('1.3M');
   });
 
-  it('adds thousands separators', () => {
-    expect(formatInt(12345)).toBe('12,345');
-  });
-
-  it('renders latency in ms or seconds', () => {
-    expect(formatMs(820)).toBe('820ms');
-    expect(formatMs(1250)).toBe('1.25s');
-    expect(formatMs(null)).toBe('—');
-  });
+  // ITEM-147: integers and durations are specified in `format.test.ts`. Repeating
+  // the expectations here is how the two formats drifted apart in the first place.
 });
 
 describe('seriesTotals / avgTtftMs', () => {

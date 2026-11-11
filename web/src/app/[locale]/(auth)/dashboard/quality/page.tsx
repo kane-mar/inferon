@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/features/dashboard/Card';
 import { EvalsPanel } from '@/features/dashboard/EvalsPanel';
 import { KpiCard } from '@/features/dashboard/KpiCard';
-import { CELL, HEAD, pct, shortHash } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD, percent, shortHash } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -69,28 +69,28 @@ export default async function QualityPage(props: {
         <KpiCard
           label={t('success_rate')}
           icon="ok"
-          value={pct(overall.success_rate)}
+          value={percent(overall.success_rate)}
           window={days}
           tone={metricTone(overall.success_rate, THRESHOLDS.okRate)}
         />
         <KpiCard
           label={t('empty_rate')}
           icon="warning"
-          value={pct(overall.empty_rate)}
+          value={percent(overall.empty_rate)}
           window={days}
           goodWhen="down"
         />
         <KpiCard
           label={t('refusal_rate')}
           icon="warning"
-          value={pct(overall.refusal_rate)}
+          value={percent(overall.refusal_rate)}
           window={days}
           goodWhen="down"
         />
         <KpiCard
           label={t('error_rate')}
           icon="warning"
-          value={pct(overall.error_rate)}
+          value={percent(overall.error_rate)}
           window={days}
           goodWhen="down"
           tone={metricTone(overall.error_rate, THRESHOLDS.errorRate)}
@@ -98,7 +98,7 @@ export default async function QualityPage(props: {
         <KpiCard
           label={t('truncated_rate')}
           icon="warning"
-          value={pct(overall.truncated_rate)}
+          value={percent(overall.truncated_rate)}
           window={days}
           goodWhen="down"
           tone={metricTone(overall.truncated_rate, THRESHOLDS.truncatedRate)}
@@ -106,7 +106,7 @@ export default async function QualityPage(props: {
         <KpiCard
           label={t('guard_fallback_rate')}
           icon="warning"
-          value={pct(overall.guard_fallback_rate)}
+          value={percent(overall.guard_fallback_rate)}
           window={days}
           goodWhen="down"
         />
@@ -203,7 +203,7 @@ export default async function QualityPage(props: {
                     <td className={CELL}>{model.empty}</td>
                     <td className={CELL}>{model.errors}</td>
                     <td className={successClass(model.success_rate)}>
-                      {pct(model.success_rate)}
+                      {percent(model.success_rate)}
                     </td>
                     <td className={CELL}>{model.thumbs_up}</td>
                     <td className={CELL}>{model.thumbs_down}</td>
@@ -251,7 +251,7 @@ export default async function QualityPage(props: {
                     <td className={CELL}>{prompt.ok}</td>
                     <td className={CELL}>{prompt.empty}</td>
                     <td className={CELL}>{prompt.errors}</td>
-                    <td className={CELL}>{pct(prompt.success_rate)}</td>
+                    <td className={CELL}>{percent(prompt.success_rate)}</td>
                   </tr>
                 ))}
               </tbody>

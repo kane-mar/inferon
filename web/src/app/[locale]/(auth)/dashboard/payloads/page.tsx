@@ -7,7 +7,7 @@ import { DocsLink } from '@/components/DocsLink';
 import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
-import { coverage, pct } from '@/features/dashboard/reportFormat';
+import { coverage, percent } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -194,10 +194,10 @@ export default async function PayloadsPage(props: {
                   />
                   <State
                     label={t('pruned_ok')}
-                    value={pct(pruning.pruned_ok_rate)}
+                    value={percent(pruning.pruned_ok_rate)}
                     tone="good"
                   />
-                  <State label={t('holdout_ok')} value={pct(pruning.holdout_ok_rate)} />
+                  <State label={t('holdout_ok')} value={percent(pruning.holdout_ok_rate)} />
                   {pruning.delta != null && (
                     <State
                       label={t('delta')}

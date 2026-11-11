@@ -6,7 +6,7 @@ import { formatInt } from '@/libs/dashboardMetrics';
 import { errorClassKeys } from '@/libs/labels';
 import { Finding } from './Finding';
 import { money } from './money';
-import { pct } from './reportFormat';
+import { percent } from './reportFormat';
 
 /** A waste flag as both the dashboard and the public report expose it. */
 export type WasteEntry = {
@@ -117,10 +117,10 @@ export const AuditCards = async (props: { locale: string; data: AuditData }) => 
       />
       <Finding
         title={t('f6_title')}
-        highlight={pct(data.quality.errorRate)}
+        highlight={percent(data.quality.errorRate)}
         metrics={[
-          { label: t('truncated_rate'), value: pct(data.quality.truncatedRate) },
-          { label: t('guard_fallback_rate'), value: pct(data.quality.guardFallbackRate) },
+          { label: t('truncated_rate'), value: percent(data.quality.truncatedRate) },
+          { label: t('guard_fallback_rate'), value: percent(data.quality.guardFallbackRate) },
           {
             label: t('top_error_class'),
             value: failure,

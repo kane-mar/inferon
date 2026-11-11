@@ -224,3 +224,107 @@ fn prompt_waste_has_to_be_worth_the_interruption() {
     assert!(plan("5.00").worth_pruning("40.00".parse().unwrap()), "12.5% of spend is");
     assert!(plan("5.00").worth_pruning(rust_decimal::Decimal::ZERO), "no spend yet: price alone decides");
 }
+
+// ITEM-147: the rules an operator's change has to satisfy, as a pure function.
+// They were only reachable through an HTTP handler, so the boundary cases were
+// tested as side effects of a request.
+
+fn operator_change(threshold: Option<f64>, objective: Option<&str>, weights: Option<(&str, f64)>) -> OperatorChange {
+    OperatorChange {
+        enabled: None,
+        router_threshold: threshold,
+        objective: objective.map(str::to_string),
+        provider_weights: weights.map(|(id, w)| [(id.to_string(), w)].into_iter().collect()),
+    }
+}
+
+#[test]
+fn a_threshold_outside_the_policy_bounds_is_refused() {
+    // Refused, never clamped: a number the operator did not type is a number they
+    // cannot debug.
+    assert_eq!(
+        operator_change(Some(0.95), None, None).apply(None),
+        Err(PolicyError::InvalidThreshold)
+    );
+    assert_eq!(
+        operator_change(Some(-0.1), None, None).apply(None),
+        Err(PolicyError::InvalidThreshold)
+    );
+    assert!(operator_change(Some(MAX_THRESHOLD), None, None).apply(None).is_ok());
+}
+
+#[test]
+fn a_weight_outside_zero_to_one_is_refused() {
+    assert_eq!(
+        operator_change(None, None, Some(("p1", 1.5))).apply(None),
+        Err(PolicyError::InvalidWeight)
+    );
+    assert_eq!(
+        operator_change(None, None, Some(("p1", -0.1))).apply(None),
+        Err(PolicyError::InvalidWeight)
+    );
+    assert!(operator_change(None, None, Some(("p1", 0.6))).apply(None).is_ok());
+}
+
+#[test]
+fn an_objective_the_loop_does_not_know_is_refused_by_name() {
+    assert_eq!(
+        operator_change(None, Some("fastest"), None).apply(None),
+        Err(PolicyError::UnknownObjective("fastest".to_string()))
+    );
+}
+
+#[test]
+fn a_partial_change_keeps_everything_it_did_not_name() {
+    let current = Policy {
+        version: 7,
+        router_threshold: Some(0.3),
+        provider_weights: [("p1".to_string(), 0.5)].into_iter().collect(),
+        prune: Some(crate::prune::PrunePolicy { enabled: true, ..Default::default() }),
+        evidence: serde_json::json!({"reason": "adaptive_step"}),
+        objective: Objective::Quality,
+        enabled: true,
+    };
+
+    let next = operator_change(Some(0.4), None, None)
+        .apply(Some(&current))
+        .expect("a valid change");
+
+    assert_eq!(next.router_threshold, Some(0.4), "the named field changed");
+    assert_eq!(next.objective, Objective::Quality, "the objective was not named");
+    assert_eq!(next.provider_weights, current.provider_weights);
+    assert!(next.prune.is_some(), "pruning survives a threshold edit");
+}
+
+#[test]
+fn the_operator_steer_records_itself_and_keeps_the_loops_observation() {
+    // A human changing the objective must not erase the prompt-waste evidence.
+    let current = Policy {
+        version: 1,
+        router_threshold: Some(0.3),
+        provider_weights: Default::default(),
+        prune: None,
+        evidence: serde_json::json!({"prompt": {"waste_usd": "2.50", "propose_pruning": true}}),
+        objective: Objective::Balanced,
+        enabled: true,
+    };
+
+    let next = operator_change(None, Some("cost"), None)
+        .apply(Some(&current))
+        .expect("a valid change");
+
+    assert_eq!(next.evidence["source"], serde_json::json!("operator"));
+    assert_eq!(next.evidence["prompt"]["waste_usd"], serde_json::json!("2.50"));
+    assert_eq!(next.objective, Objective::Cost);
+}
+
+#[test]
+fn the_first_steer_on_an_unconfigured_workspace_is_a_valid_policy() {
+    let next = operator_change(Some(0.35), Some("balanced"), None)
+        .apply(None)
+        .expect("no current policy is not an error");
+
+    assert_eq!(next.router_threshold, Some(0.35));
+    assert_eq!(next.objective, Objective::Balanced);
+    assert!(next.enabled);
+}

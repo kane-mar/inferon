@@ -10,16 +10,13 @@
 // sans, sentence case, no tracking; the row gains room so 15px text is not cramped.
 export const HEAD = 'px-3 py-2.5 text-left text-xs font-medium text-muted-foreground';
 export const CELL = 'px-3 py-2.5 text-sm tabular-nums';
+/** A header cell, aligned to its column. Two pages had declared these twice. */
+export const HEAD_LEFT = `${HEAD} text-left`;
+export const HEAD_RIGHT = `${HEAD} text-right`;
 
-export const us = (value: number | null): string =>
-  value == null ? '—' : `${value.toLocaleString('en-US')} µs`;
-
-export const ms = (value: number | null): string =>
-  value == null ? '—' : `${Math.round(value).toLocaleString('en-US')} ms`;
-
-/** A 0..1 share as a percent. `digits` is the rounding the caller needs. */
-export const pct = (value: number | null | undefined, digits = 1): string =>
-  value == null ? '—' : `${(value * 100).toFixed(digits)}%`;
+// ITEM-147: the quantities have one home (`libs/format`), re-exported here so a
+// report page imports its atoms from one module.
+export { duration, micros, percent } from '@/libs/format';
 
 /** A hash, short enough for a table; the caller puts the full value in `title`. */
 export const shortHash = (hash: string, length = 10): string => hash.slice(0, length);

@@ -279,78 +279,25 @@ pub async fn operator_policy_set(
     if let Err(resp) = operator_or(&state, &headers).await {
         return resp;
     }
-    // `Caller` carries the tenant and the operator flag, not a login: the settings
-    // audit (ITEM-108) is where "who" is recorded in full.
-    let operator = "operator";
-    if let Some(threshold) = body.router_threshold {
-        // Refuse rather than clamp: a silently different number than the one that
-        // was typed is the kind of surprise an operator cannot debug.
-        if !(crate::policy::MIN_THRESHOLD..=crate::policy::MAX_THRESHOLD).contains(&threshold) {
-            return crate::json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_threshold",
-                "router threshold must be between 0 and 0.9",
-            );
-        }
-    }
-    if let Some(weights) = &body.provider_weights {
-        if weights.values().any(|w| !w.is_finite() || *w < 0.0 || *w > 1.0) {
-            return crate::json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_weight",
-                "provider weights must be between 0 and 1",
-            );
-        }
-    }
+    let change = crate::policy::OperatorChange {
+        enabled: body.enabled,
+        router_threshold: body.router_threshold,
+        objective: body.objective,
+        provider_weights: body.provider_weights,
+    };
 
     let current = match state.policy_store.active(tenant_id).await {
         Ok(policy) => policy,
         Err(e) => return internal(e.to_string()),
     };
-    let next = crate::policy::Policy {
-        version: 0,
-        router_threshold: body
-            .router_threshold
-            .or_else(|| current.as_ref().and_then(|p| p.router_threshold)),
-        provider_weights: body.provider_weights.unwrap_or_else(|| {
-            current
-                .as_ref()
-                .map(|p| p.provider_weights.clone())
-                .unwrap_or_default()
-        }),
-        prune: current.as_ref().and_then(|p| p.prune.clone()),
-        // ITEM-141: keep the loop's own observation. A human changing the
-        // objective must not make the prompt-waste evidence disappear — that
-        // would leave the console blank exactly when someone is looking at it.
-        evidence: {
-            let mut evidence = json!({
-                "source": "operator",
-                "by": operator,
-                "at": chrono_free_now(),
-            });
-            if let Some(prompt) = current
-                .as_ref()
-                .and_then(|policy| policy.evidence.get("prompt"))
-                .cloned()
-            {
-                evidence["prompt"] = prompt;
-            }
-            evidence
-        },
-        objective: match body.objective.as_deref() {
-            Some("cost") => crate::policy::Objective::Cost,
-            Some("quality") => crate::policy::Objective::Quality,
-            Some("balanced") => crate::policy::Objective::Balanced,
-            Some(other) => {
-                return crate::json_error(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_objective",
-                    &format!("unknown objective: {other}"),
-                )
-            }
-            None => current.as_ref().map_or(crate::policy::Objective::Balanced, |p| p.objective),
-        },
-        enabled: body.enabled.unwrap_or(true),
+    // ITEM-147: the rules (bounds, known objective, what an unnamed field keeps)
+    // live in `policy::OperatorChange`, where they are tested without a request.
+    let next = match change.apply(current.as_ref()) {
+        Ok(policy) => policy,
+        Err(refusal) => {
+            let (code, message) = refusal.as_response();
+            return crate::json_error(StatusCode::BAD_REQUEST, code, &message);
+        }
     };
     match state.policy_store.publish(tenant_id, next).await {
         Ok(policy) => {
@@ -359,14 +306,6 @@ pub async fn operator_policy_set(
         }
         Err(e) => internal(e.to_string()),
     }
-}
-
-/// Seconds since the epoch, as the operator console records them.
-fn chrono_free_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// GET /v1/dashboard/api/operator/summary?days=7 — platform-wide totals.

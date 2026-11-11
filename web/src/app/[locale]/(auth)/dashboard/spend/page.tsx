@@ -12,7 +12,7 @@ import { Card } from '@/features/dashboard/Card';
 import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
-import { CELL, HEAD as REPORT_HEAD } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD, HEAD_RIGHT } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { ShareAuditPanel } from '@/features/dashboard/ShareAuditPanel';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
@@ -21,9 +21,6 @@ import { PageHeader } from '@/features/shell/PageHeader';
 import { formatCompact, formatInt, spendRows } from '@/libs/dashboardMetrics';
 import { InferonApi } from '@/libs/InferonApi';
 import { currentSession } from '@/libs/session';
-
-// ITEM-124: one header atom for every report — 13px sans, sentence case.
-const RIGHT = `${REPORT_HEAD} text-right`;
 
 /**
  * The bill (ITEM-142): what it cost, and what was avoidable.
@@ -163,11 +160,11 @@ export default async function SpendReportPage(props: {
             <table className="mt-4 w-full text-left text-sm">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-muted-foreground">
-                  <th className={REPORT_HEAD}>{t('model')}</th>
-                  <th className={RIGHT}>{t('requests')}</th>
-                  <th className={RIGHT}>{t('tokens')}</th>
-                  <th className={RIGHT}>{t('cached')}</th>
-                  <th className={RIGHT}>{t('cost')}</th>
+                  <th className={HEAD}>{t('model')}</th>
+                  <th className={HEAD_RIGHT}>{t('requests')}</th>
+                  <th className={HEAD_RIGHT}>{t('tokens')}</th>
+                  <th className={HEAD_RIGHT}>{t('cached')}</th>
+                  <th className={HEAD_RIGHT}>{t('cost')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -251,11 +248,11 @@ export default async function SpendReportPage(props: {
                 <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
-                      <th className={REPORT_HEAD}>{t('prompt_hash')}</th>
-                      <th className={RIGHT}>{t('requests')}</th>
-                      <th className={RIGHT}>{t('prompt_tokens')}</th>
-                      <th className={RIGHT}>{t('cached')}</th>
-                      <th className={RIGHT}>{t('cost')}</th>
+                      <th className={HEAD}>{t('prompt_hash')}</th>
+                      <th className={HEAD_RIGHT}>{t('requests')}</th>
+                      <th className={HEAD_RIGHT}>{t('prompt_tokens')}</th>
+                      <th className={HEAD_RIGHT}>{t('cached')}</th>
+                      <th className={HEAD_RIGHT}>{t('cost')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -323,11 +320,11 @@ export default async function SpendReportPage(props: {
               <table className="w-full">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b">
-                    <th className={REPORT_HEAD}>{heading('transaction')}</th>
-                    <th className={REPORT_HEAD}>{heading('turns')}</th>
-                    <th className={REPORT_HEAD}>{heading('models')}</th>
-                    <th className={REPORT_HEAD}>{heading('cost')}</th>
-                    <th className={REPORT_HEAD}>{heading('errors')}</th>
+                    <th className={HEAD}>{heading('transaction')}</th>
+                    <th className={HEAD}>{heading('turns')}</th>
+                    <th className={HEAD}>{heading('models')}</th>
+                    <th className={HEAD}>{heading('cost')}</th>
+                    <th className={HEAD}>{heading('errors')}</th>
                   </tr>
                 </thead>
                 <tbody>

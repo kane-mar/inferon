@@ -8,11 +8,13 @@ import { Card } from '@/features/dashboard/Card';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import {
   CELL,
+  duration,
   HEAD,
+  HEAD_LEFT,
+  HEAD_RIGHT,
   heatCellClass,
-  ms,
-  pct,
-  us,
+  micros,
+  percent,
 } from '@/features/dashboard/reportFormat';
 import { Status } from '@/features/dashboard/ReportStatus';
 import { reportDays } from '@/features/dashboard/reportWindow';
@@ -31,10 +33,6 @@ const shortBucket = (bucket: string): string => {
   const [, month, day] = (date ?? '').split('-');
   return month && day ? `${day} ${month} ${hour ?? ''}h`.trim() : bucket;
 };
-
-/** Table column classes, the same pair every other report page uses. */
-const LEFT = `${HEAD} text-left`;
-const RIGHT = `${HEAD} text-right`;
 
 /**
  * Runtime (ITEM-092/099/103): is the proxy fast? The contract, the proxy's own
@@ -92,7 +90,7 @@ export default async function RuntimePage(props: {
         <KpiCard
           label={t('claim_p50_kpi')}
           icon="latency"
-          value={us(small.band.p50_us)}
+          value={micros(small.band.p50_us)}
           window={days}
           tone={metricTone(small.band.p50_us, THRESHOLDS.proxyP50Us)}
           verdict={small.band.requests === 0
@@ -106,14 +104,14 @@ export default async function RuntimePage(props: {
         <KpiCard
           label={t('claim_p95_kpi')}
           icon="latency"
-          value={us(small.band.p95_us)}
+          value={micros(small.band.p95_us)}
           window={days}
           tone={metricTone(small.band.p95_us, THRESHOLDS.proxyP95Us)}
         />
         <KpiCard
           label={t('under_1ms')}
           icon="ok"
-          value={pct(small.band.under_1ms_rate)}
+          value={percent(small.band.under_1ms_rate)}
           window={days}
           tone={metricTone(small.band.under_1ms_rate, THRESHOLDS.under1msRate)}
         />
@@ -151,7 +149,7 @@ export default async function RuntimePage(props: {
               {t('claim_data', {
                 hours: contract.window_hours,
                 samples: formatInt(contract.samples),
-                observed: us(contract.observed_p50_us),
+                observed: micros(contract.observed_p50_us),
                 tokens: formatInt(contract.prompt_tokens_p50 ?? 0),
               })}
             </p>
@@ -175,11 +173,11 @@ export default async function RuntimePage(props: {
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
-                      <th className={LEFT}>{t('band')}</th>
-                      <th className={RIGHT}>{t('requests')}</th>
-                      <th className={RIGHT}>{t('band_p50')}</th>
-                      <th className={RIGHT}>{t('band_p95')}</th>
-                      <th className={RIGHT}>{t('band_upload')}</th>
+                      <th className={HEAD_LEFT}>{t('band')}</th>
+                      <th className={HEAD_RIGHT}>{t('requests')}</th>
+                      <th className={HEAD_RIGHT}>{t('band_p50')}</th>
+                      <th className={HEAD_RIGHT}>{t('band_p95')}</th>
+                      <th className={HEAD_RIGHT}>{t('band_upload')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -199,11 +197,11 @@ export default async function RuntimePage(props: {
                               : t('band_under', { tokens: formatInt(row.max_tokens) })}
                           </span>
                         </td>
-                        <td className={RIGHT}>{formatInt(row.requests)}</td>
-                        <td className={RIGHT}>{us(row.p50_us)}</td>
-                        <td className={RIGHT}>{us(row.p95_us)}</td>
-                        <td className={cn(RIGHT, 'text-muted-foreground')}>
-                          {row.body_p50_ms == null ? '—' : ms(row.body_p50_ms)}
+                        <td className={HEAD_RIGHT}>{formatInt(row.requests)}</td>
+                        <td className={HEAD_RIGHT}>{micros(row.p50_us)}</td>
+                        <td className={HEAD_RIGHT}>{micros(row.p95_us)}</td>
+                        <td className={cn(HEAD_RIGHT, 'text-muted-foreground')}>
+                          {row.body_p50_ms == null ? '—' : duration(row.body_p50_ms)}
                         </td>
                       </tr>
                     ))}
@@ -222,9 +220,9 @@ export default async function RuntimePage(props: {
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-muted-foreground">
-                  <th className={LEFT}>{t('band')}</th>
+                  <th className={HEAD_LEFT}>{t('band')}</th>
                   {buckets.map(bucket => (
-                    <th key={bucket} className={RIGHT}>{shortBucket(bucket)}</th>
+                    <th key={bucket} className={HEAD_RIGHT}>{shortBucket(bucket)}</th>
                   ))}
                 </tr>
               </thead>
@@ -246,15 +244,15 @@ export default async function RuntimePage(props: {
                         return (
                           <td
                             key={bucket}
-                            className={cn(RIGHT, `text-muted-foreground`)}
+                            className={cn(HEAD_RIGHT, `text-muted-foreground`)}
                           >
                             ·
                           </td>
                         );
                       }
                       return (
-                        <td key={bucket} className={cn(RIGHT, driftCellClass(point.drift))}>
-                          <span>{us(point.p50_us)}</span>
+                        <td key={bucket} className={cn(HEAD_RIGHT, driftCellClass(point.drift))}>
+                          <span>{micros(point.p50_us)}</span>
                           {driftMark(point.drift) && (
                             <span aria-hidden className="ml-1">{driftMark(point.drift)}</span>
                           )}
@@ -307,39 +305,39 @@ export default async function RuntimePage(props: {
             <KpiCard
               label={t('total_p50')}
               icon="latency"
-              value={ms(latency.total_p50_ms)}
+              value={duration(latency.total_p50_ms)}
               window={days}
             />
             <KpiCard
               label={t('total_p95')}
               icon="latency"
-              value={ms(latency.total_p95_ms)}
+              value={duration(latency.total_p95_ms)}
               window={days}
               tone={metricTone(latency.total_p95_ms, THRESHOLDS.totalP95Ms)}
             />
             <KpiCard
               label={t('total_p99')}
               icon="latency"
-              value={ms(latency.total_p99_ms)}
+              value={duration(latency.total_p99_ms)}
               window={days}
             />
             <KpiCard
               label={t('ttft_p50')}
               icon="latency"
-              value={ms(latency.ttft_p50_ms)}
+              value={duration(latency.ttft_p50_ms)}
               window={days}
             />
             <KpiCard
               label={t('ttft_p95')}
               icon="latency"
-              value={ms(latency.ttft_p95_ms)}
+              value={duration(latency.ttft_p95_ms)}
               window={days}
               tone={metricTone(latency.ttft_p95_ms, THRESHOLDS.ttftP95Ms)}
             />
             <KpiCard
               label={t('proxy_share')}
               icon="cost"
-              value={pct(latency.proxy_share)}
+              value={percent(latency.proxy_share)}
               window={days}
             />
           </div>
@@ -497,12 +495,12 @@ export default async function RuntimePage(props: {
                     <td className={CELL}>{formatInt(row.requests)}</td>
                     <td className={CELL}>{formatInt(row.prompt_tokens_p50 ?? 0)}</td>
                     <td className={cn(CELL, 'text-muted-foreground')}>
-                      {row.body_p50_ms == null ? '—' : ms(row.body_p50_ms)}
+                      {row.body_p50_ms == null ? '—' : duration(row.body_p50_ms)}
                     </td>
-                    <td className={CELL}>{us(row.proxy_p50_us)}</td>
-                    <td className={CELL}>{us(row.proxy_p95_us)}</td>
-                    <td className={CELL}>{ms(row.total_p50_ms)}</td>
-                    <td className={CELL}>{ms(row.total_p95_ms)}</td>
+                    <td className={CELL}>{micros(row.proxy_p50_us)}</td>
+                    <td className={CELL}>{micros(row.proxy_p95_us)}</td>
+                    <td className={CELL}>{duration(row.total_p50_ms)}</td>
+                    <td className={CELL}>{duration(row.total_p95_ms)}</td>
                   </tr>
                 ))}
               </tbody>

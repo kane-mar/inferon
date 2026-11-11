@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { TimeseriesPoint } from './InferonApi';
+import { duration, integer } from './format';
 
 /** Metrics the time-series chart can plot. */
 export type ChartMetric = 'requests' | 'cost' | 'tokens' | 'errors' | 'ttft';
@@ -107,16 +108,9 @@ const compact = (value: number): string => {
 /** Compact axis/legend number: 1234 → "1.2k", 1_250_000 → "1.3M". */
 export const formatCompact = (value: number): string => compact(value);
 
-/** Full integer with thousands separators: 12345 → "12,345". */
-export const formatInt = (value: number): string => Math.round(value).toLocaleString('en-US');
-
-/** Duration/latency in ms → "1.2s" past a second, else "820ms". */
-export const formatMs = (value: number | null): string => {
-  if (value == null) {
-    return '—';
-  }
-  return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`;
-};
+// ITEM-147: one set of rules, in `libs/format`.
+export const formatInt = integer;
+export const formatMs = duration;
 
 const sum = (values: (number | null)[]): number =>
   values.reduce<number>((total, value) => total + (value ?? 0), 0);
