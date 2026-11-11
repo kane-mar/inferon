@@ -310,8 +310,8 @@ export default async function SpendReportPage(props: {
 
       {/* ITEM-142: the second half of the same question — where it leaked, and
           the control that changes it. */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold">{auditCopy('title_bar')}</h2>
+      <div className="mt-6">
+        <h2 className="text-lg font-semibold text-balance">{auditCopy('title_bar')}</h2>
       </div>
       <div className="mt-6">
         <AuditCards locale={locale} data={audit} />

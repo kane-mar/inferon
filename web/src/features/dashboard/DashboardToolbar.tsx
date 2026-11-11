@@ -25,9 +25,9 @@ const href = (view: DashboardView) => ({
 
 const pill = (active: boolean): string =>
   active
-    ? 'rounded-[5px] bg-primary px-2.5 py-1 font-medium text-primary-foreground'
+    ? 'rounded-md bg-primary px-2.5 py-1 font-medium text-primary-foreground'
     : `
-      rounded-[5px] px-2.5 py-1 text-muted-foreground
+      rounded-md px-2.5 py-1 text-muted-foreground
       hover:bg-muted hover:text-foreground
     `;
 

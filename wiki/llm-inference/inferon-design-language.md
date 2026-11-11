@@ -66,6 +66,17 @@ Those percentages are **measured, not chosen**: an accent wash over this canvas
 can only reach 2% before muted ink drops under 6:1, so a wash over content is 2%
 and a glow (which sits behind a heading, where the text is body ink) may be 8%.
 
+### Where they are applied, today
+
+| Utility | Used on |
+|---|---|
+| `surface-glow` | the landing hero, behind the badge and the title |
+| `surface-wash` | the top of the workspace content area (12rem) |
+| `surface-depth` | every card header |
+
+Auth pages carry none: they are one card on the canvas, and a third glow would
+break the one-light rule.
+
 ### Rules
 
 1. **One hue.** A gradient fades a colour into the surface. Two hues is decoration.
@@ -82,7 +93,9 @@ and a glow (which sits behind a heading, where the text is body ink) may be 8%.
 ## Type
 
 - Scale at the tokens: 13 / 15 / 17px, roomier leading. Nothing renders below 13px.
-- Mono is for identifiers only. Labels are sans, sentence case.
+- Mono is for identifiers only. **Labels are sans, sentence case, no tracking**:
+  uppercase 12px mono with wide tracking was the least readable combination this
+  product ever shipped, and it came back once.
 - Metric values are 1.75rem, tight tracking, `tabular-nums`, no leading.
 - Headings use `text-balance` so a title does not end in a widow.
 
@@ -95,9 +108,14 @@ and a glow (which sits behind a heading, where the text is body ink) may be 8%.
 
 ## Motion
 
-- Only `transform` and `opacity`; only 120–150ms; only on interaction.
-- A global `prefers-reduced-motion` rule disables animation and transition.
-- No motion that carries meaning on its own.
+- **Colour, opacity, transform or shadow, never geometry.** `transition-all` is
+  banned: it animates layout properties and the browser has to reflow. Colour is
+  allowed because it costs nothing to composite.
+- 120–150ms, and only on interaction. Nothing animates on load.
+- A global `prefers-reduced-motion` rule sets every animation and transition to
+  0.01ms, so the product is static for anyone who asks.
+- No motion that carries meaning on its own: the live dot pulses, but the state it
+  shows is also written down.
 
 ## The tests that hold this
 
@@ -107,6 +125,10 @@ and a glow (which sits behind a heading, where the text is body ink) may be 8%.
   colour tokens.
 - `minimalCopy.test.ts`: no sentence in a screen namespace, no `_help`/`_desc`/
   `_note` keys, no page-header description.
+- `designLanguage.test.ts`: sentence case and no tracking on labels, nothing below
+  13px, no raw accent as text, no gradient text, no `transition-all`, transitions
+  only on colour/opacity/transform/shadow and never longer than 200ms, radii from
+  the three in this document, and every page section separated by the same value.
 - `check-guides.py`: no em dash in prose.
 
 A rule that is not in one of these is a preference, and preferences drift.

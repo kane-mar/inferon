@@ -139,7 +139,7 @@ const gradients = (name: 'light' | 'dark'): Tokens => {
 
 /** The alpha a gradient token actually mixes, as a 0..1 fraction. */
 const mixStrength = (value: string): number => {
-  const percent = /color-mix\([^;]*?([\d.]+)%/.exec(value)?.[1];
+  const percent = /([\d.]+)%/.exec(value)?.[1];
   if (percent === undefined) {
     throw new Error(`not a colour mix with a percentage: ${value}`);
   }

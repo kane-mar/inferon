@@ -19,8 +19,7 @@ export const Section = (props: {
       <div className="mx-auto mb-12 max-w-3xl text-center">
         {props.subtitle && (
           <div className="
-            inline-flex items-center gap-2 text-xs font-medium tracking-wide
-            text-accent-ink uppercase
+            inline-flex items-center gap-2 text-xs font-medium text-accent-ink
           "
           >
             <span aria-hidden className="h-px w-6 bg-accent" />

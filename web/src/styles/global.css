@@ -207,11 +207,7 @@
 }
 
 @utility surface-glow {
-  background-image: radial-gradient(
-    120% 90% at 50% -30%,
-    var(--gradient-glow-color),
-    transparent 70%
-  );
+  background-image: radial-gradient(120% 90% at 50% -30%, var(--gradient-glow-color), transparent 70%);
 }
 
 @utility surface-wash {
