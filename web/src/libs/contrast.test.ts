@@ -109,6 +109,43 @@ const need = (tokens: Tokens, name: string): string => {
 
 const theme = (name: 'light' | 'dark') => (name === 'light' ? light : dark);
 
+/**
+ * The gradient colours live inside `@supports`, so they are read from there: that
+ * is the value a capable browser paints, and the only one that exists.
+ */
+const gradients = (name: 'light' | 'dark'): Tokens => {
+  const start = css.indexOf('@supports (color: color-mix(in oklab, white, black))');
+  if (start === -1) {
+    throw new Error('no @supports block for the gradient colours');
+  }
+  // The light values are its first `:root`, the dark ones its following `.dark`.
+  const body = css.slice(start, css.indexOf('\n}', css.indexOf('.dark', start)) + 2);
+  const selector = name === 'light' ? ':root {' : '.dark {';
+  const from = body.indexOf(selector);
+  if (from === -1) {
+    throw new Error(`no ${selector} inside @supports`);
+  }
+  const block = body.slice(from, body.indexOf('}', from));
+  const tokens: Tokens = {};
+  for (const line of block.slice(block.indexOf('{') + 1).split(';')) {
+    const colon = line.indexOf(':');
+    if (colon === -1 || !line.trimStart().startsWith('--')) {
+      continue;
+    }
+    tokens[line.slice(0, colon).trim().slice(2)] = line.slice(colon + 1).trim();
+  }
+  return tokens;
+};
+
+/** The alpha a gradient token actually mixes, as a 0..1 fraction. */
+const mixStrength = (value: string): number => {
+  const percent = /color-mix\([^;]*?([\d.]+)%/.exec(value)?.[1];
+  if (percent === undefined) {
+    throw new Error(`not a colour mix with a percentage: ${value}`);
+  }
+  return Number.parseFloat(percent) / 100;
+};
+
 describe.each(['light', 'dark'] as const)('%s theme', (name) => {
   const t = theme(name);
   const canvas = need(t, 'background');
@@ -156,6 +193,68 @@ describe.each(['light', 'dark'] as const)('%s theme', (name) => {
     for (const series of ['chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5'] as const) {
       expect(ratio(need(t, series), card), `${series} on a card`).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+/**
+ * ITEM-149: a gradient must not cost legibility.
+ *
+ * The strongest point of each gradient is its darkest, so that is where text is
+ * measured: the accent composited over the canvas at the token's own strength. If
+ * someone raises `--gradient-glow` to 40% the text over the hero stops being
+ * readable, and this fails rather than shipping it.
+ */
+describe.each(['light', 'dark'] as const)('%s gradients', (name) => {
+  const t = theme(name);
+  const g = gradients(name);
+
+  /** An sRGB alpha composite, which is close enough for a contrast floor. */
+  const over = (base: string, top: string, alpha: number): string => {
+    const [br, bg, bb] = rgb(base) as [number, number, number];
+    const [tr, tg, tb] = rgb(top) as [number, number, number];
+    const mix = (b: number, f: number) => Math.round(b * (1 - alpha) + f * alpha);
+    return `#${[mix(br, tr), mix(bg, tg), mix(bb, tb)]
+      .map(channel => channel.toString(16).padStart(2, '0'))
+      .join('')}`;
+  };
+
+  it('keeps a wash over content readable for muted text', () => {
+    // A wash covers the content area, where muted labels live, so the muted floor
+    // is the one that binds. It is why this number is small: the accent has almost
+    // no headroom against #5b616b on this canvas.
+    const strength = mixStrength(need(g, 'gradient-wash-color'));
+    const peak = over(need(t, 'background'), need(t, 'accent'), strength);
+
+    expect(ratio(need(t, 'muted-foreground'), peak), 'muted ink over the peak').toBeGreaterThanOrEqual(6);
+    expect(ratio(need(t, 'foreground'), peak), 'body ink over the peak').toBeGreaterThanOrEqual(12);
+  });
+
+  it('allows a glow to be stronger, because a glow sits behind a heading', () => {
+    // The design language restricts a glow to a title band, where the text is body
+    // ink. Putting muted text over it would breach the floor above, so the rule is
+    // placement, not a weaker gradient.
+    const strength = mixStrength(need(g, 'gradient-glow-color'));
+    const peak = over(need(t, 'background'), need(t, 'accent'), strength);
+
+    expect(ratio(need(t, 'foreground'), peak), 'body ink over the peak').toBeGreaterThanOrEqual(12);
+  });
+
+  it('keeps the card depth within a hairline, not a panel', () => {
+    // The depth gradient is ink, not accent: it darkens or lightens the header.
+    const strength = mixStrength(need(g, 'gradient-depth-color'));
+    const peak = over(need(t, 'card'), need(t, 'foreground'), strength);
+
+    expect(strength).toBeLessThanOrEqual(0.03); // a card header is a tint, not a shade
+    expect(ratio(need(t, 'foreground'), peak)).toBeGreaterThanOrEqual(12);
+    expect(ratio(need(t, 'muted-foreground'), peak)).toBeGreaterThanOrEqual(6);
+  });
+
+  it('has exactly three gradients, so the language stays small', () => {
+    expect(Object.keys(g).sort()).toEqual([
+      'gradient-depth-color',
+      'gradient-glow-color',
+      'gradient-wash-color',
+    ]);
   });
 });
 

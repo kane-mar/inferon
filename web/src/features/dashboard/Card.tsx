@@ -16,7 +16,7 @@ export const Card = (props: {
   "
   >
     <header className="
-      flex items-center justify-between gap-3 border-b px-5 py-3.5
+      flex items-center justify-between gap-3 border-b surface-depth px-5 py-3.5
     "
     >
       <h2 className="flex items-center gap-2 font-semibold text-balance">

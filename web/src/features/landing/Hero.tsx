@@ -28,7 +28,7 @@ export const Hero = () => {
 
   return (
     <Section className="
-      px-3 pt-16 pb-20
+      surface-glow px-3 pt-16 pb-20
       md:pt-28
     "
     >

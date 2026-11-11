@@ -108,6 +108,20 @@
   --border: #dde0e4;
   --input: #d5d7dc;
   --ring: #932b45; /* focus is the one place the accent always appears */
+  /*
+   * ITEM-149: the gradient language, as three strengths and nothing else.
+   *
+   * A gradient here is light, not decoration: it is one hue fading into the
+   * surface, and at these strengths it is barely a tint (the contrast test proves
+   * text stays well above its floor over the darkest point). Multi-hue gradients,
+   * gradient text and gradient borders are excluded by the design language, and
+   * the reason is simple: they compete with the data.
+   */
+  /*
+   * The mixed colour is a token of its own, not a percentage inside the gradient:
+   * the minifier flattens `color-mix(... var(--percentage) ...)` down to the bare
+   * colour, which would ship an opaque accent. These are the only three.
+   */
   /* One hue family, ordered by prominence: a pink step, its deep ink, a
      desaturated teal, a slate, and plain ink. A five-colour rainbow is the
      fastest way to make a minimal report look noisy.
@@ -150,11 +164,70 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: #f1a6b0;
+  /* ITEM-149: less of it in dark mode. The same alpha is loud on a near-black
+     canvas, and the point is that the gradient is felt rather than seen. */
   --chart-1: #f386a1;
   --chart-2: #f1a6b0;
   --chart-3: #7cc4c5;
   --chart-4: #babec6;
   --chart-5: #f9fafb;
+}
+
+/*
+ * ITEM-149: three ways a gradient may appear, and no others.
+ *
+ * - `surface-glow`: one soft light from above, behind a page title. Once per
+ *   viewport at most.
+ * - `surface-wash`: a faint band at the top of a content area, gone by 12rem.
+ * - `surface-depth`: the top of a card header, 2% of ink, so a header separates
+ *   from its body without a second border.
+ *
+ * All three interpolate in OKLab and all three are single-hue. Nothing here is
+ * applied behind a number, a table cell or a chart: a gradient under a value
+ * changes how that value reads.
+ */
+/*
+ * ITEM-149: declared only where color-mix exists. A browser without it resolves
+ * nothing here, the utility's `var()` is invalid, and the gradient simply is not
+ * painted — which is the fallback the language asks for. The build would otherwise
+ * fall back to the bare accent, i.e. an opaque pink page.
+ */
+@supports (color: color-mix(in oklab, white, black)) {
+  :root {
+    --gradient-glow-color: color-mix(in oklab, var(--accent) 8%, transparent);
+    --gradient-wash-color: color-mix(in oklab, var(--accent) 2%, transparent);
+    --gradient-depth-color: color-mix(in oklab, var(--foreground) 2%, transparent);
+  }
+
+  .dark {
+    --gradient-glow-color: color-mix(in oklab, var(--accent) 5%, transparent);
+    --gradient-wash-color: color-mix(in oklab, var(--accent) 2%, transparent);
+    --gradient-depth-color: color-mix(in oklab, var(--foreground) 1.5%, transparent);
+  }
+}
+
+@utility surface-glow {
+  background-image: radial-gradient(
+    120% 90% at 50% -30%,
+    var(--gradient-glow-color),
+    transparent 70%
+  );
+}
+
+@utility surface-wash {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--accent) var(--gradient-wash), transparent),
+    transparent 12rem
+  );
+}
+
+@utility surface-depth {
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--foreground) var(--gradient-depth), transparent),
+    transparent
+  );
 }
 
 @layer base {

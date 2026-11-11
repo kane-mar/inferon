@@ -80,7 +80,14 @@ export default async function DashboardLayout(props: DashboardLayoutProps) {
       </header>
 
       {/* ITEM-143: the jump target for the skip link. */}
-      <main id="main" className="min-h-[calc(100vh-57px)] bg-muted">
+      {/* ITEM-149: the page is the canvas, and cards are the raised surface. It used to
+        be the reverse (muted page, white cards), which put muted ink on the muted
+        surface at 5.66:1, under this product's own 6:1 floor. Canvas also gives the
+        wash somewhere it can be 2% without costing legibility. */}
+      <main
+        id="main"
+        className="min-h-[calc(100vh-57px)] bg-background surface-wash"
+      >
         <div className="mx-auto max-w-7xl px-3 pt-6 pb-16">
           {props.children}
         </div>
