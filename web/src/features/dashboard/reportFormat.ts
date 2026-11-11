@@ -8,7 +8,11 @@
 
 // ITEM-124: a column header is a sentence a reader scans, not a code label. 13px
 // sans, sentence case, no tracking; the row gains room so 15px text is not cramped.
-export const HEAD = 'px-3 py-2.5 text-left text-xs font-medium text-muted-foreground';
+//
+// ITEM-148: no alignment here. `HEAD` used to carry `text-left`, so `HEAD_RIGHT`
+// emitted both classes on one element and the winner depended on stylesheet order:
+// a numeric column's header could sit left while its numbers sat right.
+export const HEAD = 'px-3 py-2.5 text-xs font-medium text-muted-foreground';
 export const CELL = 'px-3 py-2.5 text-sm tabular-nums';
 /** A header cell, aligned to its column. Two pages had declared these twice. */
 export const HEAD_LEFT = `${HEAD} text-left`;

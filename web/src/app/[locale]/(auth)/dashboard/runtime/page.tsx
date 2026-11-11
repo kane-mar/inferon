@@ -9,8 +9,8 @@ import { KpiCard } from '@/features/dashboard/KpiCard';
 import {
   CELL,
   duration,
-  HEAD,
   HEAD_LEFT,
+
   HEAD_RIGHT,
   heatCellClass,
   micros,
@@ -466,14 +466,14 @@ export default async function RuntimePage(props: {
             <table className="w-full">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b">
-                  <th className={HEAD}>{t('model')}</th>
-                  <th className={HEAD}>{t('requests')}</th>
-                  <th className={HEAD}>{t('payload_column')}</th>
-                  <th className={HEAD}>{t('upload_column')}</th>
-                  <th className={HEAD}>{t('overhead_p50')}</th>
-                  <th className={HEAD}>{t('overhead_p95')}</th>
-                  <th className={HEAD}>{t('total_p50')}</th>
-                  <th className={HEAD}>{t('total_p95')}</th>
+                  <th className={HEAD_LEFT}>{t('model')}</th>
+                  <th className={HEAD_LEFT}>{t('requests')}</th>
+                  <th className={HEAD_LEFT}>{t('payload_column')}</th>
+                  <th className={HEAD_LEFT}>{t('upload_column')}</th>
+                  <th className={HEAD_LEFT}>{t('overhead_p50')}</th>
+                  <th className={HEAD_LEFT}>{t('overhead_p95')}</th>
+                  <th className={HEAD_LEFT}>{t('total_p50')}</th>
+                  <th className={HEAD_LEFT}>{t('total_p95')}</th>
                 </tr>
               </thead>
               <tbody>

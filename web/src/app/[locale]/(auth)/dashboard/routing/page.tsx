@@ -7,7 +7,7 @@ import { Card } from '@/features/dashboard/Card';
 import { ControlsPanel } from '@/features/dashboard/ControlsPanel';
 import { Empty } from '@/features/dashboard/Empty';
 import { PrunePanel } from '@/features/dashboard/PrunePanel';
-import { HEAD } from '@/features/dashboard/reportFormat';
+import { HEAD_LEFT } from '@/features/dashboard/reportFormat';
 import { RoutingPanel } from '@/features/dashboard/RoutingPanel';
 import { TierPairsPanel } from '@/features/dashboard/TierPairsPanel';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -98,10 +98,10 @@ export default async function RoutingPage(props: RoutingPageProps) {
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className={HEAD}>{t('audit_when')}</th>
-                          <th className={HEAD}>{t('audit_actor')}</th>
-                          <th className={HEAD}>{t('audit_setting')}</th>
-                          <th className={HEAD}>{t('audit_change')}</th>
+                          <th className={HEAD_LEFT}>{t('audit_when')}</th>
+                          <th className={HEAD_LEFT}>{t('audit_actor')}</th>
+                          <th className={HEAD_LEFT}>{t('audit_setting')}</th>
+                          <th className={HEAD_LEFT}>{t('audit_change')}</th>
                         </tr>
                       </thead>
                       <tbody>

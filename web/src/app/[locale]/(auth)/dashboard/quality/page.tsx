@@ -8,7 +8,7 @@ import { Empty } from '@/features/dashboard/Empty';
 import { EvalsPanel } from '@/features/dashboard/EvalsPanel';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { OutcomeBar, ShareBar } from '@/features/dashboard/OutcomeBar';
-import { CELL, HEAD, HEAD_RIGHT, percent, shortHash } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD_LEFT, HEAD_RIGHT, percent, shortHash } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -144,7 +144,7 @@ export default async function QualityPage(props: {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b text-muted-foreground">
-                      <th className={HEAD}>{t('class')}</th>
+                      <th className={HEAD_LEFT}>{t('class')}</th>
                       <th className={HEAD_RIGHT}>{t('count')}</th>
                     </tr>
                   </thead>
@@ -193,7 +193,7 @@ export default async function QualityPage(props: {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b text-muted-foreground">
-                      <th className={HEAD}>{t('cluster')}</th>
+                      <th className={HEAD_LEFT}>{t('cluster')}</th>
                       <th className={HEAD_RIGHT}>{t('requests')}</th>
                       <th className={HEAD_RIGHT}>{t('success')}</th>
                     </tr>
@@ -245,7 +245,7 @@ export default async function QualityPage(props: {
             <table className="w-full">
               <thead>
                 <tr className="border-b text-muted-foreground">
-                  <th className={HEAD}>{t('model')}</th>
+                  <th className={HEAD_LEFT}>{t('model')}</th>
                   <th className={HEAD_RIGHT}>{t('requests')}</th>
                   <th className={HEAD_RIGHT}>{t('ok')}</th>
                   <th className={HEAD_RIGHT}>{t('empty')}</th>

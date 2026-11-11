@@ -8,7 +8,7 @@ import { DatasetPurge } from '@/features/dashboard/DatasetPurge';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { PromptsPanel } from '@/features/dashboard/PromptsPanel';
-import { CELL, HEAD, shortHash } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD_LEFT, shortHash } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import { PageHeader } from '@/features/shell/PageHeader';
@@ -117,16 +117,16 @@ export default async function DatasetsPage(props: {
             <table className="w-full">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b">
-                  <th className={HEAD}>{t('prompt')}</th>
-                  <th className={HEAD}>{t('model')}</th>
-                  <th className={HEAD}>{t('requests')}</th>
-                  <th className={HEAD}>{t('qualified')}</th>
-                  <th className={HEAD}>{t('distinct')}</th>
-                  <th className={HEAD}>{t('excluded')}</th>
-                  <th className={HEAD}>{t('why')}</th>
-                  <th className={HEAD}>{t('spend')}</th>
-                  <th className={HEAD}>{t('last_seen')}</th>
-                  <th className={HEAD}>{t('export')}</th>
+                  <th className={HEAD_LEFT}>{t('prompt')}</th>
+                  <th className={HEAD_LEFT}>{t('model')}</th>
+                  <th className={HEAD_LEFT}>{t('requests')}</th>
+                  <th className={HEAD_LEFT}>{t('qualified')}</th>
+                  <th className={HEAD_LEFT}>{t('distinct')}</th>
+                  <th className={HEAD_LEFT}>{t('excluded')}</th>
+                  <th className={HEAD_LEFT}>{t('why')}</th>
+                  <th className={HEAD_LEFT}>{t('spend')}</th>
+                  <th className={HEAD_LEFT}>{t('last_seen')}</th>
+                  <th className={HEAD_LEFT}>{t('export')}</th>
                 </tr>
               </thead>
               <tbody>

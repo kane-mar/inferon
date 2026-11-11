@@ -13,7 +13,7 @@ import { HideZeroCheckbox } from '@/features/dashboard/HideZeroCheckbox';
 import { KpiCard } from '@/features/dashboard/KpiCard';
 import { money } from '@/features/dashboard/money';
 import { ShareBar } from '@/features/dashboard/OutcomeBar';
-import { CELL, HEAD, HEAD_RIGHT } from '@/features/dashboard/reportFormat';
+import { CELL, HEAD_LEFT, HEAD_RIGHT } from '@/features/dashboard/reportFormat';
 import { reportDays } from '@/features/dashboard/reportWindow';
 import { ShareAuditPanel } from '@/features/dashboard/ShareAuditPanel';
 import { SpendBreakdown } from '@/features/dashboard/SpendBreakdown';
@@ -189,7 +189,7 @@ export default async function SpendReportPage(props: {
                 <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
-                      <th className={HEAD}>{t('model')}</th>
+                      <th className={HEAD_LEFT}>{t('model')}</th>
                       <th className={HEAD_RIGHT}>{t('requests')}</th>
                       <th className={HEAD_RIGHT}>{t('tokens')}</th>
                       <th className={HEAD_RIGHT}>{t('cached')}</th>
@@ -264,7 +264,7 @@ export default async function SpendReportPage(props: {
                 <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b text-muted-foreground">
-                      <th className={HEAD}>{t('prompt_hash')}</th>
+                      <th className={HEAD_LEFT}>{t('prompt_hash')}</th>
                       <th className={HEAD_RIGHT}>{t('requests')}</th>
                       <th className={HEAD_RIGHT}>{t('prompt_tokens')}</th>
                       <th className={HEAD_RIGHT}>{t('cached')}</th>
@@ -353,11 +353,11 @@ export default async function SpendReportPage(props: {
               <table className="w-full">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b">
-                    <th className={HEAD}>{heading('transaction')}</th>
-                    <th className={HEAD}>{heading('turns')}</th>
-                    <th className={HEAD}>{heading('models')}</th>
-                    <th className={HEAD}>{heading('cost')}</th>
-                    <th className={HEAD}>{heading('errors')}</th>
+                    <th className={HEAD_LEFT}>{heading('transaction')}</th>
+                    <th className={HEAD_LEFT}>{heading('turns')}</th>
+                    <th className={HEAD_LEFT}>{heading('models')}</th>
+                    <th className={HEAD_LEFT}>{heading('cost')}</th>
+                    <th className={HEAD_LEFT}>{heading('errors')}</th>
                   </tr>
                 </thead>
                 <tbody>
