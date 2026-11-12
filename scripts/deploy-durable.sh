@@ -174,8 +174,9 @@ NEXT_PUBLIC_APP_URL=https://$INFERON_HOST"
                PROVIDER_ENCRYPTION_KEY \
                OPERATOR_GITHUB_LOGINS ALERT_WEBHOOK_URL UPSTREAM_URL; do
         val="${!var:-}"
+        # %q: a value with a space, a comma or an & survives being sourced again.
         [ -n "$val" ] && out="$out
-$var=$val"
+$(printf '%s=%q' "$var" "$val")"
     done
     printf '%s\n' "$out"
 }

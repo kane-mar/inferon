@@ -223,35 +223,57 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: scp -i ~/.ssh/id_deploy /tmp/durable.tgz "root@$DEPLOY_HOST:/tmp/durable.tgz"
 
-      # ITEM-153: the environment travels over stdin and lands in a 0600 file, never
-      # on the command line — a deploy used to put every secret in the host's `ps`
-      # output, and to lose them entirely when /opt/inferon was re-extracted.
+      # ITEM-153/154: the environment goes to a 0600 file, never on a command line,
+      # and is reinstalled on every deploy because /opt/inferon is re-extracted.
+      # Heredocs with quoted delimiters: no nested quoting, no interpolation.
+      - name: Write the environment file
+        if: steps.cfg.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            for pair in \
+              "INFERON_HOST=$INFERON_HOST" \
+              "NEXT_PUBLIC_APP_URL=https://$INFERON_HOST" \
+              "OPERATOR_API_KEY=$OPERATOR_API_KEY" \
+              "GITHUB_CLIENT_ID=$OAUTH_CLIENT_ID" \
+              "GITHUB_CLIENT_SECRET=$OAUTH_CLIENT_SECRET" \
+              "SESSION_SECRET=$SESSION_SECRET" \
+              "UPSTREAM_MASTER_KEY=$UPSTREAM_MASTER_KEY" \
+              "PROVIDER_ENCRYPTION_KEY=$PROVIDER_ENCRYPTION_KEY" \
+              "OPERATOR_GITHUB_LOGINS=$OPERATOR_GITHUB_LOGINS" \
+              "ALERT_WEBHOOK_URL=$ALERT_WEBHOOK_URL"; do
+              name="${pair%%=*}"
+              value="${pair#*=}"
+              # %q so a value with spaces or & survives being sourced again.
+              printf '%s=%q\n' "$name" "$value"
+            done
+          } > /tmp/inferon.env
+
       - name: Deploy (migrate + rebuild + restart)
         if: steps.cfg.outputs.configured == 'true'
         run: |
-          {
-            echo "INFERON_HOST=$INFERON_HOST"
-            echo "NEXT_PUBLIC_APP_URL=https://$INFERON_HOST"
-            echo "OPERATOR_API_KEY=$OPERATOR_API_KEY"
-            echo "GITHUB_CLIENT_ID=$OAUTH_CLIENT_ID"
-            echo "GITHUB_CLIENT_SECRET=$OAUTH_CLIENT_SECRET"
-            echo "SESSION_SECRET=$SESSION_SECRET"
-            echo "UPSTREAM_MASTER_KEY=$UPSTREAM_MASTER_KEY"
-            echo "PROVIDER_ENCRYPTION_KEY=$PROVIDER_ENCRYPTION_KEY"
-            echo "OPERATOR_GITHUB_LOGINS=$OPERATOR_GITHUB_LOGINS"
-            echo "ALERT_WEBHOOK_URL=$ALERT_WEBHOOK_URL"
-          } | ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@$DEPLOY_HOST" "\
-            umask 077 && rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
-            && chmod -R a+rX /opt/inferon \
-            && cat > /opt/inferon/env.local && chmod 600 /opt/inferon/env.local \
-            && cd /opt/inferon && chmod +x scripts/*.sh \
-            && docker compose up -d postgres redis \
-            && ./scripts/migrate.sh \
-            && set -a && . ./env.local && set +a \
-            && docker compose --profile prod up -d --build \
-            && docker compose --profile prod up -d --force-recreate caddy \
-            && docker builder prune -af >/dev/null \
-            && docker image prune -f >/dev/null
+          set -euo pipefail
+          scp -i ~/.ssh/id_deploy /tmp/inferon.env "root@$DEPLOY_HOST:/tmp/inferon.env"
+          ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
+            "root@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          rm -rf /opt/inferon && mkdir -p /opt/inferon
+          tar xzf /tmp/durable.tgz -C /opt/inferon
+          chmod -R a+rX /opt/inferon
+          install -m 600 /tmp/inferon.env /opt/inferon/env.local
+          rm -f /tmp/inferon.env
+          cd /opt/inferon && chmod +x scripts/*.sh
+          docker compose up -d postgres redis
+          ./scripts/migrate.sh
+          set -a && . ./env.local && set +a
+          docker compose --profile prod up -d --build
+          docker compose --profile prod up -d --force-recreate caddy
+          # Two images on a 23 GB host: prune or the next deploy has no disk.
+          docker builder prune -af >/dev/null
+          docker image prune -f >/dev/null
+          REMOTE
 
       - name: Health check
         if: steps.cfg.outputs.configured == 'true'
