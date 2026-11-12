@@ -216,22 +216,33 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: scp -i ~/.ssh/id_deploy /tmp/durable.tgz "root@$DEPLOY_HOST:/tmp/durable.tgz"
 
+      # ITEM-153: the environment travels over stdin and lands in a 0600 file, never
+      # on the command line — a deploy used to put every secret in the host's `ps`
+      # output, and to lose them entirely when /opt/inferon was re-extracted.
       - name: Deploy (migrate + rebuild + restart)
         if: steps.cfg.outputs.configured == 'true'
         run: |
-          ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@$DEPLOY_HOST" "\
-            rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
-            && chmod -R a+rX /opt/inferon && cd /opt/inferon && chmod +x scripts/*.sh \
+          {
+            echo "INFERON_HOST=$INFERON_HOST"
+            echo "NEXT_PUBLIC_APP_URL=https://$INFERON_HOST"
+            echo "OPERATOR_API_KEY=$OPERATOR_API_KEY"
+            echo "GITHUB_CLIENT_ID=$OAUTH_CLIENT_ID"
+            echo "GITHUB_CLIENT_SECRET=$OAUTH_CLIENT_SECRET"
+            echo "SESSION_SECRET=$SESSION_SECRET"
+            echo "UPSTREAM_MASTER_KEY=$UPSTREAM_MASTER_KEY"
+            echo "PROVIDER_ENCRYPTION_KEY=$PROVIDER_ENCRYPTION_KEY"
+            echo "OPERATOR_GITHUB_LOGINS=$OPERATOR_GITHUB_LOGINS"
+            echo "ALERT_WEBHOOK_URL=$ALERT_WEBHOOK_URL"
+          } | ssh -i ~/.ssh/id_deploy -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@$DEPLOY_HOST" "\
+            umask 077 && rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
+            && chmod -R a+rX /opt/inferon \
+            && cat > /opt/inferon/env.local && chmod 600 /opt/inferon/env.local \
+            && cd /opt/inferon && chmod +x scripts/*.sh \
             && docker compose up -d postgres redis \
             && ./scripts/migrate.sh \
-            && export INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' \
-               NEXT_PUBLIC_APP_URL='https://$INFERON_HOST' \
-               GITHUB_CLIENT_ID='$OAUTH_CLIENT_ID' GITHUB_CLIENT_SECRET='$OAUTH_CLIENT_SECRET' \
-               SESSION_SECRET='$SESSION_SECRET' UPSTREAM_MASTER_KEY='$UPSTREAM_MASTER_KEY' \
-               PROVIDER_ENCRYPTION_KEY='$PROVIDER_ENCRYPTION_KEY' \
-               OPERATOR_GITHUB_LOGINS='$OPERATOR_GITHUB_LOGINS' ALERT_WEBHOOK_URL='$ALERT_WEBHOOK_URL' \
-               && docker compose --profile prod up -d --build \
-               && docker compose --profile prod up -d --force-recreate caddy"
+            && set -a && . ./env.local && set +a \
+            && docker compose --profile prod up -d --build \
+            && docker compose --profile prod up -d --force-recreate caddy"
 
       - name: Health check
         if: steps.cfg.outputs.configured == 'true'

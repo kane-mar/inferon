@@ -156,8 +156,14 @@ bundle_upload() {
 
 # Non-secret + optional env passed to compose. Values only travel over the ssh
 # command line (same channel as the operator key).
-compose_env() {
-    local out="INFERON_HOST='$INFERON_HOST' OPERATOR_API_KEY='$OPERATOR_API_KEY' NEXT_PUBLIC_APP_URL='https://$INFERON_HOST'"
+# ITEM-153: the environment is written to a 0600 file on the host and sourced
+# there. It used to be exported on the ssh command line, which puts every secret in
+# the host's own `ps` output — and it was lost whenever a deploy wiped
+# /opt/inferon, because it lived only in that command line.
+env_file() {
+    local out="INFERON_HOST=$INFERON_HOST
+OPERATOR_API_KEY=$OPERATOR_API_KEY
+NEXT_PUBLIC_APP_URL=https://$INFERON_HOST"
     # The encryption key is a saved secret, not a shell variable: read it the
     # same way as the operator key so a redeploy can never drop it.
     if [ -z "${PROVIDER_ENCRYPTION_KEY:-}" ] && [ -f "$ENC_FILE" ]; then
@@ -168,23 +174,27 @@ compose_env() {
                PROVIDER_ENCRYPTION_KEY \
                OPERATOR_GITHUB_LOGINS ALERT_WEBHOOK_URL UPSTREAM_URL; do
         val="${!var:-}"
-        [ -n "$val" ] && out="$out $var='$val'"
+        [ -n "$val" ] && out="$out
+$var=$val"
     done
-    printf '%s' "$out"
+    printf '%s\n' "$out"
 }
 
 # Deploy on the host: extract, bring Postgres up, apply db/init (idempotent —
 # the entrypoint only auto-applies on a fresh volume), then rebuild + start the
 # full prod stack.
 remote_deploy() {
-    local ip=$1 env_args
-    env_args=$(compose_env)
-    ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@$ip" \
-        "rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon && chmod -R a+rX /opt/inferon \
+    local ip=$1
+    # The file travels over stdin, never argv, and is recreated on every deploy
+    # because /opt/inferon is re-extracted from the bundle.
+    env_file | ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "root@$ip" \
+        "umask 077 && rm -rf /opt/inferon && mkdir -p /opt/inferon && tar xzf /tmp/durable.tgz -C /opt/inferon \
+         && chmod -R a+rX /opt/inferon \
+         && cat > /opt/inferon/env.local && chmod 600 /opt/inferon/env.local \
          && cd /opt/inferon && chmod +x scripts/*.sh \
          && docker compose up -d postgres redis \
          && ./scripts/migrate.sh \
-         && export $env_args \
+         && set -a && . ./env.local && set +a \
          && docker compose --profile prod up -d --build \
          && docker compose --profile prod up -d --force-recreate caddy"
 }
