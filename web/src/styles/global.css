@@ -35,6 +35,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* ITEM-152: a chart card is 12px, a step softer than a content card, because it
+     holds a figure rather than text. */
+  --radius-chart: 0.75rem;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SF Mono', Menlo, monospace;
   --color-background: var(--background);
@@ -61,6 +64,16 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chart-surface: var(--chart-surface);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-axis-ink: var(--chart-axis-ink);
+  --color-chart-title-ink: var(--chart-title-ink);
+  --color-chart-muted-ink: var(--chart-muted-ink);
+  --color-chart-cost: var(--chart-cost);
+  --color-chart-cost-soft: var(--chart-cost-soft);
+  --color-chart-tokens: var(--chart-tokens);
+  --color-chart-tokens-soft: var(--chart-tokens-soft);
+  --color-chart-line: var(--chart-line);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -127,6 +140,19 @@
      fastest way to make a minimal report look noisy.
      chart-1 is *not* --accent: the accent is a 2.2:1 wash, and a 2 px data mark
      needs 3:1 (WCAG 1.4.11), so the series uses the same hue one step deeper. */
+  /* ITEM-152: the chart surfaces and marks. A chart card is a flat tint, not a
+     bordered panel, so the data is the only figure on it. */
+  --chart-surface: #f7f8fa;
+  --chart-grid: rgba(0, 0, 0, 0.05);
+  --chart-axis-ink: #5b616b; /* the reference uses #9CA3AF: 2.39:1 on this surface */
+  --chart-title-ink: #1f2937;
+  --chart-muted-ink: #8c939d;
+  --chart-cost: #fa8c16;
+  --chart-cost-soft: #ffd666;
+  --chart-tokens: #69b1ff;
+  --chart-tokens-soft: #c6e2ff;
+  --chart-line: #3b82f6;
+  --chart-area: rgba(59, 130, 246, 0.45);
   --chart-1: #e86885;
   --chart-2: #932b45;
   --chart-3: #2f6f70;
@@ -166,6 +192,17 @@
   --ring: #f1a6b0;
   /* ITEM-149: less of it in dark mode. The same alpha is loud on a near-black
      canvas, and the point is that the gradient is felt rather than seen. */
+  --chart-surface: #1b1e24;
+  --chart-grid: rgba(255, 255, 255, 0.08);
+  --chart-axis-ink: #8f96a1;
+  --chart-title-ink: #e9ecf1;
+  --chart-muted-ink: #9aa1ab;
+  --chart-cost: #f59e0b;
+  --chart-cost-soft: #7c4a12;
+  --chart-tokens: #3b82f6;
+  --chart-tokens-soft: #1e3a5f;
+  --chart-line: #60a5fa;
+  --chart-area: rgba(96, 165, 250, 0.35);
   --chart-1: #f386a1;
   --chart-2: #f1a6b0;
   --chart-3: #7cc4c5;
@@ -204,6 +241,10 @@
     --gradient-wash-color: color-mix(in oklab, var(--accent) 2%, transparent);
     --gradient-depth-color: color-mix(in oklab, var(--foreground) 1.5%, transparent);
   }
+}
+
+@utility rounded-chart {
+  border-radius: var(--radius-chart);
 }
 
 @utility surface-glow {

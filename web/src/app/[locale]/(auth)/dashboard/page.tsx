@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { DashboardView } from '@/features/dashboard/DashboardToolbar';
-import type { LineSeries, ValueFormat } from '@/features/dashboard/LineChart';
 import type { ChartMetric } from '@/libs/dashboardMetrics';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { redirect } from 'next/navigation';
 import { buttonVariants } from '@/components/ui/buttonVariants';
+import { AreaChart } from '@/features/dashboard/AreaChart';
 import { Card } from '@/features/dashboard/Card';
+import { ChartCard } from '@/features/dashboard/ChartCard';
 import {
   CompareToggle,
   MetricTabs,
@@ -15,9 +16,9 @@ import {
 import { Empty } from '@/features/dashboard/Empty';
 import { Icon } from '@/features/dashboard/Icon';
 import { KpiCard } from '@/features/dashboard/KpiCard';
-import { LineChart } from '@/features/dashboard/LineChart';
 import { money } from '@/features/dashboard/money';
 import { WINDOWS } from '@/features/dashboard/reportWindow';
+import { StackedBars } from '@/features/dashboard/StackedBars';
 import { WindowChip } from '@/features/dashboard/WindowChip';
 import {
   chartSeries,
@@ -34,14 +35,6 @@ import { metricTone, THRESHOLDS, toneGlyphClass } from '@/libs/reportTone';
 import { currentSession } from '@/libs/session';
 
 const CHART_METRICS: ChartMetric[] = ['requests', 'cost', 'tokens', 'ttft', 'errors'];
-
-const VALUE_FORMAT: Record<ChartMetric, ValueFormat> = {
-  requests: 'int',
-  errors: 'int',
-  cost: 'usd',
-  tokens: 'compact',
-  ttft: 'ms',
-};
 
 type SearchParams = { days?: string; compare?: string; metric?: string; hide_zero?: string };
 
@@ -93,23 +86,6 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
     : null;
   const ttftDelta = previous ? deltaPct(summary.ttft_p95_ms, previous.ttft_p95_ms) : null;
   const errorRate = errorRatePct(summary.requests, summary.errors);
-
-  const chartSeriesList: LineSeries[] = [
-    {
-      name: t('current'),
-      color: 'var(--chart-1)',
-      values: chartSeries(series.points, view.metric),
-      area: true,
-    },
-  ];
-  if (previousSeries) {
-    chartSeriesList.push({
-      name: t('previous'),
-      color: 'var(--muted-foreground)',
-      values: chartSeries(previousSeries.points, view.metric),
-      dashed: true,
-    });
-  }
 
   const metricLabels: Record<ChartMetric, string> = {
     requests: t('requests'),
@@ -289,18 +265,37 @@ export default async function DashboardIndexPage(props: DashboardIndexPageProps)
         </div>
       )}
 
+      {/* ITEM-152: the chart style. One card, and the chart *type* answers to the
+          metric: a smooth area for a measure that is a quantity over time, stacked
+          columns where a measure has two parts. Previous-window comparison stays on
+          the area, as a dashed neutral line. */}
       <div className="mt-6">
-        <Card
-          title={t('usage_over_time')}
-          icon="activity"
+        <ChartCard
+          measure={t('usage_over_time')}
           action={<MetricTabs {...view} labels={metricLabels} />}
         >
-          <LineChart
-            labels={series.points.map(point => point.date)}
-            series={chartSeriesList}
-            valueFormat={VALUE_FORMAT[view.metric]}
-          />
-        </Card>
+          {view.metric === 'cost' || view.metric === 'tokens'
+            ? (
+                <StackedBars
+                  labels={series.points.map(point => point.date)}
+                  values={series.points.map(point => (view.metric === 'tokens'
+                    ? [point.prompt_tokens, point.completion_tokens] as [number, number]
+                    : [Number(point.cost_usd), 0] as [number, number]))}
+                  palette={view.metric === 'tokens' ? 'tokens' : 'cost'}
+                  format={view.metric === 'tokens' ? formatInt : value => money(value)}
+                />
+              )
+            : (
+                <AreaChart
+                  labels={series.points.map(point => point.date)}
+                  values={chartSeries(series.points, view.metric).map(value => value ?? 0)}
+                  previous={view.compare && previousSeries
+                    ? chartSeries(previousSeries.points, view.metric).map(value => value ?? 0)
+                    : undefined}
+                  format={view.metric === 'ttft' ? formatMs : formatInt}
+                />
+              )}
+        </ChartCard>
       </div>
     </>
   );

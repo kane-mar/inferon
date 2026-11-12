@@ -96,9 +96,11 @@ describe('motion', () => {
 });
 
 describe('shape', () => {
-  it('keeps radii to the three in the language, plus a full round', () => {
-    // Cards 8px, controls 6px, chips 4px; `rounded-full` is a dot or a pill.
+  it('keeps radii to the four in the language, plus a full round', () => {
+    // Cards 8px, controls 6px, chips 4px, chart cards 12px (`rounded-chart`);
+    // `rounded-full` is a dot or a pill. An arbitrary radius is the thing banned.
     expect(offenders(/\brounded-(?:xl|2xl|3xl|\[)/)).toEqual([]);
+    expect(offenders(/\brounded-chart\b/).length).toBeGreaterThan(0);
   });
 });
 

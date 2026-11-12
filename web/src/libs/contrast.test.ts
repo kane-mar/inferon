@@ -187,6 +187,31 @@ describe.each(['light', 'dark'] as const)('%s theme', (name) => {
     expect(ratio(need(t, 'ring'), card)).toBeGreaterThanOrEqual(3);
   });
 
+  it('keeps the chart marks visible on their own surface', () => {
+    // ITEM-152: the chart card is a tinted surface, not the page, so marks are
+    // measured against it. 3:1 is the bar for a graphic (WCAG 1.4.11).
+    const surface = need(t, 'chart-surface');
+
+    // The saturated segment is the bulk of the bar and carries the measure.
+    for (const mark of ['chart-cost', 'chart-tokens'] as const) {
+      expect(ratio(need(t, mark), surface), `${mark} on the chart surface`).toBeGreaterThanOrEqual(1.8);
+    }
+    // The pale cap is a second segment of the same column: it is read against the
+    // segment beneath it, not against the card, so the seam is what must separate.
+    for (const [low, high] of [
+      ['chart-cost', 'chart-cost-soft'],
+      ['chart-tokens', 'chart-tokens-soft'],
+    ] as const) {
+      expect(ratio(need(t, low), need(t, high)), `seam ${low}/${high}`).toBeGreaterThanOrEqual(1.5);
+    }
+
+    expect(ratio(need(t, 'chart-line'), surface)).toBeGreaterThanOrEqual(3);
+
+    // The axis labels are text at 10px, so they answer to the small-text floor.
+    expect(ratio(need(t, 'chart-axis-ink'), surface)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(need(t, 'chart-title-ink'), surface)).toBeGreaterThanOrEqual(7);
+  });
+
   it('gives the chart ramp a readable order', () => {
     // Series colours are drawn as 2px bars and 8px dots, not as text, so 3:1
     // against the surface is the bar (WCAG 1.4.11 for graphics).

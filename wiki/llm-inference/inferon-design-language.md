@@ -90,6 +90,45 @@ break the one-light rule.
    not information.
 6. **Halve it in dark mode.** The same alpha is loud on a near-black canvas.
 
+## Charts
+
+The chart style is deliberately its own surface: a chart holds a figure, not text, so
+it gets a flat tint and a softer corner rather than the hairline that separates
+content cards.
+
+| Token | Light | Dark | Role |
+|---|---|---|---|
+| `--chart-surface` | `#f7f8fa` | `#1b1e24` | the card, no border, no shadow, 20px padding, 12px radius |
+| `--chart-grid` | `rgba(0,0,0,0.05)` | `rgba(255,255,255,0.08)` | the only lines on the plot: **three** horizontal ones |
+| `--chart-axis-ink` | `#5b616b` | `#8f96a1` | 10px labels |
+| `--chart-title-ink` | `#1f2937` | `#e9ecf1` | the measure, 13px, semibold |
+| `--chart-muted-ink` | `#8c939d` | `#9aa1ab` | the aggregate beside it |
+| `--chart-cost` / `--chart-cost-soft` | `#fa8c16` / `#ffd666` | `#f59e0b` / `#7c4a12` | warm duo: money |
+| `--chart-tokens` / `--chart-tokens-soft` | `#69b1ff` / `#c6e2ff` | `#3b82f6` / `#1e3a5f` | cool duo: a measure with two parts |
+| `--chart-line` / `--chart-area` | `#3b82f6` / 45% | `#60a5fa` / 35% | the area chart |
+
+**Rules**
+
+1. **Three gridlines, never five**, and no vertical gridlines. Zero, the midpoint and
+   a maximum rounded *up* to two significant figures, so the tallest bar cannot cross
+   the top line (`libs/chart.ts`, tested).
+2. **The type answers to the measure**: a smooth area when the value is a quantity
+   over time, stacked columns when it has two parts. A metric switch changes the type,
+   not just the numbers.
+3. **Monotone cubic, not Catmull-Rom.** A plain spline dips below the baseline between
+   two quiet days and a peak, which in an area chart reads as negative traffic.
+4. **Leave a third of the slot empty.** Bars are 62% of their slot; the top corners
+   are 1.5px and the seam between segments is flat.
+5. **A near-zero day keeps a 1.5px sliver; a zero day gets nothing.** A sliver on an
+   empty day is a lie about the data.
+6. **Sparse axis labels** — four dates across thirty columns. Every fifth label is a
+   label nobody reads.
+7. **No data dots at rest, no legend for one series, no gradients in a fill.**
+
+**One deviation from the reference style, and why:** its axis labels are `#9CA3AF`,
+which is **2.39:1** on `#F7F8FA` — under any small-text floor. They use the product's
+muted ink instead (5.9:1). Everything else is the reference's own value.
+
 ## Type
 
 - Scale at the tokens: 13 / 15 / 17px, roomier leading. Nothing renders below 13px.
