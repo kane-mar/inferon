@@ -3,12 +3,11 @@ name: ci-cd
 on:
   push:
     branches: [master]
+    # ITEM-154: a tag is the only thing that deploys. A push to master runs the
+    # checks and publishes the docs; it does not rebuild the host.
+    tags: ['v*']
   workflow_dispatch:
 
-# One deploy at a time; never cancel a run mid-deploy.
-concurrency:
-  group: durable-deploy
-  cancel-in-progress: false
 
 jobs:
   test:
@@ -136,6 +135,9 @@ jobs:
     needs: docs-site
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write
@@ -167,8 +169,13 @@ jobs:
         run: python3 scripts/check-guides.py
 
   deploy:
-    needs: [test, web, licences, docs]
+    # ITEM-154: a release tag deploys, and only once every check is green.
+    needs: [test, web, licences, docs, docs-site, self-hosted, embedder]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: durable-deploy
+      cancel-in-progress: false
     env:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -242,7 +249,9 @@ jobs:
             && ./scripts/migrate.sh \
             && set -a && . ./env.local && set +a \
             && docker compose --profile prod up -d --build \
-            && docker compose --profile prod up -d --force-recreate caddy"
+            && docker compose --profile prod up -d --force-recreate caddy \
+            && docker builder prune -af >/dev/null \
+            && docker image prune -f >/dev/null
 
       - name: Health check
         if: steps.cfg.outputs.configured == 'true'

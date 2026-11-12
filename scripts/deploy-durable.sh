@@ -196,7 +196,9 @@ remote_deploy() {
          && ./scripts/migrate.sh \
          && set -a && . ./env.local && set +a \
          && docker compose --profile prod up -d --build \
-         && docker compose --profile prod up -d --force-recreate caddy"
+         && docker compose --profile prod up -d --force-recreate caddy \
+         && docker builder prune -af >/dev/null \
+         && docker image prune -f >/dev/null"
 }
 
 remote_health() {
